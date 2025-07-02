@@ -1,0 +1,29 @@
+# Go-Kit 应用程序配置文件示例
+# 支持环境变量覆盖：将配置键中的点(.)替换为下划线(_)并转为大写
+# 例如：app.name -> APP_NAME
+
+app:
+  name: "Go-Kit 示例应用"
+  version: "1.0.0"
+  port: 8080
+  environment: "development"
+  debug: false
+
+database:
+  host: "localhost"
+  port: 5432
+  username: "postgres"
+  password: "password"
+  dbname: "gokit_db"
+  sslmode: "disable"
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout" 

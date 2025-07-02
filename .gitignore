@@ -1,32 +1,84 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
+# Go 相关
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Code coverage profiles and other test artifacts
 *.out
-coverage.*
-*.coverprofile
-profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
 go.work
-go.work.sum
 
-# env file
+# 构建输出
+bin/
+dist/
+build/
+
+# 测试覆盖率
+coverage.out
+coverage.html
+*.cover
+
+# 依赖
+vendor/
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 配置文件（包含敏感信息）
+config.local.yaml
+config.prod.yaml
 .env
+.env.local
+.env.production
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 证书和密钥
+*.pem
+*.key
+*.crt
+*.p12
+
+# 文档生成
+docs/generated/
+
+# 示例输出
+examples/*/output/
+examples/*/logs/
+
+# 性能分析
+*.prof
+*.pprof
+
+# 缓存
+.cache/
+*.cache
+
+# 其他
+*.bak
+*.backup

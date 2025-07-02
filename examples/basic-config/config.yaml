@@ -1,0 +1,12 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+database:
+  host: "localhost"
+  port: 3306
+  username: "demo_user"
+  password: "demo_password"
+  name: "demo_db"
+
+debug: true 

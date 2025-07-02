@@ -1,0 +1,28 @@
+# 自定义路径的配置文件示例
+# 演示如何使用自定义配置文件路径
+
+app:
+  name: "自定义配置的应用"
+  version: "2.0.0"
+  port: 3000
+  environment: "production"
+  debug: false
+
+database:
+  host: "prod-db-server"
+  port: 5432
+  username: "prod_user"
+  password: "prod_password"
+  dbname: "production_db"
+  sslmode: "require"
+
+redis:
+  host: "redis-cluster"
+  port: 6379
+  password: "redis_secret"
+  db: 1
+
+logging:
+  level: "warn"
+  format: "text"
+  output: "file" 
