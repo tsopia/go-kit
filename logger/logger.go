@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tsopia/go-kit/pkg/constants"
+	"github.com/tsopia/go-kit/constants"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

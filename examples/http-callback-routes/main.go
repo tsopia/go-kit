@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/tsopia/go-kit/pkg/httpserver"
-	"github.com/tsopia/go-kit/pkg/logger"
+	"github.com/tsopia/go-kit/httpserver"
+	"github.com/tsopia/go-kit/logger"
 
 	"github.com/gin-gonic/gin"
 )

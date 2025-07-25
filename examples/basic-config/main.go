@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tsopia/go-kit/pkg/config"
+	"github.com/tsopia/go-kit/config"
 )
 
 // Config 应用配置结构（使用 mapstructure 标签）

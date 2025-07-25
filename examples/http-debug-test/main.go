@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"time"
 
-	httpkit "github.com/tsopia/go-kit/pkg/httpclient"
+	httpkit "github.com/tsopia/go-kit/httpclient"
 )
 
 // SimpleLogger 实现一个简单的日志记录器

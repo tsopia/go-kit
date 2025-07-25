@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tsopia/go-kit/pkg/config"
+	"github.com/tsopia/go-kit/config"
 )
 
 // AppConfig 应用配置结构体

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/tsopia/go-kit/pkg/errors"
+	"github.com/tsopia/go-kit/errors"
 )
 
 func main() {

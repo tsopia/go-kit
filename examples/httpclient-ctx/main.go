@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/tsopia/go-kit/pkg/httpclient"
+	"github.com/tsopia/go-kit/httpclient"
 )
 
 func main() {
