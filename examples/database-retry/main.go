@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"go-kit/pkg/database"
+	"github.com/tsopia/go-kit/pkg/database"
 )
 
 func main() {

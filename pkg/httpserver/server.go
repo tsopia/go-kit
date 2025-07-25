@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"go-kit/pkg/constants"
+	"github.com/tsopia/go-kit/pkg/constants"
 
 	"github.com/gin-gonic/gin"
 )

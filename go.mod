@@ -1,4 +1,4 @@
-module go-kit
+module github.com/tsopia/go-kit
 
 go 1.21
 

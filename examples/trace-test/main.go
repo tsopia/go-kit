@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"go-kit/pkg/constants"
-	"go-kit/pkg/logger"
+	"github.com/tsopia/go-kit/pkg/constants"
+	"github.com/tsopia/go-kit/pkg/logger"
 )
 
 func main() {

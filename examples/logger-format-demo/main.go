@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go-kit/pkg/logger"
+	"github.com/tsopia/go-kit/pkg/logger"
 )
 
 func main() {
