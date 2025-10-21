@@ -12,6 +12,8 @@
 - ✅ 采样和限流
 - ✅ 钩子函数支持
 - ✅ 线程安全
+- ✅ 智能调用者信息显示（caller）
+- ✅ 堆栈跟踪支持（stacktrace）
 
 ## 📖 快速开始
 
@@ -352,7 +354,63 @@ func backgroundTask(ctx context.Context) {
 }
 ```
 
-### 6. 日志配置
+### 6. 调用者信息和堆栈跟踪
+
+#### 调用者信息（Caller）
+
+调用者信息显示日志调用的具体位置，包括文件名和行号。这对于调试和问题定位非常有用。
+
+```go
+// 启用调用者信息
+log := logger.NewWithOptions(logger.Options{
+    Caller: true,  // 启用调用者信息
+})
+
+log.Info("这条日志会显示调用位置")
+// 输出: 2023-01-01 10:00:00 INFO main.go:25 这条日志会显示调用位置
+```
+
+#### 堆栈跟踪（Stacktrace）
+
+堆栈跟踪在错误级别日志中显示完整的调用栈，帮助快速定位问题。
+
+```go
+// 启用堆栈跟踪
+log := logger.NewWithOptions(logger.Options{
+    Stacktrace: true,  // 启用堆栈跟踪
+})
+
+log.Error("发生错误")
+// 输出会包含完整的调用栈信息
+```
+
+#### 全局函数调用者信息
+
+全局函数调用时，系统会自动显示正确的调用位置，而不是logger包内部的位置：
+
+```go
+// 全局函数调用 - 显示正确的调用位置
+logger.Info("全局函数调用")  // 显示: main.go:10
+
+func someFunction() {
+    logger.Info("函数内调用")  // 显示: main.go:15
+}
+```
+
+#### 实例方法调用者信息
+
+实例方法调用也会正确显示调用位置：
+
+```go
+log := logger.New()
+log.Info("实例方法调用")  // 显示: main.go:20
+
+func someFunction() {
+    log.Info("函数内实例调用")  // 显示: main.go:25
+}
+```
+
+### 7. 日志配置
 
 #### 开发环境
 
@@ -362,8 +420,8 @@ func setupDevelopmentLogger() {
         Level:      logger.DebugLevel,
         Format:     logger.FormatConsole,
         TimeFormat: "2006-01-02 15:04:05",
-        Caller:     true,
-        Stacktrace: true,
+        Caller:     true,      // 启用调用者信息
+        Stacktrace: true,      // 启用堆栈跟踪
     })
 }
 ```
@@ -376,8 +434,8 @@ func setupProductionLogger() {
         Level:            logger.InfoLevel,
         Format:           logger.FormatJSON,
         TimeFormat:       time.RFC3339,
-        Caller:           false,
-        Stacktrace:       false,
+        Caller:           true,       // 生产环境也建议启用调用者信息
+        Stacktrace:       true,       // 生产环境也建议启用堆栈跟踪
         EnableFileOutput: true,
         Rotate: &logger.RotateConfig{
             Filename:   "logs/app.log",
