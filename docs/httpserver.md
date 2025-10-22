@@ -11,6 +11,9 @@
 - ✅ 路由管理和分组
 - ✅ 请求/响应拦截器
 - ✅ 线程安全
+- ✅ 默认健康检查接口
+- ✅ 可扩展的健康检查管理器
+- ✅ 内置健康检查器（数据库、HTTP等）
 
 ## 📖 快速开始
 
@@ -26,29 +29,21 @@ import (
 )
 
 func main() {
-    // 创建服务器
-    server := httpserver.New(&httpserver.Config{
-        Host: "0.0.0.0",
-        Port: 8080,
-        Mode: "debug",
-    })
+    // 创建服务器（默认启用健康检查）
+    server := httpserver.NewServer(nil)
     
-    // 注册路由
-    server.GET("/health", healthHandler)
+    // 注册业务路由
     server.POST("/users", createUserHandler)
     server.GET("/users/:id", getUserHandler)
     
     // 启动服务器
     log := logger.New()
     log.Info("启动HTTP服务器", "port", 8080)
+    log.Info("健康检查端点", "path", "/health")
     
     if err := server.Run(); err != nil {
         log.Fatal("服务器启动失败", "error", err)
     }
-}
-
-func healthHandler(c *gin.Context) {
-    c.JSON(200, gin.H{"status": "ok"})
 }
 
 func createUserHandler(c *gin.Context) {
@@ -68,6 +63,61 @@ func getUserHandler(c *gin.Context) {
     // 获取用户逻辑...
     user := &User{ID: userID, Name: "张三"}
     c.JSON(200, user)
+}
+```
+
+### 带健康检查管理器的使用
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "time"
+    
+    "go-kit/pkg/httpserver"
+    "go-kit/pkg/logger"
+)
+
+func main() {
+    // 创建健康检查管理器
+    manager := httpserver.NewHealthCheckManager("1.0.0")
+    
+    // 添加各种健康检查器
+    manager.AddChecker(httpserver.NewDatabaseHealthChecker("mysql", mysqlDB))
+    manager.AddChecker(httpserver.NewHTTPHealthChecker("payment_service", "http://payment.example.com/health", 5*time.Second))
+    manager.AddChecker(httpserver.NewCustomHealthChecker("file_system", checkDiskSpace))
+    
+    // 创建服务器
+    server := httpserver.NewServer(&httpserver.Config{
+        Host:            "0.0.0.0",
+        Port:            8080,
+        EnableHealthCheck: true,
+        HealthCheckPath: "/health",
+    })
+    
+    // 启用带管理器的健康检查
+    server.EnableHealthCheckWithManager(manager)
+    
+    // 注册业务路由
+    server.POST("/users", createUserHandler)
+    server.GET("/users/:id", getUserHandler)
+    
+    // 启动服务器
+    log := logger.New()
+    log.Info("启动HTTP服务器", "port", 8080)
+    log.Info("健康检查端点", "path", "/health")
+    
+    if err := server.Run(); err != nil {
+        log.Fatal("服务器启动失败", "error", err)
+    }
+}
+
+func checkDiskSpace(ctx context.Context) error {
+    // 检查磁盘空间
+    // 返回nil表示健康，返回error表示不健康
+    return nil
 }
 ```
 
@@ -390,34 +440,140 @@ func errorRecoveryMiddleware() gin.HandlerFunc {
 
 ### 健康检查
 
-```go
-// 注册健康检查处理器
-func healthHandler(c *gin.Context) {
-    // 检查数据库连接
-    if err := db.Ping(); err != nil {
-        c.JSON(503, gin.H{
-            "status": "unhealthy",
-            "error": "数据库连接失败",
-        })
-        return
-    }
-    
-    // 检查外部服务
-    if err := checkExternalService(); err != nil {
-        c.JSON(503, gin.H{
-            "status": "unhealthy",
-            "error": "外部服务不可用",
-        })
-        return
-    }
-    
-    c.JSON(200, gin.H{
-        "status": "healthy",
-        "timestamp": time.Now().Unix(),
-    })
-}
+#### 默认健康检查
 
-server.GET("/health", healthHandler)
+服务器默认启用健康检查功能，无需额外配置：
+
+```go
+// 创建服务器（默认启用健康检查）
+server := httpserver.NewServer(nil)
+
+// 健康检查端点自动注册为 GET /health
+// 返回简单的健康状态
+```
+
+#### 带管理器的健康检查
+
+使用健康检查管理器可以添加多个检查器：
+
+```go
+// 创建健康检查管理器
+manager := httpserver.NewHealthCheckManager("1.0.0")
+
+// 添加数据库检查器
+manager.AddChecker(httpserver.NewDatabaseHealthChecker("database", db))
+
+// 添加HTTP服务检查器
+manager.AddChecker(httpserver.NewHTTPHealthChecker("api_service", "http://api.example.com/health", 5*time.Second))
+
+// 添加自定义检查器
+manager.AddChecker(httpserver.NewCustomHealthChecker("custom_check", func(ctx context.Context) error {
+    // 自定义检查逻辑
+    return nil
+}))
+
+// 启用带管理器的健康检查
+server.EnableHealthCheckWithManager(manager)
+```
+
+#### 健康检查配置
+
+```go
+server := httpserver.NewServer(&httpserver.Config{
+    Host:            "0.0.0.0",
+    Port:            8080,
+    EnableHealthCheck: true,        // 启用健康检查
+    HealthCheckPath: "/health",     // 健康检查路径
+    HealthCheckPort: 0,             // 健康检查端口（0表示使用主端口）
+})
+```
+
+#### 健康检查响应格式
+
+**默认健康检查响应：**
+```json
+{
+    "status": "healthy",
+    "timestamp": 1640995200,
+    "version": "1.0.0"
+}
+```
+
+**带管理器的健康检查响应：**
+```json
+{
+    "status": "healthy",
+    "timestamp": 1640995200,
+    "version": "1.0.0",
+    "uptime": 3600,
+    "checks": {
+        "database": {
+            "status": "healthy"
+        },
+        "api_service": {
+            "status": "healthy"
+        },
+        "custom_check": {
+            "status": "healthy"
+        }
+    }
+}
+```
+
+**不健康时的响应：**
+```json
+{
+    "status": "unhealthy",
+    "timestamp": 1640995200,
+    "version": "1.0.0",
+    "uptime": 3600,
+    "checks": {
+        "database": {
+            "status": "unhealthy",
+            "error": "connection timeout"
+        }
+    },
+    "error": "service unavailable"
+}
+```
+
+#### 内置健康检查器
+
+**数据库健康检查器：**
+```go
+// 适用于任何实现了Ping()方法的数据库连接
+manager.AddChecker(httpserver.NewDatabaseHealthChecker("mysql", mysqlDB))
+manager.AddChecker(httpserver.NewDatabaseHealthChecker("redis", redisDB))
+```
+
+**HTTP服务健康检查器：**
+```go
+// 检查外部HTTP服务的健康状态
+manager.AddChecker(httpserver.NewHTTPHealthChecker(
+    "payment_service", 
+    "http://payment.example.com/health", 
+    5*time.Second,
+))
+```
+
+**自定义健康检查器：**
+```go
+// 实现自定义检查逻辑
+manager.AddChecker(httpserver.NewCustomHealthChecker("file_system", func(ctx context.Context) error {
+    // 检查磁盘空间
+    if diskUsage > 90 {
+        return fmt.Errorf("磁盘使用率过高: %.1f%%", diskUsage)
+    }
+    return nil
+}))
+```
+
+#### 禁用健康检查
+
+```go
+server := httpserver.NewServer(&httpserver.Config{
+    EnableHealthCheck: false,  // 禁用健康检查
+})
 ```
 
 ## 🏗️ 最佳实践

@@ -773,15 +773,27 @@ func NewNop() *Logger {
 // 全局日志实例
 var defaultLogger = New()
 
+// 全局函数专用logger（使用更大的skip值以正确显示调用者位置）
+var globalLogger *zap.Logger
+
+func init() {
+	// 初始化全局函数专用logger - 不使用skip，让zap自动处理
+	globalLogger = defaultLogger.GetZap()
+}
+
 // Init 初始化全局日志记录器
 func Init(opts Options) {
 	defaultLogger = NewWithOptions(opts)
+	// 为全局函数创建专门的logger - 不使用skip，让zap自动处理
+	globalLogger = defaultLogger.GetZap()
 }
 
 // InitWithLogger 使用指定的日志记录器初始化全局实例
 func InitWithLogger(logger *Logger) {
 	if logger != nil {
 		defaultLogger = logger
+		// 为全局函数创建专门的logger - 不使用skip，让zap自动处理
+		globalLogger = logger.GetZap()
 	}
 }
 
@@ -812,53 +824,101 @@ func GetLevel() Level {
 }
 
 func Debug(msg string, fields ...interface{}) {
-	defaultLogger.Debug(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Debugw(msg, fields...)
+	} else {
+		defaultLogger.Debug(msg, fields...)
+	}
 }
 
 func Info(msg string, fields ...interface{}) {
-	defaultLogger.Info(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Infow(msg, fields...)
+	} else {
+		defaultLogger.Info(msg, fields...)
+	}
 }
 
 func Warn(msg string, fields ...interface{}) {
-	defaultLogger.Warn(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Warnw(msg, fields...)
+	} else {
+		defaultLogger.Warn(msg, fields...)
+	}
 }
 
 func Error(msg string, fields ...interface{}) {
-	defaultLogger.Error(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Errorw(msg, fields...)
+	} else {
+		defaultLogger.Error(msg, fields...)
+	}
 }
 
 func Fatal(msg string, fields ...interface{}) {
-	defaultLogger.Fatal(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Fatalw(msg, fields...)
+	} else {
+		defaultLogger.Fatal(msg, fields...)
+	}
 }
 
 func Panic(msg string, fields ...interface{}) {
-	defaultLogger.Panic(msg, fields...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Panicw(msg, fields...)
+	} else {
+		defaultLogger.Panic(msg, fields...)
+	}
 }
 
 // === 格式化全局函数 ===
 
 func Debugf(format string, args ...interface{}) {
-	defaultLogger.Debugf(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Debugf(format, args...)
+	} else {
+		defaultLogger.Debugf(format, args...)
+	}
 }
 
 func Infof(format string, args ...interface{}) {
-	defaultLogger.Infof(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Infof(format, args...)
+	} else {
+		defaultLogger.Infof(format, args...)
+	}
 }
 
 func Warnf(format string, args ...interface{}) {
-	defaultLogger.Warnf(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Warnf(format, args...)
+	} else {
+		defaultLogger.Warnf(format, args...)
+	}
 }
 
 func Errorf(format string, args ...interface{}) {
-	defaultLogger.Errorf(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Errorf(format, args...)
+	} else {
+		defaultLogger.Errorf(format, args...)
+	}
 }
 
 func Fatalf(format string, args ...interface{}) {
-	defaultLogger.Fatalf(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Fatalf(format, args...)
+	} else {
+		defaultLogger.Fatalf(format, args...)
+	}
 }
 
 func Panicf(format string, args ...interface{}) {
-	defaultLogger.Panicf(format, args...)
+	if globalLogger != nil {
+		globalLogger.Sugar().Panicf(format, args...)
+	} else {
+		defaultLogger.Panicf(format, args...)
+	}
 }
 
 func With(fields ...interface{}) *Logger {
