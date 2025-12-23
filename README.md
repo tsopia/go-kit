@@ -24,6 +24,7 @@
 | [pkg/httpserver](./docs/httpserver.md) | HTTP服务器 | [📖 详细文档](./docs/httpserver.md) |
 | [pkg/constants](./docs/constants.md) | 常量定义 | [📖 详细文档](./docs/constants.md) |
 | [pkg/utils](./docs/utils.md) | 工具函数 | [📖 详细文档](./docs/utils.md) |
+| [llm](./docs/llm.md) | 大模型客户端统一封装（Eino 兼容） | [📖 详细文档](./docs/llm.md) |
 
 ## 🎯 快速开始
 
