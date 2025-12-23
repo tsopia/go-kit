@@ -65,6 +65,23 @@ logger.SetupWithOptions(logger.Options{
         Compress:   true,
     },
 })
+
+// 使用 slog 包初始化并直接调用 slog 默认全局 logger
+kitSlog.SetupSlogWithOptions(kitSlog.Options{
+    Level:      kitSlog.InfoLevel,
+    Format:     kitSlog.FormatJSON,
+    Caller:     true,
+    Stacktrace: true,
+    Rotate: &kitSlog.RotateConfig{
+        Filename:   "logs/app.log",
+        MaxSize:    50,
+        MaxBackups: 5,
+        MaxAge:     7,
+        Compress:   true,
+    },
+})
+
+slog.Info("服务已启动", "port", 8080) // 直接使用 slog.Info（已被 kitSlog 设置为默认）
 ```
 
 ## 🔧 API 参考
