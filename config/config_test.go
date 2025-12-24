@@ -75,6 +75,105 @@ database:
 	}
 }
 
+func TestLoadConfig_DefaultEnvFallback(t *testing.T) {
+	// 重置全局状态确保测试隔离
+	ResetGlobalState()
+
+	tempDir := t.TempDir()
+	envFile := filepath.Join(tempDir, ".env")
+
+	envContent := `
+app.name=Env App
+app.version=1.2.3
+app.port=9090
+app.debug=true
+database.host=env-host
+database.port=6543
+database.username=env-user
+database.password=env-pass
+`
+
+	if err := os.WriteFile(envFile, []byte(envContent), 0644); err != nil {
+		t.Fatalf("创建 .env 文件失败: %v", err)
+	}
+
+	oldDir, _ := os.Getwd()
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("切换工作目录失败: %v", err)
+	}
+
+	var cfg TestConfig
+	if err := LoadConfig(&cfg); err != nil {
+		t.Fatalf("加载 .env 配置失败: %v", err)
+	}
+
+	if cfg.App.Name != "Env App" {
+		t.Errorf("期望 App.Name = 'Env App', 实际 = '%s'", cfg.App.Name)
+	}
+	if cfg.App.Port != 9090 {
+		t.Errorf("期望 App.Port = 9090, 实际 = %d", cfg.App.Port)
+	}
+	if cfg.Database.Host != "env-host" {
+		t.Errorf("期望 Database.Host = 'env-host', 实际 = '%s'", cfg.Database.Host)
+	}
+}
+
+func TestLoadConfig_SearchParentDirectories(t *testing.T) {
+	ResetGlobalState()
+
+	root := filepath.Join(t.TempDir(), "project")
+	serviceDir := filepath.Join(root, "cmd", "service")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("创建配置目录失败: %v", err)
+	}
+
+	configFile := filepath.Join(configDir, "config.yml")
+	configContent := `
+app:
+  name: "Parent App"
+  version: "1.0.0"
+  port: 8088
+  debug: false
+
+database:
+  host: "parent-host"
+  port: 6432
+  username: "parent-user"
+  password: "parent-pass"
+`
+
+	if err := os.WriteFile(configFile, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("创建配置文件失败: %v", err)
+	}
+
+	oldDir, _ := os.Getwd()
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(serviceDir); err != nil {
+		t.Fatalf("切换工作目录失败: %v", err)
+	}
+
+	var cfg TestConfig
+	if err := LoadConfig(&cfg); err != nil {
+		t.Fatalf("加载父级目录配置失败: %v", err)
+	}
+
+	if cfg.App.Name != "Parent App" {
+		t.Errorf("期望 App.Name = 'Parent App', 实际 = '%s'", cfg.App.Name)
+	}
+	if cfg.App.Port != 8088 {
+		t.Errorf("期望 App.Port = 8088, 实际 = %d", cfg.App.Port)
+	}
+	if cfg.Database.Host != "parent-host" {
+		t.Errorf("期望 Database.Host = 'parent-host', 实际 = '%s'", cfg.Database.Host)
+	}
+}
+
 func TestLoadConfig_CustomPath(t *testing.T) {
 	// 重置全局状态确保测试隔离
 	ResetGlobalState()

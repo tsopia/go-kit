@@ -79,7 +79,7 @@ debug: false
 加载配置文件并解析到结构体
 
 ```go
-// 使用默认配置文件路径 (config.yml)
+// 使用默认配置文件路径（自动查找 config.yml 或 .env）
 err := config.LoadConfig(&cfg)
 
 // 使用自定义配置文件路径
@@ -189,15 +189,20 @@ export MYAPP_DATABASE_HOST=db.example.com
 
 ### 默认查找路径
 
-如果不指定配置文件路径，会自动在以下位置查找：
+如果不指定配置文件路径，会自动在以下位置按顺序查找 `config.yml`，若未找到则回退查找 `.env`：
 
 1. 当前工作目录
 2. `./configs/`
 3. `./config/`
+4. 上一级目录及其 `configs/`、`config/`
+5. 上上一级目录及其 `configs/`、`config/`
+
+> 提示：无需传递空字符串来触发默认行为，直接调用 `LoadConfig(&cfg)` 即可。
 
 ### 支持的文件格式
 
 - `config.yml` / `config.yaml`
+- `.env`
 - `config.json`
 - `config.toml`
 - `config.hcl`
