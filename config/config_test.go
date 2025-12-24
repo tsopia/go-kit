@@ -75,6 +75,48 @@ database:
 	}
 }
 
+func TestLoadConfig_DefaultEnvFallback(t *testing.T) {
+	// 重置全局状态确保测试隔离
+	ResetGlobalState()
+
+	tempDir := t.TempDir()
+	envFile := filepath.Join(tempDir, ".env")
+
+	envContent := `
+app.name=Env App
+app.version=1.2.3
+app.port=9090
+app.debug=true
+database.host=env-host
+database.port=6543
+database.username=env-user
+database.password=env-pass
+`
+
+	if err := os.WriteFile(envFile, []byte(envContent), 0644); err != nil {
+		t.Fatalf("创建 .env 文件失败: %v", err)
+	}
+
+	oldDir, _ := os.Getwd()
+	defer os.Chdir(oldDir)
+	os.Chdir(tempDir)
+
+	var cfg TestConfig
+	if err := LoadConfig(&cfg); err != nil {
+		t.Fatalf("加载 .env 配置失败: %v", err)
+	}
+
+	if cfg.App.Name != "Env App" {
+		t.Errorf("期望 App.Name = 'Env App', 实际 = '%s'", cfg.App.Name)
+	}
+	if cfg.App.Port != 9090 {
+		t.Errorf("期望 App.Port = 9090, 实际 = %d", cfg.App.Port)
+	}
+	if cfg.Database.Host != "env-host" {
+		t.Errorf("期望 Database.Host = 'env-host', 实际 = '%s'", cfg.Database.Host)
+	}
+}
+
 func TestLoadConfig_CustomPath(t *testing.T) {
 	// 重置全局状态确保测试隔离
 	ResetGlobalState()

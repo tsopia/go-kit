@@ -707,40 +707,16 @@ func AllKeys() ([]string, error) {
 func createViperInstanceWithError(filePath ...string) (*viper.Viper, error) {
 	v := viper.New()
 
-	// 确定配置文件路径
-	var configPath string
-	if len(filePath) > 0 && filePath[0] != "" {
-		configPath = filePath[0]
-	} else {
-		// 默认使用项目根目录的 config.yml
-		configPath = DefaultConfigFileName
+	configPath, err := resolveConfigPath(filePath...)
+	if err != nil {
+		return nil, err
 	}
 
-	// 解析文件路径和名称
-	dir := filepath.Dir(configPath)
-	filename := filepath.Base(configPath)
-	name := strings.TrimSuffix(filename, filepath.Ext(filename))
-	ext := strings.TrimPrefix(filepath.Ext(filename), ".")
-
-	// 设置配置文件路径和名称
-	if dir != "." {
-		v.AddConfigPath(dir)
-	} else {
-		// 添加常见的配置文件搜索路径
-		v.AddConfigPath(".")
-		v.AddConfigPath("./configs")
-		v.AddConfigPath("./config")
-
-		// 获取工作目录并添加为搜索路径
-		if pwd, err := os.Getwd(); err == nil {
-			v.AddConfigPath(pwd)
-		}
-	}
-
-	v.SetConfigName(name)
-	if ext != "" {
+	// 根据解析出的文件路径设置配置
+	if ext := strings.TrimPrefix(filepath.Ext(configPath), "."); ext != "" {
 		v.SetConfigType(ext)
 	}
+	v.SetConfigFile(configPath)
 
 	// 自动从 APP_NAME 环境变量获取前缀
 	appName := os.Getenv("APP_NAME")
@@ -768,6 +744,42 @@ func createViperInstanceWithError(filePath ...string) (*viper.Viper, error) {
 	}
 
 	return v, nil
+}
+
+// resolveConfigPath 根据传入参数或默认规则解析配置文件路径
+//
+// 优先级:
+//  1. 使用调用方提供的非空路径
+//  2. 自动搜索当前目录、./configs、./config 及工作目录中的 config.yml
+//  3. 若未找到 config.yml，则尝试查找 .env
+func resolveConfigPath(filePath ...string) (string, error) {
+	for _, path := range filePath {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+		return "", fmt.Errorf("配置文件未找到: %s。请确保配置文件存在于正确的路径", path)
+	}
+
+	searchPaths := []string{".", "./configs", "./config"}
+	if pwd, err := os.Getwd(); err == nil {
+		searchPaths = append(searchPaths, pwd)
+	}
+
+	candidates := []string{DefaultConfigFileName, ".env"}
+	for _, candidate := range candidates {
+		for _, dir := range searchPaths {
+			candidatePath := filepath.Join(dir, candidate)
+			if info, err := os.Stat(candidatePath); err == nil && !info.IsDir() {
+				return candidatePath, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("配置文件未找到: %s 或 .env。请确保配置文件存在于正确的路径", DefaultConfigFileName)
 }
 
 // createViperInstance 创建并配置viper实例（内部函数，保持向后兼容）
