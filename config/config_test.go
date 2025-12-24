@@ -99,7 +99,9 @@ database.password=env-pass
 
 	oldDir, _ := os.Getwd()
 	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("切换工作目录失败: %v", err)
+	}
 
 	var cfg TestConfig
 	if err := LoadConfig(&cfg); err != nil {
@@ -114,6 +116,61 @@ database.password=env-pass
 	}
 	if cfg.Database.Host != "env-host" {
 		t.Errorf("期望 Database.Host = 'env-host', 实际 = '%s'", cfg.Database.Host)
+	}
+}
+
+func TestLoadConfig_SearchParentDirectories(t *testing.T) {
+	ResetGlobalState()
+
+	root := filepath.Join(t.TempDir(), "project")
+	serviceDir := filepath.Join(root, "cmd", "service")
+	if err := os.MkdirAll(serviceDir, 0o755); err != nil {
+		t.Fatalf("创建目录失败: %v", err)
+	}
+
+	configDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("创建配置目录失败: %v", err)
+	}
+
+	configFile := filepath.Join(configDir, "config.yml")
+	configContent := `
+app:
+  name: "Parent App"
+  version: "1.0.0"
+  port: 8088
+  debug: false
+
+database:
+  host: "parent-host"
+  port: 6432
+  username: "parent-user"
+  password: "parent-pass"
+`
+
+	if err := os.WriteFile(configFile, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("创建配置文件失败: %v", err)
+	}
+
+	oldDir, _ := os.Getwd()
+	defer os.Chdir(oldDir)
+	if err := os.Chdir(serviceDir); err != nil {
+		t.Fatalf("切换工作目录失败: %v", err)
+	}
+
+	var cfg TestConfig
+	if err := LoadConfig(&cfg); err != nil {
+		t.Fatalf("加载父级目录配置失败: %v", err)
+	}
+
+	if cfg.App.Name != "Parent App" {
+		t.Errorf("期望 App.Name = 'Parent App', 实际 = '%s'", cfg.App.Name)
+	}
+	if cfg.App.Port != 8088 {
+		t.Errorf("期望 App.Port = 8088, 实际 = %d", cfg.App.Port)
+	}
+	if cfg.Database.Host != "parent-host" {
+		t.Errorf("期望 Database.Host = 'parent-host', 实际 = '%s'", cfg.Database.Host)
 	}
 }
 

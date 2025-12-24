@@ -194,6 +194,8 @@ export MYAPP_DATABASE_HOST=db.example.com
 1. 当前工作目录
 2. `./configs/`
 3. `./config/`
+4. 上一级目录及其 `configs/`、`config/`
+5. 上上一级目录及其 `configs/`、`config/`
 
 > 提示：无需传递空字符串来触发默认行为，直接调用 `LoadConfig(&cfg)` 即可。
 

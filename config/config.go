@@ -750,7 +750,7 @@ func createViperInstanceWithError(filePath ...string) (*viper.Viper, error) {
 //
 // 优先级:
 //  1. 使用调用方提供的非空路径
-//  2. 自动搜索当前目录、./configs、./config 及工作目录中的 config.yml
+//  2. 自动搜索当前目录、上层两级目录及它们下的 configs/config 目录中的 config.yml
 //  3. 若未找到 config.yml，则尝试查找 .env
 func resolveConfigPath(filePath ...string) (string, error) {
 	for _, path := range filePath {
@@ -764,9 +764,28 @@ func resolveConfigPath(filePath ...string) (string, error) {
 		return "", fmt.Errorf("配置文件未找到: %s。请确保配置文件存在于正确的路径", path)
 	}
 
-	searchPaths := []string{".", "./configs", "./config"}
-	if pwd, err := os.Getwd(); err == nil {
-		searchPaths = append(searchPaths, pwd)
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("获取当前工作目录失败: %w", err)
+	}
+
+	searchPaths := make([]string, 0, 9)
+	seen := map[string]struct{}{}
+	current := wd
+	for i := 0; i < 3 && current != "" && current != "/"; i++ {
+		candidates := []string{current, filepath.Join(current, "configs"), filepath.Join(current, "config")}
+		for _, dir := range candidates {
+			if _, ok := seen[dir]; ok {
+				continue
+			}
+			seen[dir] = struct{}{}
+			searchPaths = append(searchPaths, dir)
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+		current = next
 	}
 
 	candidates := []string{DefaultConfigFileName, ".env"}
