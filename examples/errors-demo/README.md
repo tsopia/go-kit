@@ -61,4 +61,4 @@ err1 的错误码: INVALID_PARAM (代码: 1001)
 ## 相关文档
 
 - [错误包完整文档](../../docs/errors.md)
-- [错误包测试用例](../../pkg/errors/errors_test.go) 
+- [错误包测试用例](../../errors/errors_test.go)

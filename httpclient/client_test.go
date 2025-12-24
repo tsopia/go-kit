@@ -1,9 +1,12 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -200,6 +203,91 @@ func TestPutJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
 	}
+}
+
+func TestRetryReplaysRequestBody(t *testing.T) {
+	attempts := 0
+	var bodies [][]byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, payload)
+		attempts++
+
+		if attempts == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client := NewClientWithOptions(ClientOptions{
+		BaseURL: server.URL,
+		Retry: &RetryConfig{
+			MaxRetries:    1,
+			InitialDelay:  0,
+			MaxDelay:      time.Millisecond,
+			BackoffFactor: 1,
+		},
+	})
+
+	body := map[string]string{"name": "retry"}
+	resp, err := client.PostJSON("/retry", body)
+	if err != nil {
+		t.Fatalf("expected request to eventually succeed: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("expected to capture two request bodies, got %d", len(bodies))
+	}
+
+	if !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("expected request bodies to match across retries, got %q and %q", bodies[0], bodies[1])
+	}
+}
+
+func TestCircuitBreakerOpensAfterFailures(t *testing.T) {
+	client := NewClientWithOptions(ClientOptions{
+		CircuitBreaker: &CircuitBreakerConfig{
+			FailureThreshold: 1,
+			MaxRequests:      1,
+			Timeout:          50 * time.Millisecond,
+			SuccessThreshold: 1,
+		},
+		Middlewares: []Middleware{
+			func(http.RoundTripper) http.RoundTripper {
+				return roundTripperFunc(func(*http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("boom")
+				})
+			},
+		},
+	})
+
+	req := client.NewRequest("GET", "http://example.com")
+	if _, err := client.do(req); err == nil {
+		t.Fatalf("expected first request to fail")
+	}
+
+	if _, err := client.do(req); !errors.Is(err, ErrCircuitOpen) {
+		t.Fatalf("expected circuit breaker to open, got error: %v", err)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestDelete(t *testing.T) {

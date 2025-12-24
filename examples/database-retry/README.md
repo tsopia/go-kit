@@ -96,7 +96,7 @@ config := &database.Config{
 go run examples/database-retry/main.go
 
 # 运行相关测试
-go test ./pkg/database -v -run TestRetry
+go test ./database -v -run TestRetry
 ```
 
 ## 🎨 设计理念

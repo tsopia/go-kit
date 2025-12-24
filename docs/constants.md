@@ -1,4 +1,4 @@
-# 常量定义 (pkg/constants)
+# 常量定义 (constants)
 
 共享常量和工具函数，提供项目中使用的通用常量和辅助函数。
 
@@ -19,7 +19,7 @@ package main
 
 import (
     "fmt"
-    "go-kit/pkg/constants"
+    "github.com/tsopia/go-kit/constants"
 )
 
 func main() {

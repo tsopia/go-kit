@@ -1,4 +1,4 @@
-# HTTP服务器 (pkg/httpserver)
+# HTTP服务器 (httpserver)
 
 基于Gin的轻量级HTTP服务器，提供中间件、路由管理、上下文追踪等企业级特性。
 
@@ -24,8 +24,8 @@ package main
 
 import (
     "log"
-    "go-kit/pkg/httpserver"
-    "go-kit/pkg/logger"
+    "github.com/tsopia/go-kit/httpserver"
+    "github.com/tsopia/go-kit/logger"
 )
 
 func main() {
@@ -76,8 +76,8 @@ import (
     "log"
     "time"
     
-    "go-kit/pkg/httpserver"
-    "go-kit/pkg/logger"
+    "github.com/tsopia/go-kit/httpserver"
+    "github.com/tsopia/go-kit/logger"
 )
 
 func main() {

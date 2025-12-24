@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"io/ioutil"
 )
 
 // RetryConfig 重试配置
@@ -130,24 +132,125 @@ type CircuitBreaker interface {
 	State() string
 }
 
-// simpleCircuitBreaker 简单熔断器实现
-type simpleCircuitBreaker struct {
-	config CircuitBreakerConfig
+var ErrCircuitOpen = errors.New("circuit breaker is open")
+var ErrCircuitHalfOpenLimited = errors.New("circuit breaker half-open request limit reached")
+
+type circuitState string
+
+const (
+	stateClosed   circuitState = "closed"
+	stateOpen     circuitState = "open"
+	stateHalfOpen circuitState = "half-open"
+)
+
+// statefulCircuitBreaker 具有基础状态机的熔断器实现
+type statefulCircuitBreaker struct {
+	config    CircuitBreakerConfig
+	state     circuitState
+	failures  uint32
+	successes uint32
+	openedAt  time.Time
+	mu        sync.Mutex
 }
 
 // newCircuitBreaker 创建新的熔断器
 func newCircuitBreaker(config CircuitBreakerConfig) CircuitBreaker {
-	return &simpleCircuitBreaker{config: config}
+	if config.FailureThreshold == 0 {
+		config.FailureThreshold = 5
+	}
+	if config.SuccessThreshold == 0 {
+		config.SuccessThreshold = 1
+	}
+	if config.MaxRequests == 0 {
+		config.MaxRequests = 1
+	}
+	if config.Timeout == 0 {
+		config.Timeout = 30 * time.Second
+	}
+
+	return &statefulCircuitBreaker{config: config, state: stateClosed}
 }
 
 // Execute 执行函数
-func (cb *simpleCircuitBreaker) Execute(fn func() error) error {
-	return fn() // 简单实现，直接执行
+func (cb *statefulCircuitBreaker) Execute(fn func() error) error {
+	cb.mu.Lock()
+	state := cb.currentStateLocked()
+
+	if state == stateOpen {
+		cb.mu.Unlock()
+		return ErrCircuitOpen
+	}
+
+	if state == stateHalfOpen && cb.successes >= cb.config.MaxRequests {
+		cb.mu.Unlock()
+		return ErrCircuitHalfOpenLimited
+	}
+
+	cb.mu.Unlock()
+
+	err := fn()
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.updateStateLocked(err == nil)
+
+	return err
 }
 
 // State 获取熔断器状态
-func (cb *simpleCircuitBreaker) State() string {
-	return "closed" // 简单实现，总是返回关闭状态
+func (cb *statefulCircuitBreaker) State() string {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	return string(cb.currentStateLocked())
+}
+
+func (cb *statefulCircuitBreaker) currentStateLocked() circuitState {
+	if cb.state == stateOpen && time.Since(cb.openedAt) >= cb.config.Timeout {
+		cb.state = stateHalfOpen
+		cb.failures = 0
+		cb.successes = 0
+	}
+
+	return cb.state
+}
+
+func (cb *statefulCircuitBreaker) updateStateLocked(success bool) {
+	switch cb.currentStateLocked() {
+	case stateClosed:
+		if success {
+			cb.failures = 0
+			return
+		}
+
+		cb.failures++
+		if cb.failures >= cb.config.FailureThreshold {
+			cb.tripLocked()
+		}
+	case stateHalfOpen:
+		if success {
+			cb.successes++
+			if cb.successes >= cb.config.SuccessThreshold {
+				cb.resetLocked()
+			}
+			return
+		}
+
+		cb.tripLocked()
+	}
+}
+
+func (cb *statefulCircuitBreaker) tripLocked() {
+	cb.state = stateOpen
+	cb.openedAt = time.Now()
+	cb.failures = 0
+	cb.successes = 0
+}
+
+func (cb *statefulCircuitBreaker) resetLocked() {
+	cb.state = stateClosed
+	cb.failures = 0
+	cb.successes = 0
 }
 
 // Client HTTP客户端
@@ -186,6 +289,9 @@ type Request struct {
 	headers map[string]string
 	cookies []*http.Cookie
 	body    io.Reader
+	bodyErr error
+	bodyRaw []byte
+	bodySrc io.ReadSeeker
 	timeout time.Duration
 	ctx     context.Context
 	retries int
@@ -428,10 +534,22 @@ func (c *Client) buildRequest(req *Request) (*http.Request, error) {
 		fullURL = c.baseURL + "/" + strings.TrimPrefix(req.url, "/")
 	}
 
+	if req.bodyErr != nil {
+		return nil, req.bodyErr
+	}
+
+	bodyReader, getBody, err := req.prepareBody()
+	if err != nil {
+		return nil, err
+	}
+
 	// 创建HTTP请求
-	httpReq, err := http.NewRequestWithContext(req.ctx, req.method, fullURL, req.body)
+	httpReq, err := http.NewRequestWithContext(req.ctx, req.method, fullURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	if getBody != nil {
+		httpReq.GetBody = getBody
 	}
 
 	// 设置默认请求头
@@ -458,6 +576,30 @@ func (c *Client) buildRequest(req *Request) (*http.Request, error) {
 	}
 
 	return httpReq, nil
+}
+
+func (r *Request) prepareBody() (io.Reader, func() (io.ReadCloser, error), error) {
+	switch {
+	case r.bodySrc != nil:
+		if _, err := r.bodySrc.Seek(0, io.SeekStart); err != nil {
+			return nil, nil, fmt.Errorf("重置请求体失败: %w", err)
+		}
+
+		return r.bodySrc, func() (io.ReadCloser, error) {
+			if _, err := r.bodySrc.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
+			return ioutil.NopCloser(r.bodySrc), nil
+		}, nil
+	case r.bodyRaw != nil:
+		return bytes.NewReader(r.bodyRaw), func() (io.ReadCloser, error) {
+			return ioutil.NopCloser(bytes.NewReader(r.bodyRaw)), nil
+		}, nil
+	case r.body != nil:
+		return r.body, nil, nil
+	default:
+		return nil, nil, nil
+	}
 }
 
 // do 执行HTTP请求
@@ -596,17 +738,24 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 
 	var lastErr error
 	for attempt := 0; attempt <= c.retry.MaxRetries; attempt++ {
-		// 克隆请求（因为body可能被消费）
-		clonedReq := req.Clone(req.Context())
-		if req.Body != nil {
-			// 如果有body，需要重新设置
-			if seeker, ok := req.Body.(io.Seeker); ok {
-				seeker.Seek(0, io.SeekStart)
-				clonedReq.Body = req.Body
+		currentReq := req
+		if attempt > 0 {
+			currentReq = req.Clone(req.Context())
+			switch {
+			case req.GetBody != nil:
+				body, err := req.GetBody()
+				if err != nil {
+					return nil, fmt.Errorf("重建请求体失败: %w", err)
+				}
+				currentReq.Body = body
+			case req.Body == nil:
+				currentReq.Body = nil
+			default:
+				return nil, fmt.Errorf("请求体不可重放，无法执行重试")
 			}
 		}
 
-		resp, err := c.executeWithInterceptors(clonedReq)
+		resp, err := c.executeWithInterceptors(currentReq)
 		if err == nil && !c.shouldRetry(resp, err) {
 			return resp, nil
 		}
@@ -798,7 +947,29 @@ func (r *Request) Cookie(cookie *http.Cookie) *Request {
 
 // Body 设置请求体
 func (r *Request) Body(body io.Reader) *Request {
-	r.body = body
+	r.bodyErr = nil
+	r.bodyRaw = nil
+	r.bodySrc = nil
+
+	if body == nil {
+		r.body = nil
+		return r
+	}
+
+	if seeker, ok := body.(io.ReadSeeker); ok {
+		r.bodySrc = seeker
+		r.body = seeker
+		return r
+	}
+
+	data, err := ioutil.ReadAll(body)
+	if err != nil {
+		r.bodyErr = fmt.Errorf("读取请求体失败: %w", err)
+		return r
+	}
+
+	r.bodyRaw = data
+	r.body = bytes.NewReader(data)
 	return r
 }
 
@@ -809,14 +980,20 @@ func (r *Request) JSON(data interface{}) *Request {
 		// 这里可以考虑返回错误，但为了链式调用的简洁性，暂时忽略
 		return r
 	}
+	r.bodyErr = nil
+	r.bodySrc = nil
 	r.body = bytes.NewBuffer(jsonData)
+	r.bodyRaw = jsonData
 	r.headers["Content-Type"] = "application/json"
 	return r
 }
 
 // Form 设置表单请求体
 func (r *Request) Form(data url.Values) *Request {
+	r.bodyErr = nil
+	r.bodySrc = nil
 	r.body = strings.NewReader(data.Encode())
+	r.bodyRaw = []byte(data.Encode())
 	r.headers["Content-Type"] = "application/x-www-form-urlencoded"
 	return r
 }

@@ -16,14 +16,14 @@
 
 | 模块 | 描述 | 文档 |
 |------|------|------|
-| [pkg/config](./docs/config.md) | 配置管理系统 | [📖 详细文档](./docs/config.md) |
-| [pkg/httpclient](./docs/httpclient.md) | HTTP客户端 | [📖 详细文档](./docs/httpclient.md) |
-| [pkg/database](./docs/database.md) | 数据库连接管理 | [📖 详细文档](./docs/database.md) |
-| [pkg/logger](./docs/logger.md) | 日志记录系统 | [📖 详细文档](./docs/logger.md) |
-| [pkg/errors](./docs/errors.md) | 错误处理系统 | [📖 详细文档](./docs/errors.md) |
-| [pkg/httpserver](./docs/httpserver.md) | HTTP服务器 | [📖 详细文档](./docs/httpserver.md) |
-| [pkg/constants](./docs/constants.md) | 常量定义 | [📖 详细文档](./docs/constants.md) |
-| [pkg/utils](./docs/utils.md) | 工具函数 | [📖 详细文档](./docs/utils.md) |
+| [config](./docs/config.md) | 配置管理系统 | [📖 详细文档](./docs/config.md) |
+| [httpclient](./docs/httpclient.md) | HTTP客户端 | [📖 详细文档](./docs/httpclient.md) |
+| [database](./docs/database.md) | 数据库连接管理 | [📖 详细文档](./docs/database.md) |
+| [logger](./docs/logger.md) | 日志记录系统 | [📖 详细文档](./docs/logger.md) |
+| [errors](./docs/errors.md) | 错误处理系统 | [📖 详细文档](./docs/errors.md) |
+| [httpserver](./docs/httpserver.md) | HTTP服务器 | [📖 详细文档](./docs/httpserver.md) |
+| [constants](./docs/constants.md) | 常量定义 | [📖 详细文档](./docs/constants.md) |
+| [utils](./docs/utils.md) | 工具函数 | [📖 详细文档](./docs/utils.md) |
 | [llm](./docs/llm.md) | 大模型客户端统一封装（Eino 兼容） | [📖 详细文档](./docs/llm.md) |
 
 ## 🎯 快速开始
@@ -45,9 +45,9 @@ package main
 
 import (
     "log"
-    "go-kit/pkg/config"
-    "go-kit/pkg/logger"
-    "go-kit/pkg/httpclient"
+    "github.com/tsopia/go-kit/config"
+    "github.com/tsopia/go-kit/logger"
+    "github.com/tsopia/go-kit/httpclient"
 )
 
 // 配置结构
@@ -102,22 +102,21 @@ func main() {
 
 ```
 go-kit/
-├── pkg/
-│   ├── config/      # 配置管理
-│   ├── logger/      # 日志系统  
-│   ├── httpclient/  # HTTP客户端
-│   ├── database/    # 数据库连接
-│   ├── errors/      # 错误处理
-│   ├── httpserver/  # HTTP服务器
-│   ├── constants/   # 常量定义
-│   └── utils/       # 工具函数
-├── examples/        # 使用示例
-└── docs/           # 详细文档
+├── config/      # 配置管理
+├── logger/      # 日志系统
+├── httpclient/  # HTTP客户端
+├── database/    # 数据库连接
+├── errors/      # 错误处理
+├── httpserver/  # HTTP服务器
+├── constants/   # 常量定义
+├── utils/       # 工具函数
+├── examples/    # 使用示例
+└── docs/       # 详细文档
 ```
 
 ### 依赖关系
 - 所有模块都可以独立使用
-- 通过 `pkg/constants` 解决共享常量问题
+- 通过 `constants` 解决共享常量问题
 - 避免循环依赖，保持清晰的模块边界
 
 ## 🔧 环境要求

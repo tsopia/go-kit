@@ -1,4 +1,4 @@
-# 工具函数 (pkg/utils)
+# 工具函数 (utils)
 
 常用工具函数集合，提供字符串处理、时间操作、加密解密、文件操作等实用功能。
 
@@ -21,7 +21,7 @@ package main
 
 import (
     "fmt"
-    "go-kit/pkg/utils"
+    "github.com/tsopia/go-kit/utils"
 )
 
 func main() {
