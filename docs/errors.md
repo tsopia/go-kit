@@ -1,4 +1,4 @@
-# 错误处理 (pkg/errors)
+# 错误处理 (errors)
 
 统一的错误码系统和错误包装，提供类型安全的错误处理机制。
 
@@ -20,7 +20,7 @@ package main
 
 import (
     "fmt"
-    "go-kit/pkg/errors"
+    "github.com/tsopia/go-kit/errors"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-# 日志系统 (pkg/logger)
+# 日志系统 (logger)
 
 基于Zap的高性能结构化日志系统，支持多种输出格式、文件轮转、上下文追踪等企业级特性。
 
@@ -23,7 +23,7 @@
 package main
 
 import (
-    "go-kit/pkg/logger"
+    "github.com/tsopia/go-kit/logger"
 )
 
 func main() {
@@ -190,8 +190,8 @@ log.Panicf("系统错误: %v", err)
 ```go
 import (
     "context"
-    "go-kit/pkg/logger"
-    "go-kit/pkg/httpserver"
+    "github.com/tsopia/go-kit/logger"
+    "github.com/tsopia/go-kit/httpserver"
 )
 
 func userHandler(c *gin.Context) {

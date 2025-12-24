@@ -1,4 +1,4 @@
-# 数据库连接 (pkg/database)
+# 数据库连接 (database)
 
 支持MySQL、PostgreSQL、SQLite的数据库连接管理器，提供重试机制、连接池管理、健康检查等企业级特性。
 
@@ -21,7 +21,7 @@ package main
 
 import (
     "log"
-    "go-kit/pkg/database"
+    "github.com/tsopia/go-kit/database"
 )
 
 func main() {

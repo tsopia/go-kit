@@ -1,4 +1,4 @@
-# 配置管理 (pkg/config)
+# 配置管理 (config)
 
 基于Viper的现代化配置管理系统，支持多种配置格式和环境变量覆盖。
 
@@ -20,7 +20,7 @@ package main
 
 import (
     "log"
-    "go-kit/pkg/config"
+    "github.com/tsopia/go-kit/config"
 )
 
 // 配置结构体

@@ -1,4 +1,4 @@
-# HTTP客户端 (pkg/httpclient)
+# HTTP客户端 (httpclient)
 
 功能强大的HTTP客户端，支持重试、熔断、调试、中间件等企业级特性。
 
@@ -21,7 +21,7 @@ package main
 
 import (
     "fmt"
-    "go-kit/pkg/httpclient"
+    "github.com/tsopia/go-kit/httpclient"
 )
 
 func main() {
@@ -200,6 +200,9 @@ retryConfig := &httpclient.RetryConfig{
         &net.OpError{},
     },
 }
+
+// 提示：为了保证重试时请求体可被安全重放，
+// 请传入可重复读取的 io.ReadSeeker，或使用 PostJSON/Form 等会自动缓存 body 的方法。
 ```
 
 #### DebugConfig - 调试配置
