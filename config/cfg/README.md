@@ -22,11 +22,11 @@ if err != nil {
 }
 
 // 直接通过 manager 读取
-name, err := manager.String("app.name")            // 如果缺失返回 ErrNotFound
-port, err := manager.Int("app.port", 8080)         // 缺失时落回默认值
+name, err := manager.GetString("app.name")         // 如果缺失返回 ErrNotFound
+port, err := manager.GetInt("app.port", 8080)      // 缺失时落回默认值
 
 // 或使用包级函数读取（依赖默认管理器）
-debug, err := cfg.Bool("flags.debug", false)
+debug, err := cfg.GetBool("flags.debug", false)
 ```
 
 ## 默认值与错误处理
@@ -38,7 +38,7 @@ debug, err := cfg.Bool("flags.debug", false)
 
 ## 支持的 Getter
 
-与 Viper 常用接口保持一致：`String`、`Bool`、`Int`、`Int64`、`Float64`、`Duration`、`Time`、`StringSlice`、`StringMap`、`StringMapString`，每个都支持可选默认值。可通过 `IsSet` 判断键是否存在。
+与 Viper 常用接口保持一致：`GetString`、`GetBool`、`GetInt`、`GetInt64`、`GetFloat64`、`GetDuration`、`GetTime`、`GetStringSlice`、`GetStringMap`、`GetStringMapString`，每个都支持可选默认值。可通过 `IsSet` 判断键是否存在。
 
 ## 配置文件查找规则
 

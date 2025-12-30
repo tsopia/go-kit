@@ -67,94 +67,94 @@ func Default() (*Manager, error) {
 	return defaultManager, nil
 }
 
-// String 读取字符串配置，支持可选默认值。
-func String(key string, defaultValue ...string) (string, error) {
+// GetString 读取字符串配置，支持可选默认值。
+func GetString(key string, defaultValue ...string) (string, error) {
 	manager, err := Default()
 	if err != nil {
 		return "", err
 	}
-	return manager.String(key, defaultValue...)
+	return manager.GetString(key, defaultValue...)
 }
 
-// Bool 读取布尔配置，支持可选默认值。
-func Bool(key string, defaultValue ...bool) (bool, error) {
+// GetBool 读取布尔配置，支持可选默认值。
+func GetBool(key string, defaultValue ...bool) (bool, error) {
 	manager, err := Default()
 	if err != nil {
 		return false, err
 	}
-	return manager.Bool(key, defaultValue...)
+	return manager.GetBool(key, defaultValue...)
 }
 
-// Int 读取 int 配置，支持可选默认值。
-func Int(key string, defaultValue ...int) (int, error) {
+// GetInt 读取 int 配置，支持可选默认值。
+func GetInt(key string, defaultValue ...int) (int, error) {
 	manager, err := Default()
 	if err != nil {
 		return 0, err
 	}
-	return manager.Int(key, defaultValue...)
+	return manager.GetInt(key, defaultValue...)
 }
 
-// Int64 读取 int64 配置，支持可选默认值。
-func Int64(key string, defaultValue ...int64) (int64, error) {
+// GetInt64 读取 int64 配置，支持可选默认值。
+func GetInt64(key string, defaultValue ...int64) (int64, error) {
 	manager, err := Default()
 	if err != nil {
 		return 0, err
 	}
-	return manager.Int64(key, defaultValue...)
+	return manager.GetInt64(key, defaultValue...)
 }
 
-// Float64 读取 float64 配置，支持可选默认值。
-func Float64(key string, defaultValue ...float64) (float64, error) {
+// GetFloat64 读取 float64 配置，支持可选默认值。
+func GetFloat64(key string, defaultValue ...float64) (float64, error) {
 	manager, err := Default()
 	if err != nil {
 		return 0, err
 	}
-	return manager.Float64(key, defaultValue...)
+	return manager.GetFloat64(key, defaultValue...)
 }
 
-// Duration 读取 time.Duration 配置，支持可选默认值。
-func Duration(key string, defaultValue ...time.Duration) (time.Duration, error) {
+// GetDuration 读取 time.Duration 配置，支持可选默认值。
+func GetDuration(key string, defaultValue ...time.Duration) (time.Duration, error) {
 	manager, err := Default()
 	if err != nil {
 		return 0, err
 	}
-	return manager.Duration(key, defaultValue...)
+	return manager.GetDuration(key, defaultValue...)
 }
 
-// Time 读取 time.Time 配置，支持可选默认值。
-func Time(key string, defaultValue ...time.Time) (time.Time, error) {
+// GetTime 读取 time.Time 配置，支持可选默认值。
+func GetTime(key string, defaultValue ...time.Time) (time.Time, error) {
 	manager, err := Default()
 	if err != nil {
 		return time.Time{}, err
 	}
-	return manager.Time(key, defaultValue...)
+	return manager.GetTime(key, defaultValue...)
 }
 
-// StringSlice 读取字符串切片配置，支持可选默认值。
-func StringSlice(key string, defaultValue ...[]string) ([]string, error) {
+// GetStringSlice 读取字符串切片配置，支持可选默认值。
+func GetStringSlice(key string, defaultValue ...[]string) ([]string, error) {
 	manager, err := Default()
 	if err != nil {
 		return nil, err
 	}
-	return manager.StringSlice(key, defaultValue...)
+	return manager.GetStringSlice(key, defaultValue...)
 }
 
-// StringMap 读取字符串键的 map 配置，支持可选默认值。
-func StringMap(key string, defaultValue ...map[string]interface{}) (map[string]interface{}, error) {
+// GetStringMap 读取字符串键的 map 配置，支持可选默认值。
+func GetStringMap(key string, defaultValue ...map[string]interface{}) (map[string]interface{}, error) {
 	manager, err := Default()
 	if err != nil {
 		return nil, err
 	}
-	return manager.StringMap(key, defaultValue...)
+	return manager.GetStringMap(key, defaultValue...)
 }
 
-// StringMapString 读取 map[string]string 配置，支持可选默认值。
-func StringMapString(key string, defaultValue ...map[string]string) (map[string]string, error) {
+// GetStringMapString 读取 map[string]string 配置，支持可选默认值。
+func GetStringMapString(key string, defaultValue ...map[string]string) (map[string]string, error) {
 	manager, err := Default()
 	if err != nil {
 		return nil, err
 	}
-	return manager.StringMapString(key, defaultValue...)
+	return manager.GetStringMapString(key, defaultValue...)
 }
 
 // IsSet 判断配置项是否存在。
@@ -166,8 +166,8 @@ func IsSet(key string) (bool, error) {
 	return manager.IsSet(key)
 }
 
-// String 读取字符串配置，支持可选默认值。
-func (m *Manager) String(key string, defaultValue ...string) (string, error) {
+// GetString 读取字符串配置，支持可选默认值。
+func (m *Manager) GetString(key string, defaultValue ...string) (string, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -183,8 +183,8 @@ func (m *Manager) String(key string, defaultValue ...string) (string, error) {
 	return result, nil
 }
 
-// Bool 读取布尔配置，支持可选默认值。
-func (m *Manager) Bool(key string, defaultValue ...bool) (bool, error) {
+// GetBool 读取布尔配置，支持可选默认值。
+func (m *Manager) GetBool(key string, defaultValue ...bool) (bool, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -200,8 +200,8 @@ func (m *Manager) Bool(key string, defaultValue ...bool) (bool, error) {
 	return result, nil
 }
 
-// Int 读取 int 配置，支持可选默认值。
-func (m *Manager) Int(key string, defaultValue ...int) (int, error) {
+// GetInt 读取 int 配置，支持可选默认值。
+func (m *Manager) GetInt(key string, defaultValue ...int) (int, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -217,8 +217,8 @@ func (m *Manager) Int(key string, defaultValue ...int) (int, error) {
 	return result, nil
 }
 
-// Int64 读取 int64 配置，支持可选默认值。
-func (m *Manager) Int64(key string, defaultValue ...int64) (int64, error) {
+// GetInt64 读取 int64 配置，支持可选默认值。
+func (m *Manager) GetInt64(key string, defaultValue ...int64) (int64, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -234,8 +234,8 @@ func (m *Manager) Int64(key string, defaultValue ...int64) (int64, error) {
 	return result, nil
 }
 
-// Float64 读取 float64 配置，支持可选默认值。
-func (m *Manager) Float64(key string, defaultValue ...float64) (float64, error) {
+// GetFloat64 读取 float64 配置，支持可选默认值。
+func (m *Manager) GetFloat64(key string, defaultValue ...float64) (float64, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -251,8 +251,8 @@ func (m *Manager) Float64(key string, defaultValue ...float64) (float64, error) 
 	return result, nil
 }
 
-// Duration 读取 time.Duration 配置，支持可选默认值。
-func (m *Manager) Duration(key string, defaultValue ...time.Duration) (time.Duration, error) {
+// GetDuration 读取 time.Duration 配置，支持可选默认值。
+func (m *Manager) GetDuration(key string, defaultValue ...time.Duration) (time.Duration, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -268,8 +268,8 @@ func (m *Manager) Duration(key string, defaultValue ...time.Duration) (time.Dura
 	return result, nil
 }
 
-// Time 读取 time.Time 配置，支持可选默认值。
-func (m *Manager) Time(key string, defaultValue ...time.Time) (time.Time, error) {
+// GetTime 读取 time.Time 配置，支持可选默认值。
+func (m *Manager) GetTime(key string, defaultValue ...time.Time) (time.Time, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -285,8 +285,8 @@ func (m *Manager) Time(key string, defaultValue ...time.Time) (time.Time, error)
 	return result, nil
 }
 
-// StringSlice 读取字符串切片配置，支持可选默认值。
-func (m *Manager) StringSlice(key string, defaultValue ...[]string) ([]string, error) {
+// GetStringSlice 读取字符串切片配置，支持可选默认值。
+func (m *Manager) GetStringSlice(key string, defaultValue ...[]string) ([]string, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -302,8 +302,8 @@ func (m *Manager) StringSlice(key string, defaultValue ...[]string) ([]string, e
 	return result, nil
 }
 
-// StringMap 读取字符串键的 map 配置，支持可选默认值。
-func (m *Manager) StringMap(key string, defaultValue ...map[string]interface{}) (map[string]interface{}, error) {
+// GetStringMap 读取字符串键的 map 配置，支持可选默认值。
+func (m *Manager) GetStringMap(key string, defaultValue ...map[string]interface{}) (map[string]interface{}, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil
@@ -319,8 +319,8 @@ func (m *Manager) StringMap(key string, defaultValue ...map[string]interface{}) 
 	return result, nil
 }
 
-// StringMapString 读取 map[string]string 配置，支持可选默认值。
-func (m *Manager) StringMapString(key string, defaultValue ...map[string]string) (map[string]string, error) {
+// GetStringMapString 读取 map[string]string 配置，支持可选默认值。
+func (m *Manager) GetStringMapString(key string, defaultValue ...map[string]string) (map[string]string, error) {
 	value, err := m.value(key)
 	if errors.Is(err, ErrNotFound) && len(defaultValue) > 0 {
 		return defaultValue[0], nil

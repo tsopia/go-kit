@@ -59,7 +59,7 @@ func TestLoadAndBind(t *testing.T) {
 		t.Fatalf("unexpected struct content: %+v", cfgStruct.App)
 	}
 
-	name, err := manager.String("app.name")
+	name, err := manager.GetString("app.name")
 	if err != nil {
 		t.Fatalf("read string failed: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestLoadAndBind(t *testing.T) {
 		t.Fatalf("unexpected name: %s", name)
 	}
 
-	port, err := Int("app.port")
+	port, err := GetInt("app.port")
 	if err != nil {
 		t.Fatalf("read int failed: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestDefaultsAndMissing(t *testing.T) {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	fallback, err := String("missing.key", "default")
+	fallback, err := GetString("missing.key", "default")
 	if err != nil {
 		t.Fatalf("expected default without error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestDefaultsAndMissing(t *testing.T) {
 		t.Fatalf("unexpected default: %s", fallback)
 	}
 
-	_, err = String("missing.key")
+	_, err = GetString("missing.key")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -106,7 +106,7 @@ func TestTypeMismatch(t *testing.T) {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	if _, err := Int("app.name"); !errors.Is(err, ErrTypeMismatch) {
+	if _, err := GetInt("app.name"); !errors.Is(err, ErrTypeMismatch) {
 		t.Fatalf("expected ErrTypeMismatch, got %v", err)
 	}
 }
@@ -119,7 +119,7 @@ func TestCompositeTypes(t *testing.T) {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	slice, err := StringSlice("strings.list")
+	slice, err := GetStringSlice("strings.list")
 	if err != nil {
 		t.Fatalf("string slice read failed: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestCompositeTypes(t *testing.T) {
 		t.Fatalf("unexpected slice: %#v", slice)
 	}
 
-	m, err := StringMap("maps.values")
+	m, err := GetStringMap("maps.values")
 	if err != nil {
 		t.Fatalf("string map read failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDurationAndTime(t *testing.T) {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	duration, err := Duration("limits.timeout")
+	duration, err := GetDuration("limits.timeout")
 	if err != nil {
 		t.Fatalf("duration read failed: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestDurationAndTime(t *testing.T) {
 	}
 
 	// when not set, allow default
-	ts, err := Time("limits.deadline", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	ts, err := GetTime("limits.deadline", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("time with default failed: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestNotLoadedGuard(t *testing.T) {
 	defaultManager = nil
 	defaultMutex.Unlock()
 
-	if _, err := String("app.name"); !errors.Is(err, ErrNotLoaded) {
+	if _, err := GetString("app.name"); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("expected ErrNotLoaded, got %v", err)
 	}
 }
