@@ -29,6 +29,31 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestNewClientOptionsIsolation(t *testing.T) {
+	headers := map[string]string{"X-Trace": "abc"}
+	cookies := []*http.Cookie{{Name: "session", Value: "keep"}}
+
+	client := NewClient(
+		WithHeaders(headers),
+		WithCookies(cookies),
+	)
+
+	headers["X-Trace"] = "mutated"
+	cookies[0].Value = "changed"
+
+	if got := client.headers["X-Trace"]; got != "abc" {
+		t.Fatalf("expected header to be isolated copy, got %q", got)
+	}
+
+	if got := client.cookies[0].Value; got != "keep" {
+		t.Fatalf("expected cookie to be isolated copy, got %q", got)
+	}
+
+	if client.httpClient.Timeout != 30*time.Second {
+		t.Fatalf("expected default timeout to be 30s, got %v", client.httpClient.Timeout)
+	}
+}
+
 func TestSetTimeout(t *testing.T) {
 	client := NewClient()
 	timeout := 60 * time.Second
@@ -46,6 +71,25 @@ func TestSetBaseURL(t *testing.T) {
 
 	if client.baseURL != baseURL {
 		t.Errorf("Expected baseURL %s, got %s", baseURL, client.baseURL)
+	}
+}
+
+func TestNewClientWithCustomHTTPClient(t *testing.T) {
+	transport := &testRoundTripper{next: http.DefaultTransport}
+	base := &http.Client{Transport: transport, Timeout: time.Second}
+
+	client := NewClient(WithHTTPClient(base))
+
+	if client.httpClient == base {
+		t.Fatal("expected client to clone provided http.Client")
+	}
+
+	if client.httpClient.Transport != transport {
+		t.Fatalf("expected transport to be preserved")
+	}
+
+	if client.httpClient.Timeout != 30*time.Second {
+		t.Fatalf("expected default timeout to override to 30s, got %v", client.httpClient.Timeout)
 	}
 }
 
@@ -88,6 +132,29 @@ func TestAddMiddleware(t *testing.T) {
 	// 验证中间件已添加（这里只是确保不会panic）
 	if len(client.middlewares) == 0 {
 		t.Error("Expected middleware to be added")
+	}
+}
+
+func TestResetDefaultForGlobalHelpers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/default" {
+			t.Fatalf("expected path /default, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	defer ResetDefault()
+	ResetDefault(WithBaseURL(server.URL))
+
+	resp, err := Get("/default")
+	if err != nil {
+		t.Fatalf("expected no error from global Get, got %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status code 200, got %d", resp.StatusCode)
 	}
 }
 

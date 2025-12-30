@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"io/ioutil"
@@ -97,6 +98,271 @@ type ClientOptions struct {
 	Metrics        Metrics                               // 指标收集器
 	RateLimiter    RateLimiter                           // 限流器
 	Debug          *DebugConfig                          // Debug配置
+	HTTPClient     *http.Client                          // 自定义HTTP Client
+}
+
+// Option 选项函数
+type Option func(*ClientOptions)
+
+func applyOptions(options ...Option) ClientOptions {
+	base := DefaultOptions()
+	for _, opt := range options {
+		if opt != nil {
+			opt(&base)
+		}
+	}
+	return cloneOptions(base)
+}
+
+func cloneOptions(opts ClientOptions) ClientOptions {
+	copyHeaders := func(in map[string]string) map[string]string {
+		if in == nil {
+			return nil
+		}
+		out := make(map[string]string, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+
+	copyCookies := func(in []*http.Cookie) []*http.Cookie {
+		if in == nil {
+			return nil
+		}
+		out := make([]*http.Cookie, len(in))
+		for i, c := range in {
+			if c == nil {
+				continue
+			}
+			clone := *c
+			out[i] = &clone
+		}
+		return out
+	}
+
+	copyInterceptors := func(in []Interceptor) []Interceptor {
+		if in == nil {
+			return nil
+		}
+		out := make([]Interceptor, len(in))
+		copy(out, in)
+		return out
+	}
+
+	copyMiddlewares := func(in []Middleware) []Middleware {
+		if in == nil {
+			return nil
+		}
+		out := make([]Middleware, len(in))
+		copy(out, in)
+		return out
+	}
+
+	copyDebug := func(in *DebugConfig) *DebugConfig {
+		if in == nil {
+			return nil
+		}
+		out := *in
+		if in.SensitiveHeaders != nil {
+			out.SensitiveHeaders = append([]string{}, in.SensitiveHeaders...)
+		}
+		return &out
+	}
+
+	return ClientOptions{
+		Timeout:        opts.Timeout,
+		BaseURL:        opts.BaseURL,
+		Headers:        copyHeaders(opts.Headers),
+		UserAgent:      opts.UserAgent,
+		Cookies:        copyCookies(opts.Cookies),
+		Retry:          opts.Retry,
+		CircuitBreaker: opts.CircuitBreaker,
+		Pool:           opts.Pool,
+		TLS:            opts.TLS,
+		Proxy:          opts.Proxy,
+		Interceptors:   copyInterceptors(opts.Interceptors),
+		Middlewares:    copyMiddlewares(opts.Middlewares),
+		Logger:         opts.Logger,
+		Metrics:        opts.Metrics,
+		RateLimiter:    opts.RateLimiter,
+		Debug:          copyDebug(opts.Debug),
+		HTTPClient:     opts.HTTPClient,
+	}
+}
+
+// DefaultOptions 默认配置
+func DefaultOptions() ClientOptions {
+	debug := DefaultDebugConfig()
+	debug.Enabled = false
+
+	return ClientOptions{
+		Timeout:   30 * time.Second,
+		UserAgent: "go-kit-httpclient/1.0",
+		Retry: &RetryConfig{
+			MaxRetries:    2,
+			InitialDelay:  100 * time.Millisecond,
+			MaxDelay:      2 * time.Second,
+			BackoffFactor: 2.0,
+			RetryableStatus: []int{
+				408, 429, 500, 502, 503, 504,
+			},
+		},
+		Pool: &PoolConfig{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			MaxConnsPerHost:     0,
+			IdleConnTimeout:     90 * time.Second,
+		},
+		CircuitBreaker: &CircuitBreakerConfig{
+			FailureThreshold: 5,
+			SuccessThreshold: 1,
+			MaxRequests:      1,
+			Timeout:          30 * time.Second,
+		},
+		Debug: debug,
+	}
+}
+
+// WithTimeout 设置超时时间
+func WithTimeout(timeout time.Duration) Option {
+	return func(opts *ClientOptions) {
+		opts.Timeout = timeout
+	}
+}
+
+// WithBaseURL 设置基础URL
+func WithBaseURL(baseURL string) Option {
+	return func(opts *ClientOptions) {
+		opts.BaseURL = strings.TrimSuffix(baseURL, "/")
+	}
+}
+
+// WithHeaders 覆盖默认请求头
+func WithHeaders(headers map[string]string) Option {
+	return func(opts *ClientOptions) {
+		opts.Headers = headers
+	}
+}
+
+// WithExtraHeaders 追加请求头
+func WithExtraHeaders(headers map[string]string) Option {
+	return func(opts *ClientOptions) {
+		if opts.Headers == nil {
+			opts.Headers = map[string]string{}
+		}
+		for k, v := range headers {
+			opts.Headers[k] = v
+		}
+	}
+}
+
+// WithCookies 设置默认Cookie
+func WithCookies(cookies []*http.Cookie) Option {
+	return func(opts *ClientOptions) {
+		opts.Cookies = cookies
+	}
+}
+
+// WithUserAgent 设置User-Agent
+func WithUserAgent(ua string) Option {
+	return func(opts *ClientOptions) {
+		opts.UserAgent = ua
+	}
+}
+
+// WithRetry 设置重试配置
+func WithRetry(cfg *RetryConfig) Option {
+	return func(opts *ClientOptions) {
+		opts.Retry = cfg
+	}
+}
+
+// WithCircuitBreaker 设置熔断配置
+func WithCircuitBreaker(cfg *CircuitBreakerConfig) Option {
+	return func(opts *ClientOptions) {
+		opts.CircuitBreaker = cfg
+	}
+}
+
+// WithPool 设置连接池配置
+func WithPool(cfg *PoolConfig) Option {
+	return func(opts *ClientOptions) {
+		opts.Pool = cfg
+	}
+}
+
+// WithTLS 设置TLS配置
+func WithTLS(cfg *tls.Config) Option {
+	return func(opts *ClientOptions) {
+		opts.TLS = cfg
+	}
+}
+
+// WithProxy 设置代理
+func WithProxy(proxy func(*http.Request) (*url.URL, error)) Option {
+	return func(opts *ClientOptions) {
+		opts.Proxy = proxy
+	}
+}
+
+// WithInterceptors 设置拦截器
+func WithInterceptors(interceptors ...Interceptor) Option {
+	return func(opts *ClientOptions) {
+		opts.Interceptors = append(opts.Interceptors, interceptors...)
+	}
+}
+
+// WithMiddlewares 设置中间件
+func WithMiddlewares(middlewares ...Middleware) Option {
+	return func(opts *ClientOptions) {
+		opts.Middlewares = append(opts.Middlewares, middlewares...)
+	}
+}
+
+// WithLogger 设置日志器
+func WithLogger(logger Logger) Option {
+	return func(opts *ClientOptions) {
+		opts.Logger = logger
+	}
+}
+
+// WithMetrics 设置指标收集
+func WithMetrics(metrics Metrics) Option {
+	return func(opts *ClientOptions) {
+		opts.Metrics = metrics
+	}
+}
+
+// WithRateLimiter 设置限流器
+func WithRateLimiter(rateLimiter RateLimiter) Option {
+	return func(opts *ClientOptions) {
+		opts.RateLimiter = rateLimiter
+	}
+}
+
+// WithDebug 设置调试配置
+func WithDebug(debug *DebugConfig) Option {
+	return func(opts *ClientOptions) {
+		opts.Debug = debug
+	}
+}
+
+// WithHTTPClient 注入自定义 http.Client
+func WithHTTPClient(client *http.Client) Option {
+	return func(opts *ClientOptions) {
+		opts.HTTPClient = client
+	}
+}
+
+// WithTransport 注入自定义 RoundTripper
+func WithTransport(transport http.RoundTripper) Option {
+	return func(opts *ClientOptions) {
+		if opts.HTTPClient == nil {
+			opts.HTTPClient = &http.Client{}
+		}
+		opts.HTTPClient.Transport = transport
+	}
 }
 
 // Interceptor HTTP拦截器
@@ -318,74 +584,77 @@ type httpDebugInfo struct {
 	Duration  time.Duration
 }
 
-// NewClient 创建新的HTTP客户端
-func NewClient() *Client {
-	return NewClientWithOptions(ClientOptions{
-		Timeout: 30 * time.Second,
-		Pool: &PoolConfig{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			MaxConnsPerHost:     100,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	})
+// NewClient 创建新的HTTP客户端，支持传入可选配置覆盖默认值
+func NewClient(options ...Option) *Client {
+	return newClientWithOptions(applyOptions(options...))
 }
 
-// NewClientWithOptions 根据选项创建HTTP客户端
+// NewClientWithOptions 根据选项创建HTTP客户端（兼容旧接口）
 func NewClientWithOptions(opts ClientOptions) *Client {
-	// 构建传输层
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+	return newClientWithOptions(cloneOptions(opts))
+}
+
+func newClientWithOptions(opts ClientOptions) *Client {
+	baseHTTPClient := opts.HTTPClient
+	if baseHTTPClient == nil {
+		baseHTTPClient = &http.Client{}
+	}
+
+	transport := baseHTTPClient.Transport
+	if transport == nil {
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		}
 	}
 
 	// 应用连接池配置
 	if opts.Pool != nil {
-		transport.MaxIdleConns = opts.Pool.MaxIdleConns
-		transport.MaxIdleConnsPerHost = opts.Pool.MaxIdleConnsPerHost
-		transport.MaxConnsPerHost = opts.Pool.MaxConnsPerHost
-		transport.IdleConnTimeout = opts.Pool.IdleConnTimeout
-		transport.DisableKeepAlives = opts.Pool.DisableKeepAlives
-		transport.DisableCompression = opts.Pool.DisableCompression
+		if t, ok := transport.(*http.Transport); ok {
+			if pool := opts.Pool; pool.MaxIdleConns != 0 {
+				t.MaxIdleConns = pool.MaxIdleConns
+			}
+			if pool := opts.Pool; pool.MaxIdleConnsPerHost != 0 {
+				t.MaxIdleConnsPerHost = pool.MaxIdleConnsPerHost
+			}
+			t.MaxConnsPerHost = opts.Pool.MaxConnsPerHost
+			if pool := opts.Pool; pool.IdleConnTimeout != 0 {
+				t.IdleConnTimeout = pool.IdleConnTimeout
+			}
+			t.DisableKeepAlives = opts.Pool.DisableKeepAlives
+			t.DisableCompression = opts.Pool.DisableCompression
+		}
 	}
 
 	// 应用TLS配置
 	if opts.TLS != nil {
-		transport.TLSClientConfig = opts.TLS
+		if t, ok := transport.(*http.Transport); ok {
+			t.TLSClientConfig = opts.TLS
+		}
 	}
 
 	// 应用代理配置
 	if opts.Proxy != nil {
-		transport.Proxy = opts.Proxy
-	}
-
-	// 应用中间件
-	var roundTripper http.RoundTripper = transport
-	for i := len(opts.Middlewares) - 1; i >= 0; i-- {
-		roundTripper = opts.Middlewares[i](roundTripper)
-	}
-
-	// 创建HTTP客户端
-	httpClient := &http.Client{
-		Transport: roundTripper,
-		Timeout:   opts.Timeout,
+		if t, ok := transport.(*http.Transport); ok {
+			t.Proxy = opts.Proxy
+		}
 	}
 
 	client := &Client{
-		httpClient:   httpClient,
+		httpClient:   cloneHTTPClient(baseHTTPClient, opts.Timeout, transport),
 		baseURL:      strings.TrimSuffix(opts.BaseURL, "/"),
-		headers:      make(map[string]string),
-		cookies:      opts.Cookies,
-		interceptors: opts.Interceptors,
-		middlewares:  opts.Middlewares,
+		headers:      map[string]string{},
+		cookies:      []*http.Cookie{},
+		interceptors: []Interceptor{},
+		middlewares:  []Middleware{},
 		retry:        opts.Retry,
 		logger:       opts.Logger,
 		metrics:      opts.Metrics,
@@ -394,23 +663,49 @@ func NewClientWithOptions(opts ClientOptions) *Client {
 	}
 
 	// 设置默认请求头
-	if opts.Headers != nil {
-		for key, value := range opts.Headers {
-			client.headers[key] = value
-		}
+	client.headers["User-Agent"] = opts.UserAgent
+	for key, value := range opts.Headers {
+		client.headers[key] = value
 	}
 
-	// 设置用户代理
-	if opts.UserAgent != "" {
-		client.headers["User-Agent"] = opts.UserAgent
+	// 设置Cookie
+	if opts.Cookies != nil {
+		client.cookies = append(client.cookies, opts.Cookies...)
 	}
 
-	// 创建熔断器
+	// 添加拦截器
+	if opts.Interceptors != nil {
+		client.interceptors = append(client.interceptors, opts.Interceptors...)
+	}
+
+	// 添加中间件
+	if len(opts.Middlewares) > 0 {
+		client.middlewares = append(client.middlewares, opts.Middlewares...)
+		client.rebuildTransport()
+	}
+
+	// 设置熔断器
 	if opts.CircuitBreaker != nil {
 		client.circuitBreaker = newCircuitBreaker(*opts.CircuitBreaker)
 	}
 
 	return client
+}
+
+func cloneHTTPClient(client *http.Client, timeout time.Duration, transport http.RoundTripper) *http.Client {
+	if client == nil {
+		return &http.Client{Timeout: timeout, Transport: transport}
+	}
+
+	clone := *client
+	if timeout > 0 {
+		clone.Timeout = timeout
+	}
+	if transport != nil {
+		clone.Transport = transport
+	}
+
+	return &clone
 }
 
 // NewRequest 创建新的请求构建器
@@ -422,6 +717,21 @@ func (c *Client) NewRequest(method, url string) *Request {
 		headers: make(map[string]string),
 		ctx:     context.Background(),
 	}
+}
+
+// Do 直接执行HTTP请求
+func (c *Client) Do(ctx context.Context, method, url string, body io.Reader) (*Response, error) {
+	return c.NewRequest(method, url).Context(ctx).Body(body).Do()
+}
+
+// HTTPClient 返回底层 http.Client
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
+}
+
+// Transport 返回底层传输层
+func (c *Client) Transport() http.RoundTripper {
+	return c.httpClient.Transport
 }
 
 // SetTimeout 设置超时时间
@@ -1242,63 +1552,121 @@ func (mt *metricsTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 // 全局客户端实例
-var defaultClient = NewClient()
+var (
+	defaultClientValue atomic.Value // *Client
+	defaultClientOnce  sync.Once
+	defaultClientMu    sync.Mutex
+)
 
-// 全局函数
-func Get(url string) (*Response, error) {
-	return defaultClient.Get(url)
+func getDefaultClient() *Client {
+	if client, ok := defaultClientValue.Load().(*Client); ok {
+		return client
+	}
+
+	defaultClientOnce.Do(func() {
+		defaultClientValue.Store(NewClient())
+	})
+
+	if client, ok := defaultClientValue.Load().(*Client); ok {
+		return client
+	}
+
+	return NewClient()
 }
 
-func Post(url string, body io.Reader) (*Response, error) {
-	return defaultClient.Post(url, body)
-}
+func ResetDefault(opts ...Option) *Client {
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
 
-func PostJSON(url string, data interface{}) (*Response, error) {
-	return defaultClient.PostJSON(url, data)
-}
-
-func Put(url string, body io.Reader) (*Response, error) {
-	return defaultClient.Put(url, body)
-}
-
-func PutJSON(url string, data interface{}) (*Response, error) {
-	return defaultClient.PutJSON(url, data)
-}
-
-func Delete(url string) (*Response, error) {
-	return defaultClient.Delete(url)
-}
-
-func Patch(url string, body io.Reader) (*Response, error) {
-	return defaultClient.Patch(url, body)
-}
-
-func PatchJSON(url string, data interface{}) (*Response, error) {
-	return defaultClient.PatchJSON(url, data)
-}
-
-func SetTimeout(timeout time.Duration) {
-	defaultClient.SetTimeout(timeout)
-}
-
-func SetBaseURL(baseURL string) {
-	defaultClient.SetBaseURL(baseURL)
-}
-
-func SetHeader(key, value string) {
-	defaultClient.SetHeader(key, value)
-}
-
-func SetHeaders(headers map[string]string) {
-	defaultClient.SetHeaders(headers)
+	client := NewClient(opts...)
+	defaultClientValue.Store(client)
+	return client
 }
 
 func SetDefaultClient(client *Client) {
-	defaultClient = client
+	if client == nil {
+		return
+	}
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
+	defaultClientValue.Store(client)
 }
 
 func GetDefaultClient() *Client {
-	return defaultClient
+	return getDefaultClient()
+}
+
+// 全局函数
+func Get(url string) (*Response, error) {
+	return getDefaultClient().Get(url)
+}
+
+func Post(url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().Post(url, body)
+}
+
+func PostJSON(url string, data interface{}) (*Response, error) {
+	return getDefaultClient().PostJSON(url, data)
+}
+
+func Put(url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().Put(url, body)
+}
+
+func PutJSON(url string, data interface{}) (*Response, error) {
+	return getDefaultClient().PutJSON(url, data)
+}
+
+func Delete(url string) (*Response, error) {
+	return getDefaultClient().Delete(url)
+}
+
+func Patch(url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().Patch(url, body)
+}
+
+func PatchJSON(url string, data interface{}) (*Response, error) {
+	return getDefaultClient().PatchJSON(url, data)
+}
+
+func GetContext(ctx context.Context, url string) (*Response, error) {
+	return getDefaultClient().NewRequest(http.MethodGet, url).Context(ctx).Do()
+}
+
+func PostContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().NewRequest(http.MethodPost, url).Context(ctx).Body(body).Do()
+}
+
+func PutContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().NewRequest(http.MethodPut, url).Context(ctx).Body(body).Do()
+}
+
+func DeleteContext(ctx context.Context, url string) (*Response, error) {
+	return getDefaultClient().NewRequest(http.MethodDelete, url).Context(ctx).Do()
+}
+
+func PatchContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return getDefaultClient().NewRequest(http.MethodPatch, url).Context(ctx).Body(body).Do()
+}
+
+func SetTimeout(timeout time.Duration) {
+	getDefaultClient().SetTimeout(timeout)
+}
+
+func SetBaseURL(baseURL string) {
+	getDefaultClient().SetBaseURL(baseURL)
+}
+
+func SetHeader(key, value string) {
+	getDefaultClient().SetHeader(key, value)
+}
+
+func SetHeaders(headers map[string]string) {
+	getDefaultClient().SetHeaders(headers)
+}
+
+func DefaultClient() *Client {
+	return getDefaultClient()
 }
 
 // collectRequestDebugInfo 收集请求调试信息
