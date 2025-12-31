@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -899,6 +900,28 @@ func (d *Database) Transaction(fn func(*gorm.DB) error) error {
 // TransactionWithContext 带Context的事务便利方法
 func (d *Database) TransactionWithContext(ctx context.Context, fn func(*gorm.DB) error) error {
 	return d.db.WithContext(ctx).Transaction(fn)
+}
+
+// BeginTx 开启事务，允许外部传入 sql.TxOptions 并绑定上下文
+// 适用于需要与 gorm/gen 生成代码共用事务会话的场景。
+func (d *Database) BeginTx(ctx context.Context, opts ...*sql.TxOptions) (*gorm.DB, error) {
+	d.mu.RLock()
+	base := d.db
+	d.mu.RUnlock()
+
+	session := base
+	if ctx != nil {
+		session = session.WithContext(ctx)
+	}
+
+	var tx *gorm.DB
+	if len(opts) > 0 && opts[0] != nil {
+		tx = session.Begin(opts[0])
+	} else {
+		tx = session.Begin()
+	}
+
+	return tx, tx.Error
 }
 
 // SafeString 返回安全的配置字符串（密码已脱敏）
