@@ -110,6 +110,39 @@ if err := tx.Commit().Error; err != nil {
 }
 ```
 
+### 封装接口与受控逃逸
+
+`Database` 同时实现了 `database.DB` 接口，优先使用封装好的方法，必要时再通过受控逃逸访问底层 `*gorm.DB`：
+
+```go
+cfg := database.NewConfigBuilder().MySQL("127.0.0.1", "root", "pwd", "app").Build()
+
+db, err := database.NewWithOptions(
+    cfg,
+    database.WithLogger(myLogger),
+    database.WithHooks(database.Hooks{BeforeProbe: func(ctx context.Context) error {
+        // 探针前的自定义检查，例如 feature flag
+        return nil
+    }}),
+)
+if err != nil {
+    panic(err)
+}
+defer db.Close()
+
+// 优先使用封装接口
+if err := db.Exec(ctx, "UPDATE users SET last_seen = NOW() WHERE id = ?", userID); err != nil {
+    panic(err)
+}
+var u userModel
+if err := db.Query(ctx, &u, "SELECT * FROM users WHERE id = ?", userID); err != nil {
+    panic(err)
+}
+
+// 需要 gorm 高级能力时，再受控获取
+gormDB := db.Raw()
+```
+
 ### 高级配置 - 自定义重试策略
 
 ```go

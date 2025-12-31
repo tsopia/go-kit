@@ -495,10 +495,41 @@ type Database struct {
 	config *Config
 	db     *gorm.DB
 	mu     sync.RWMutex
+	hooks  Hooks
+	logger SimpleLogger
+}
+
+type stdLogger struct{}
+
+func (l *stdLogger) Info(msg string, fields ...interface{})  { log.Printf("INFO %s %v", msg, fields) }
+func (l *stdLogger) Warn(msg string, fields ...interface{})  { log.Printf("WARN %s %v", msg, fields) }
+func (l *stdLogger) Error(msg string, fields ...interface{}) { log.Printf("ERROR %s %v", msg, fields) }
+
+func (d *Database) logInfo(msg string, fields ...interface{}) {
+	if d.logger != nil {
+		d.logger.Info(msg, fields...)
+	}
+}
+
+func (d *Database) logWarn(msg string, fields ...interface{}) {
+	if d.logger != nil {
+		d.logger.Warn(msg, fields...)
+	}
+}
+
+func (d *Database) logError(msg string, fields ...interface{}) {
+	if d.logger != nil {
+		d.logger.Error(msg, fields...)
+	}
 }
 
 // New 创建新的数据库管理器
 func New(config *Config) (*Database, error) {
+	return NewWithOptions(config)
+}
+
+// NewWithOptions 支持通过可选参数注入日志与生命周期钩子。
+func NewWithOptions(config *Config, opts ...Option) (*Database, error) {
 	// 设置默认值
 	config.SetDefaults()
 
@@ -507,63 +538,82 @@ func New(config *Config) (*Database, error) {
 		return nil, fmt.Errorf("配置验证失败: %w", err)
 	}
 
-	db, err := connect(config)
+	database := &Database{
+		config: config,
+	}
+
+	// 应用可选配置
+	for _, opt := range opts {
+		opt(database)
+	}
+
+	// 兜底日志器
+	if database.logger == nil {
+		database.logger = &stdLogger{}
+	}
+
+	if database.hooks.BeforeConnect != nil {
+		database.hooks.BeforeConnect(config)
+	}
+
+	db, err := database.connect()
 	if err != nil {
 		return nil, fmt.Errorf("连接数据库失败: %w", err)
 	}
 
-	database := &Database{
-		config: config,
-		db:     db,
-	}
+	database.db = db
 
 	// 配置连接池
 	if err := database.configurePool(); err != nil {
 		// 如果连接池配置失败，关闭已建立的连接
-		if closeErr := database.Close(); closeErr != nil {
+		if closeErr := database.CloseWithContext(context.Background()); closeErr != nil {
 			return nil, fmt.Errorf("配置连接池失败: %w (关闭连接时发生额外错误: %v)", err, closeErr)
 		}
 		return nil, fmt.Errorf("配置连接池失败: %w", err)
+	}
+
+	if database.hooks.AfterConnect != nil {
+		database.hooks.AfterConnect(db)
 	}
 
 	return database, nil
 }
 
 // connect 连接数据库
-func connect(config *Config) (*gorm.DB, error) {
-	if config.RetryEnabled && config.RetryMaxAttempts > 1 {
-		return connectWithRetry(config)
+func (d *Database) connect() (*gorm.DB, error) {
+	if d.config.RetryEnabled && d.config.RetryMaxAttempts > 1 {
+		return d.connectWithRetry()
 	}
-	return connectOnce(config)
+	return d.connectOnce()
 }
 
 // connectOnce 单次连接数据库
-func connectOnce(config *Config) (*gorm.DB, error) {
+func (d *Database) connectOnce() (*gorm.DB, error) {
 	var dialector gorm.Dialector
 
-	switch config.Driver {
+	switch d.config.Driver {
 	case "mysql":
-		dsn := buildMySQLDSN(config)
+		dsn := buildMySQLDSN(d.config)
 		dialector = mysql.Open(dsn)
 
 	case "postgres":
-		dsn := buildPostgresDSN(config)
+		dsn := buildPostgresDSN(d.config)
 		dialector = postgres.Open(dsn)
 
 	case "sqlite":
-		dialector = sqlite.Open(config.Database)
+		dialector = sqlite.Open(d.config.Database)
 
 	default:
-		return nil, fmt.Errorf("不支持的数据库驱动: %s", config.Driver)
+		return nil, fmt.Errorf("不支持的数据库驱动: %s", d.config.Driver)
 	}
 
 	// 配置GORM
 	gormConfig := &gorm.Config{
-		Logger:                                   newGormLogger(config),
-		NamingStrategy:                           buildNamingStrategy(config),
-		DisableForeignKeyConstraintWhenMigrating: config.DisableForeignKey,
-		PrepareStmt:                              config.PrepareStmt,
-		DryRun:                                   config.DryRun,
+		Logger:                                   newGormLogger(d.config),
+		NamingStrategy:                           buildNamingStrategy(d.config),
+		DisableForeignKeyConstraintWhenMigrating: d.config.DisableForeignKey,
+		PrepareStmt:                              d.config.PrepareStmt,
+		DryRun:                                   d.config.DryRun,
 	}
 
 	db, err := gorm.Open(dialector, gormConfig)
@@ -575,14 +625,14 @@ func connectOnce(config *Config) (*gorm.DB, error) {
 }
 
 // connectWithRetry 带重试的连接数据库
-func connectWithRetry(config *Config) (*gorm.DB, error) {
+func (d *Database) connectWithRetry() (*gorm.DB, error) {
 	var lastErr error
 
-	for attempt := 1; attempt <= config.RetryMaxAttempts; attempt++ {
-		db, err := connectOnce(config)
+	for attempt := 1; attempt <= d.config.RetryMaxAttempts; attempt++ {
+		db, err := d.connectOnce()
 		if err == nil {
 			if attempt > 1 {
-				log.Printf("数据库连接成功，尝试次数: %d", attempt)
+				d.logInfo("database connect retry success", "attempt", attempt)
 			}
 			return db, nil
 		}
@@ -590,14 +640,13 @@ func connectWithRetry(config *Config) (*gorm.DB, error) {
 		lastErr = err
 
 		// 如果是最后一次尝试，不需要等待
-		if attempt == config.RetryMaxAttempts {
+		if attempt == d.config.RetryMaxAttempts {
 			break
 		}
 
 		// 计算延迟时间
-		delay := calculateRetryDelay(config, attempt-1)
-		log.Printf("数据库连接失败 (尝试 %d/%d): %v, %v后重试",
-			attempt, config.RetryMaxAttempts, err, delay)
+		delay := calculateRetryDelay(d.config, attempt-1)
+		d.logWarn("database connect failed; will retry", "attempt", attempt, "max_attempts", d.config.RetryMaxAttempts, "delay", delay, "error", err)
 
 		// 等待后重试
 		time.Sleep(delay)
@@ -711,6 +760,17 @@ func (d *Config) SetCustomLogger(l SimpleLogger, level string) {
 
 // Close 关闭数据库连接
 func (d *Database) Close() error {
+	return d.CloseWithContext(context.Background())
+}
+
+// CloseWithContext 允许调用方传入上下文，配合生命周期钩子完成优雅关闭。
+func (d *Database) CloseWithContext(ctx context.Context) error {
+	if d.hooks.BeforeClose != nil {
+		if err := d.hooks.BeforeClose(ctx, d.db); err != nil {
+			return err
+		}
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -718,7 +778,13 @@ func (d *Database) Close() error {
 	if err != nil {
 		return err
 	}
-	return sqlDB.Close()
+	closeErr := sqlDB.Close()
+
+	if d.hooks.AfterClose != nil {
+		d.hooks.AfterClose(ctx, closeErr)
+	}
+
+	return closeErr
 }
 
 // Ping 测试数据库连接
@@ -783,6 +849,17 @@ func (d *Database) HealthCheckWithContext(ctx context.Context) *HealthStatus {
 		Stats:     d.Stats(),
 	}
 
+	if d.hooks.BeforeProbe != nil {
+		if err := d.hooks.BeforeProbe(ctx); err != nil {
+			status.Healthy = false
+			status.Errors = append(status.Errors, fmt.Sprintf("Probe前置检查失败: %v", err))
+			if d.hooks.AfterProbe != nil {
+				d.hooks.AfterProbe(ctx, err)
+			}
+			return status
+		}
+	}
+
 	// 检查Context是否已取消
 	if ctx.Err() != nil {
 		status.Healthy = false
@@ -820,6 +897,10 @@ func (d *Database) HealthCheckWithContext(ctx context.Context) *HealthStatus {
 	if err := d.performQueryTest(ctx); err != nil {
 		status.Healthy = false
 		status.Errors = append(status.Errors, fmt.Sprintf("查询测试失败: %v", err))
+	}
+
+	if d.hooks.AfterProbe != nil {
+		d.hooks.AfterProbe(ctx, nil)
 	}
 
 	return status
@@ -900,6 +981,36 @@ func (d *Database) Transaction(fn func(*gorm.DB) error) error {
 // TransactionWithContext 带Context的事务便利方法
 func (d *Database) TransactionWithContext(ctx context.Context, fn func(*gorm.DB) error) error {
 	return d.db.WithContext(ctx).Transaction(fn)
+}
+
+// Tx 启动事务并允许传入可选的 sql.TxOptions，适合 gorm/gen 生成代码复用。
+func (d *Database) Tx(ctx context.Context, fn func(tx *gorm.DB) error, opts ...*sql.TxOptions) error {
+	tx, err := d.BeginTx(ctx, opts...)
+	if err != nil {
+		return err
+	}
+
+	if err := fn(tx); err != nil {
+		d.logError("transaction failed", "error", err)
+		return tx.Rollback().Error
+	}
+
+	return tx.Commit().Error
+}
+
+// Exec 执行写操作，封装常用 Exec 场景。
+func (d *Database) Exec(ctx context.Context, query string, args ...interface{}) error {
+	return d.WithContext(ctx).Exec(query, args...).Error
+}
+
+// Query 执行查询并扫描到目标结构体。
+func (d *Database) Query(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+	return d.WithContext(ctx).Raw(query, args...).Scan(dest).Error
+}
+
+// Raw 提供受控的底层 *gorm.DB 访问。
+func (d *Database) Raw() *gorm.DB {
+	return d.GetDB()
 }
 
 // BeginTx 开启事务，允许外部传入 sql.TxOptions 并绑定上下文
