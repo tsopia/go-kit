@@ -23,4 +23,8 @@ type DB interface {
 
 	// Raw 返回底层 *gorm.DB 以支持少数无法封装的高级用法（请谨慎使用）。
 	Raw() *gorm.DB
+
+	// SQLDB 返回底层 *sql.DB，便于执行需要专用连接的场景（如 PostgreSQL LISTEN/NOTIFY、
+	// 使用特定扩展或 Driver 原生能力）。调用方负责确保合理的生命周期管理。
+	SQLDB() (*sql.DB, error)
 }
