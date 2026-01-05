@@ -141,6 +141,90 @@ if err := db.Query(ctx, &u, "SELECT * FROM users WHERE id = ?", userID); err != 
 
 // 需要 gorm 高级能力时，再受控获取
 gormDB := db.Raw()
+
+// 需要专用连接或 driver 原生能力（如 PostgreSQL LISTEN/NOTIFY、pgvector 扩展）
+sqlDB, err := db.SQLDB()
+if err != nil {
+    panic(err)
+}
+defer sqlDB.Close()
+```
+
+### 组件化职责（Phase 1）
+
+数据库封装已拆分为可替换的职责组件，便于按需扩展或接入自定义实现：
+
+- **Connector**：负责配置验证、连接建立与重试、命名策略以及连接池参数配置。
+- **Executor**：承载 `Exec` / `Query` / `Tx` / `BeginTx` 等常规执行能力。
+- **HealthChecker**：实现 `Ping` / `HealthCheck` / `HealthCheckWithContext`，串联探针钩子。
+
+默认实现随 `database.New/NewWithOptions` 一起注入；若需要接入自定义拨号器或观测增强，可以通过 `WithConnector`、`WithExecutor`、`WithHealthChecker` 选项替换对应组件，无需修改业务代码。
+
+### PostgreSQL 高级能力示例
+
+#### LISTEN/NOTIFY（类消息队列）
+GORM 不直接暴露异步通知 API，但可以通过 `SQLDB()` 拿到底层连接，并结合 `pgx` stdlib 驱动访问原生 `*pgconn.PgConn`：
+
+```go
+import (
+    "context"
+    "log"
+
+    "github.com/jackc/pgx/v5/pgconn"
+    "github.com/jackc/pgx/v5/stdlib"
+    "github.com/tsopia/go-kit/database"
+)
+
+db, _ := database.New(database.NewConfigBuilder().
+    PostgreSQL("127.0.0.1", "postgres", "pwd", "app").Build())
+ctx := context.Background()
+
+sqlDB, _ := db.SQLDB()
+conn, _ := sqlDB.Conn(ctx)
+defer conn.Close()
+
+var pgConn *pgconn.PgConn
+_ = conn.Raw(func(dc interface{}) error {
+    stdConn, ok := dc.(*stdlib.Conn)
+    if !ok {
+        return fmt.Errorf("unexpected driver conn %T", dc)
+    }
+    pgConn = stdConn.Conn()
+    return nil
+})
+
+if _, err := pgConn.Exec(ctx, "LISTEN events").ReadAll(); err != nil {
+    log.Fatal(err)
+}
+for {
+    notif, err := pgConn.WaitForNotification(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("channel=%s payload=%s", notif.Channel, notif.Payload)
+}
+```
+
+#### pgvector 嵌入向量
+`pgvector` 需通过扩展启用，创建列时可直接使用 `Raw()`/GORM 声明字段类型：
+
+```go
+import "github.com/pgvector/pgvector-go"
+
+// 启用扩展
+_ = db.Raw().Exec("CREATE EXTENSION IF NOT EXISTS vector").Error
+
+// 定义模型
+type Item struct {
+    ID        int64
+    Embedding pgvector.Vector `gorm:"type:vector(3)"`
+}
+
+// 相似度查询
+var items []Item
+err := db.Raw().
+    Where("embedding <-> ? < 0.3", pgvector.NewVector([]float32{0.1, 0.2, 0.3})).
+    Find(&items).Error
 ```
 
 ### 高级配置 - 自定义重试策略
@@ -344,6 +428,10 @@ type Database struct {
     config *Config
     db     *gorm.DB
     mu     sync.RWMutex
+
+    connector     Connector
+    executor      Executor
+    healthChecker HealthChecker
 }
 ```
 
@@ -353,10 +441,14 @@ type Database struct {
 |------|------|
 | `New(config *Config) (*Database, error)` | 创建数据库连接 |
 | `GetDB() *gorm.DB` | 获取GORM实例 |
+| `Raw() *gorm.DB` | 获取底层 GORM 实例（需自行控制高级能力） |
+| `SQLDB() (*sql.DB, error)` | 获取底层 *sql.DB，适合 LISTEN/NOTIFY、pgvector 等原生能力 |
 | `Close() error` | 关闭数据库连接 |
 | `Ping() error` | 测试数据库连接 |
 | `Stats() PoolStats` | 获取连接池统计 |
 | `AutoMigrate(dst ...interface{}) error` | 自动迁移表结构 |
+
+> 高级定制：需要替换拨号/执行/探针逻辑时，可通过 `WithConnector`、`WithExecutor`、`WithHealthChecker` 选项注入自定义实现，无需改动业务调用方。
 
 ## 🧪 测试
 
