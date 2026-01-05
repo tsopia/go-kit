@@ -12,6 +12,7 @@
 - **读写分离预留**: 为未来扩展预留接口
 - **线程安全**: 支持并发访问
 - **错误处理**: 友好的错误信息
+- **GORM Gen 兼容**: 直接将 `*gorm.DB` 注入生成代码，事务/上下文保持一致
 
 ## 🚀 快速开始
 
@@ -44,6 +45,102 @@ func main() {
     // 4. 使用GORM进行数据库操作
     // ... 你的业务逻辑
 }
+```
+
+### 与 gorm/gen 集成
+
+```go
+// 假设生成的 query 包路径为 "yourapp/internal/query"
+import (
+    "context"
+    "database/sql"
+
+    "github.com/tsopia/go-kit/database"
+    "gorm.io/gorm"
+    "yourapp/internal/model" // gorm/gen 生成的 model 包路径
+    "yourapp/internal/query" // gorm/gen 生成的 query 包路径
+)
+
+func main() {
+    cfg := database.NewConfigBuilder().
+        MySQL("127.0.0.1", "root", "password", "app").
+        Build()
+
+    db, err := database.New(cfg)
+    if err != nil {
+        panic(err)
+    }
+    defer db.Close()
+
+    // 将封装后的 *gorm.DB 传给 gorm/gen 生成的 query 层
+    q := query.Use(db.GetDB())
+
+    ctx := context.Background()
+
+    // 在同一个事务中执行多张表的操作（gorm/gen 默认 Transaction 基于 *gorm.DB）
+    err = db.TransactionWithContext(ctx, func(tx *gorm.DB) error {
+        // 将事务会话透传给生成的 query（Use 会克隆 tx，WithContext 传递 ctx）
+        qtx := query.Use(tx).WithContext(ctx)
+
+        if _, err := qtx.User.Create(&model.User{Name: "foo"}); err != nil {
+            return err
+        }
+
+        _, err := qtx.Account.Create(&model.Account{UserID: 1, Balance: 100})
+        return err
+    })
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+> 如果需要指定隔离级别/读写模式，可使用 `BeginTx` 显式开启事务并传入 `sql.TxOptions`：
+
+```go
+tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false})
+if err != nil {
+    panic(err)
+}
+qtx := query.Use(tx).WithContext(ctx)
+// ...业务 SQL...
+if err := tx.Commit().Error; err != nil {
+    _ = tx.Rollback()
+    panic(err)
+}
+```
+
+### 封装接口与受控逃逸
+
+`Database` 同时实现了 `database.DB` 接口，优先使用封装好的方法，必要时再通过受控逃逸访问底层 `*gorm.DB`：
+
+```go
+cfg := database.NewConfigBuilder().MySQL("127.0.0.1", "root", "pwd", "app").Build()
+
+db, err := database.NewWithOptions(
+    cfg,
+    database.WithLogger(myLogger),
+    database.WithHooks(database.Hooks{BeforeProbe: func(ctx context.Context) error {
+        // 探针前的自定义检查，例如 feature flag
+        return nil
+    }}),
+)
+if err != nil {
+    panic(err)
+}
+defer db.Close()
+
+// 优先使用封装接口
+if err := db.Exec(ctx, "UPDATE users SET last_seen = NOW() WHERE id = ?", userID); err != nil {
+    panic(err)
+}
+var u userModel
+if err := db.Query(ctx, &u, "SELECT * FROM users WHERE id = ?", userID); err != nil {
+    panic(err)
+}
+
+// 需要 gorm 高级能力时，再受控获取
+gormDB := db.Raw()
 ```
 
 ### 高级配置 - 自定义重试策略
