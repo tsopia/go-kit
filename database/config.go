@@ -30,6 +30,8 @@ const (
 	DefaultRetryMaxDelay      = 30 * time.Second
 	DefaultRetryBackoffFactor = 2.0
 	DefaultRetryJitterEnabled = true
+
+	MaxRetryAttempts = 100
 )
 
 // Config 数据库配置
@@ -321,6 +323,9 @@ func (c *Config) validateTimeouts() error {
 func (c *Config) validateRetryConfig() error {
 	if c.RetryMaxAttempts < 1 {
 		return fmt.Errorf("%w: 重试次数必须大于等于1", ErrInvalidTimeout)
+	}
+	if c.RetryMaxAttempts > MaxRetryAttempts {
+		return fmt.Errorf("%w: 重试次数不能超过%d", ErrInvalidTimeout, MaxRetryAttempts)
 	}
 	if c.RetryEnabled && c.RetryMaxAttempts == 1 {
 		return fmt.Errorf("%w: 启用重试时，重试次数必须大于1", ErrInvalidTimeout)

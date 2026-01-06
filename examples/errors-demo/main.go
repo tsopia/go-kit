@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Go-Kit Errors Package Demo ===\n")
+	fmt.Println("=== Go-Kit Errors Package Demo ===")
 
 	// 1. 基本错误创建
 	demoBasicErrors()

@@ -1136,13 +1136,14 @@ func (c *Client) shouldRetry(resp *http.Response, err error) bool {
 
 	// 检查状态码
 	if resp != nil {
-		for _, status := range c.retry.RetryableStatus {
-			if resp.StatusCode == status {
-				return true
+		if c.retry.RetryableStatus != nil {
+			for _, status := range c.retry.RetryableStatus {
+				if resp.StatusCode == status {
+					return true
+				}
 			}
-		}
-		// 默认5xx错误可重试
-		if resp.StatusCode >= 500 {
+		} else if resp.StatusCode >= 500 {
+			// 默认配置（未提供显式状态码列表）时，5xx 视为可重试
 			return true
 		}
 	}
