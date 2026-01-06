@@ -421,10 +421,18 @@ func kvToAttrs(fields ...interface{}) []slog.Attr {
 	return attrs
 }
 
+func attrsToArgs(attrs []slog.Attr) []any {
+	args := make([]any, len(attrs))
+	for i, attr := range attrs {
+		args[i] = attr
+	}
+	return args
+}
+
 // With 创建带字段的日志记录器
 func (l *Logger) With(fields ...interface{}) *Logger {
 	return &Logger{
-		logger:       l.logger.With(kvToAttrs(fields...)...),
+		logger:       l.logger.With(attrsToArgs(kvToAttrs(fields...))...),
 		levelVar:     l.levelVar,
 		config:       l.config,
 		ctx:          l.ctx,
@@ -440,7 +448,7 @@ func (l *Logger) WithFields(fields map[string]interface{}) *Logger {
 		attrs = append(attrs, slog.Any(key, value))
 	}
 	return &Logger{
-		logger:       l.logger.With(attrs...),
+		logger:       l.logger.With(attrsToArgs(attrs)...),
 		levelVar:     l.levelVar,
 		config:       l.config,
 		ctx:          l.ctx,
@@ -470,7 +478,7 @@ func (l *Logger) WithContext(ctx context.Context) *Logger {
 		for key, value := range ctxFields {
 			attrs = append(attrs, slog.Any(key, value))
 		}
-		newLogger.logger = l.logger.With(attrs...)
+		newLogger.logger = l.logger.With(attrsToArgs(attrs)...)
 	}
 	return newLogger
 }

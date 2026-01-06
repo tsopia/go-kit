@@ -26,32 +26,41 @@ type Config struct {
 }
 
 func main() {
-	fmt.Println("=== Go-Kit 配置系统演示 ===\n")
-	fmt.Println("🚀 基于 Viper 的现代配置加载方案\n")
+	fmt.Println("=== Go-Kit 配置系统演示 ===")
+	fmt.Println("🚀 基于 Viper 的现代配置加载方案")
+	fmt.Println()
 
 	// 示例1: 使用默认配置文件路径
 	fmt.Println("📋 示例1: 使用默认配置文件路径")
 	demonstrateDefaultConfig()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例2: 环境变量覆盖演示（无前缀模式）
 	fmt.Println("📋 示例2: 环境变量覆盖演示（无前缀）")
 	demonstrateEnvOverride()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例3: 使用APP_NAME自动前缀
 	fmt.Println("📋 示例3: 使用 APP_NAME 自动前缀")
 	demonstrateAutoPrefix()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例4: 自定义配置文件路径
 	fmt.Println("📋 示例4: 自定义配置文件路径")
 	demonstrateCustomPath()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例5: 使用建议和最佳实践
 	fmt.Println("📋 示例5: 使用建议和最佳实践")

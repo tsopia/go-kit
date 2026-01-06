@@ -43,31 +43,40 @@ type AppConfig struct {
 }
 
 func main() {
-	fmt.Println("=== Go-Kit 配置加载演示 ===\n")
+	fmt.Println("=== Go-Kit 配置加载演示 ===")
+	fmt.Println()
 
 	// 示例1：使用默认配置文件路径 (config.yml)
 	fmt.Println("示例 1: 使用默认配置文件")
 	demonstrateDefaultConfig()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例2：使用自定义配置文件路径
 	fmt.Println("示例 2: 使用自定义配置文件路径")
 	demonstrateCustomConfigPath()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例3：演示环境变量覆盖（无前缀模式）
 	fmt.Println("示例 3: 环境变量覆盖配置文件（无前缀）")
 	demonstrateEnvOverride()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例4：使用APP_NAME自动前缀
 	fmt.Println("示例 4: 使用 APP_NAME 自动前缀")
 	demonstrateAutoPrefix()
 
-	fmt.Println("\n" + strings.Repeat("-", 50) + "\n")
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 50))
+	fmt.Println()
 
 	// 示例5：APP_NAME 优先级演示
 	fmt.Println("示例 5: APP_NAME 优先级演示")

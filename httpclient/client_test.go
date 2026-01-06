@@ -489,6 +489,7 @@ func TestResponseIsOK(t *testing.T) {
 			defer server.Close()
 
 			client := NewClient()
+			client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
 			resp, err := client.Get(server.URL)
 			if err != nil {
 				t.Fatalf("Expected no error, got %v", err)
@@ -562,6 +563,7 @@ func TestResponseIsServerError(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
+	client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
 	resp, err := client.Get(server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
@@ -600,6 +602,7 @@ func TestResponseIsError(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
+	client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
 	resp, err := client.Get(server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
