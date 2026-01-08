@@ -95,7 +95,7 @@ func TestSendNegativeDelay(t *testing.T) {
 		t.Fatalf("new queue error: %v", err)
 	}
 
-	_, err = queue.Send(context.Background(), testPayload{ID: "1"}, -1)
+	_, err = queue.SendWithDelay(context.Background(), testPayload{ID: "1"}, -1)
 	if err != ErrInvalidDelay {
 		t.Fatalf("expected ErrInvalidDelay, got %v", err)
 	}

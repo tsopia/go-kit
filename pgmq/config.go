@@ -17,6 +17,7 @@ const (
 	DefaultRetryDelay    = 2 * time.Second
 	DefaultRetryMaxDelay = 5 * time.Minute
 	DefaultBackoffFactor = 2.0
+	DefaultPollInterval  = 200 * time.Millisecond
 	DefaultConcurrency   = 4
 )
 
@@ -45,13 +46,94 @@ type RetryConfig struct {
 
 // ConsumerConfig 消费者配置
 type ConsumerConfig struct {
-	Concurrency int
+	VisibilityTimeout time.Duration
+	PollInterval      time.Duration
+	MaxConcurrency    int
 }
 
 // ReadOptions 读取配置
 type ReadOptions struct {
 	VisibilityTimeout time.Duration
 	Quantity          int
+}
+
+// Option 配置 Queue
+type Option func(*QueueConfig, *QueueOptions)
+
+// QueueOptions 额外注入项
+type QueueOptions struct {
+	logger  SimpleLogger
+	metrics Metrics
+}
+
+// WithSchema 设置 schema
+func WithSchema(schema string) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.Schema = schema
+	}
+}
+
+// WithCheckExtension 是否检查扩展
+func WithCheckExtension(enabled bool) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.CheckExtension = enabled
+	}
+}
+
+// WithEnsureQueue 是否自动创建队列
+func WithEnsureQueue(enabled bool) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.EnsureQueue = enabled
+	}
+}
+
+// WithDLQSuffix 设置死信队列后缀
+func WithDLQSuffix(suffix string) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.DLQSuffix = suffix
+	}
+}
+
+// WithVisibilityTimeout 设置默认可见性超时
+func WithVisibilityTimeout(timeout time.Duration) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.Visibility = timeout
+	}
+}
+
+// WithReadQuantity 设置默认读取数量
+func WithReadQuantity(quantity int) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.ReadQuantity = quantity
+	}
+}
+
+// WithRetryConfig 设置重试配置
+func WithRetryConfig(retry RetryConfig) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.Retry = retry
+	}
+}
+
+// WithConsumerConfig 设置消费者配置
+func WithConsumerConfig(consumer ConsumerConfig) Option {
+	return func(cfg *QueueConfig, _ *QueueOptions) {
+		cfg.Consumer = consumer
+	}
+}
+
+// WithLogger 注入日志器
+func WithLogger(logger SimpleLogger) Option {
+	return func(_ *QueueConfig, opt *QueueOptions) {
+		opt.logger = logger
+	}
+}
+
+// WithMetrics 注入指标实现
+func WithMetrics(metrics Metrics) Option {
+	return func(_ *QueueConfig, opt *QueueOptions) {
+		opt.metrics = metrics
+	}
 }
 
 // SetDefaults 设置默认值
@@ -80,8 +162,14 @@ func (c *QueueConfig) SetDefaults() {
 	if c.Retry.BackoffFactor == 0 {
 		c.Retry.BackoffFactor = DefaultBackoffFactor
 	}
-	if c.Consumer.Concurrency == 0 {
-		c.Consumer.Concurrency = DefaultConcurrency
+	if c.Consumer.MaxConcurrency == 0 {
+		c.Consumer.MaxConcurrency = DefaultConcurrency
+	}
+	if c.Consumer.VisibilityTimeout == 0 {
+		c.Consumer.VisibilityTimeout = DefaultVisibility
+	}
+	if c.Consumer.PollInterval == 0 {
+		c.Consumer.PollInterval = DefaultPollInterval
 	}
 }
 
@@ -108,7 +196,13 @@ func (c *QueueConfig) Validate() error {
 	if c.Retry.BackoffFactor < 1 {
 		return ErrInvalidConfig
 	}
-	if c.Consumer.Concurrency <= 0 {
+	if c.Consumer.MaxConcurrency <= 0 {
+		return ErrInvalidConfig
+	}
+	if c.Consumer.VisibilityTimeout <= 0 {
+		return ErrInvalidConfig
+	}
+	if c.Consumer.PollInterval <= 0 {
 		return ErrInvalidConfig
 	}
 	return nil
@@ -128,6 +222,19 @@ func normalizeReadOptions(cfg QueueConfig, opts ReadOptions) (ReadOptions, error
 		return ReadOptions{}, ErrInvalidQuantity
 	}
 	return opts, nil
+}
+
+func normalizeConsumerConfig(cfg ConsumerConfig) ConsumerConfig {
+	if cfg.VisibilityTimeout <= 0 {
+		cfg.VisibilityTimeout = DefaultVisibility
+	}
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = DefaultPollInterval
+	}
+	if cfg.MaxConcurrency <= 0 {
+		cfg.MaxConcurrency = DefaultConcurrency
+	}
+	return cfg
 }
 
 func validateQueueName(name string) error {

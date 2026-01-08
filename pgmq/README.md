@@ -5,7 +5,7 @@
 ## ✨ 特性
 
 - **泛型消息**：`Message[T]` 自动完成 JSON 编解码。
-- **标准 API**：`Send` / `Read` / `Pop` / `Archive` / `Delete` / `Drop`。
+- **标准 API**：`Send` / `SendBatch` / `Read` / `Pop` / `Archive` / `Delete` / `Drop`。
 - **自动校验**：初始化时检测 `pgmq` 扩展，可自动创建队列。
 - **并发消费者**：支持协程池与渐进式重试、DLQ 自动转移。
 - **可观测性**：可插拔 Metrics 接口。
@@ -18,8 +18,14 @@
   ```sql
   CREATE EXTENSION IF NOT EXISTS pgmq;
   ```
+  或使用内置方法：
+  ```go
+  if err := pgmq.CreateExtension(ctx, adapter); err != nil {
+      log.Fatal(err)
+  }
+  ```
 
-## 🚀 快速开始
+## 🚀 SDK 风格快速开始
 
 ```go
 package main
@@ -46,17 +52,17 @@ func main() {
     }
     defer db.Close()
 
-    adapter, err := pgmq.NewDatabaseAdapter(db)
+    adapter, err := pgmq.NewAdapter(context.Background(), db)
     if err != nil {
         log.Fatal(err)
     }
 
-    queue, err := pgmq.NewQueue[map[string]string](context.Background(), adapter, "orders")
+    _, err = pgmq.Configure(adapter)
     if err != nil {
         log.Fatal(err)
     }
 
-    id, err := queue.Send(context.Background(), map[string]string{"order_id": "123"}, 0)
+    id, err := pgmq.SendMsg(context.Background(), "orders", map[string]string{"order_id": "123"})
     if err != nil {
         log.Fatal(err)
     }
@@ -65,16 +71,36 @@ func main() {
 }
 ```
 
+## 🔌 单一连接串接入（推荐）
+
+```go
+adapter, err := pgmq.NewAdapter(ctx, "postgres://user:pass@localhost:5432/app")
+if err != nil {
+    log.Fatal(err)
+}
+
+_, err = pgmq.Configure(adapter)
+if err != nil {
+    log.Fatal(err)
+}
+
+queue, err := pgmq.NewQueue[map[string]string](ctx, adapter, "orders")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
 ## 🧩 消费者示例
 
 ```go
-err := queue.Consume(context.Background(), func(ctx context.Context, msg *pgmq.Message[map[string]string]) error {
+consumer, err := queue.StartConsumer(context.Background(), func(ctx context.Context, msg *pgmq.Message[map[string]string]) error {
     // 处理逻辑
     return nil
 })
 if err != nil {
     log.Fatal(err)
 }
+defer consumer.Stop(context.Background())
 ```
 
 ## ⚙️ 配置说明
@@ -92,14 +118,52 @@ queue, err := pgmq.NewQueue[map[string]string](ctx, adapter, "orders",
         BackoffFactor: 2,
         Jitter:        true,
     }),
-    pgmq.WithConsumerConfig(pgmq.ConsumerConfig{Concurrency: 4}),
+    pgmq.WithConsumerConfig(pgmq.ConsumerConfig{
+        VisibilityTimeout: 30 * time.Second,
+        PollInterval:      200 * time.Millisecond,
+        MaxConcurrency:    4,
+    }),
 )
+```
+
+## 🧰 SDK 快捷方法示例
+
+```go
+_, err := pgmq.Configure(adapter,
+    pgmq.WithEnsureQueue(true),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+id, err := pgmq.SendMsg(ctx, "orders", map[string]string{"order_id": "1"})
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("sent: %d", id)
+```
+
+## 📦 批量发送示例
+
+```go
+ids, err := queue.SendBatch(ctx, []map[string]string{
+    {"order_id": "1"},
+    {"order_id": "2"},
+}, 0)
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("sent batch: %v", ids)
 ```
 
 ## 📌 目录结构
 
 - `config.go`：默认值、校验与重试/消费配置
 - `options.go`：Option 注入
-- `pgmq.go`：Queue 管理与核心 API
+- `queue.go`：Queue 管理与核心 API
+- `client.go`：SDK Client 与全局实例管理
+- `helpers.go`：SDK 快捷方法
+- `consumer.go`：Consumer 生命周期管理
+- `types.go`：基础类型与消息结构
 - `adapter_db.go`：DB 适配
 - `errors.go`：错误定义

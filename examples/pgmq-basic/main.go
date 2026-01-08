@@ -26,17 +26,17 @@ func main() {
 	}
 	defer db.Close()
 
-	adapter, err := pgmq.NewDatabaseAdapter(db)
+	adapter, err := pgmq.NewAdapter(context.Background(), db)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	queue, err := pgmq.NewQueue[OrderMessage](context.Background(), adapter, "orders")
+	_, err = pgmq.Configure(adapter)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	messageID, err := queue.Send(context.Background(), OrderMessage{OrderID: "123"}, 0)
+	messageID, err := pgmq.SendMsg(context.Background(), "orders", OrderMessage{OrderID: "123"})
 	if err != nil {
 		log.Fatal(err)
 	}
