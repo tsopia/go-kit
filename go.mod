@@ -3,16 +3,18 @@ module github.com/tsopia/go-kit
 go 1.21
 
 require (
-        github.com/gin-gonic/gin v1.9.1
-        github.com/spf13/viper v1.17.0
-        go.uber.org/zap v1.26.0
-        google.golang.org/grpc v1.59.0
-        gopkg.in/natefinch/lumberjack.v2 v2.2.1
-        gorm.io/driver/mysql v1.5.2
-        gorm.io/driver/postgres v1.5.4
-        gorm.io/driver/sqlite v1.5.4
-        gorm.io/gorm v1.25.5
+	github.com/gin-gonic/gin v1.9.1
+	github.com/jackc/pgx/v5 v5.4.3
+	github.com/spf13/viper v1.17.0
+	go.uber.org/zap v1.26.0
+	google.golang.org/grpc v1.59.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+	gorm.io/driver/mysql v1.5.2
+	gorm.io/driver/postgres v1.5.4
+	gorm.io/driver/sqlite v1.5.4
+	gorm.io/gorm v1.25.5
 )
+
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
@@ -29,7 +31,6 @@ require (
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/jackc/pgx/v5 v5.4.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

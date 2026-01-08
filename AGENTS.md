@@ -2,6 +2,13 @@
 
 本规范提炼自 `database` 包的封装思路，供本仓库所有工具/基础设施包复用，确保不同能力（HTTP、gRPC、消息、缓存等）在架构层面保持一致。
 
+## SDK 风格封装规范（Client 与 Helper）
+- **全局客户端约定**：包内维护未导出的全局 `_client *Client`，通过 `Configure(...)` 初始化/替换，通过 `GetClient()` 获取当前默认实例。
+- **可选 Client 覆盖**：所有高层工具函数/快捷方法统一支持可选 `*Client` 参数（形如 `func SendMsg(ctx context.Context, ..., c ...*Client)`），调用时若传入则优先使用传入实例，否则回退到 `_client`。
+- **显式错误提示**：当未调用 `Configure(...)` 且未传入 `*Client` 时，应返回清晰的 `ErrMissingClient`。
+- **Client 角色**：`Client` 只持有配置与依赖（如 DB/Options），不承载业务逻辑；业务逻辑保持在 `Queue/Manager` 或包内工具函数中。
+- **示例与文档**：README 与 examples 优先展示 SDK 风格调用（Configure + helper），并保留显式构造实例的方式作为高级用法。
+
 ## 核心理念
 - **职责解耦、接口优先**：用接口定义核心能力（如连接、执行、探活、关闭、指标暴露），通过管理器结构体组合各组件。默认实现可被 `WithXXX` 选项替换，避免具体依赖渗透业务。
 - **配置中心化**：以配置结构体为单一入口，统一提供 `SetDefaults`/`Validate` 或 Builder 流程，先补齐安全默认值，再做严格校验，实例化前确保配置可用且语义清晰。
