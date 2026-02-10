@@ -7,16 +7,28 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tsopia/go-kit/llm/model"
-	"github.com/tsopia/go-kit/llm/tool"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
-type configProvider interface {
-	GetModelConfig() ModelConfig
-}
-
-func RunToolCallLoop(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (RunResult, error) {
-	boundModel, err := m.WithTools(tools...)
+// RunToolCallLoop 执行工具调用循环。
+//
+// messages 是用户上下文（system/user/history），tools 是可执行工具集合。
+// loop 会根据 ToolCallPolicy 驱动模型调用工具，根据 ToolResultPolicy 决定返回策略。
+// 支持多个 tool calls（parallel function calling）和多轮工具调用链。
+func RunToolCallLoop(
+	ctx context.Context,
+	m model.ToolCallingChatModel,
+	messages []*schema.Message,
+	tools []InvokableTool,
+	opts RunOptions,
+) (RunResult, error) {
+	// 提取 ToolInfo 并绑定到模型
+	toolInfos := make([]*schema.ToolInfo, len(tools))
+	for i, t := range tools {
+		toolInfos[i] = t.Info()
+	}
+	boundModel, err := m.WithTools(toolInfos)
 	if err != nil {
 		return RunResult{StopReason: STOP_ERROR}, err
 	}
@@ -26,93 +38,129 @@ func RunToolCallLoop(ctx context.Context, m model.ToolCallingChatModel, tools []
 		cfg = p.GetModelConfig().normalized()
 	}
 
-	toolByName := map[string]tool.InvokableTool{}
+	toolByName := map[string]InvokableTool{}
 	allNames := make([]string, 0, len(tools))
 	for _, t := range tools {
-		name := t.Name()
+		name := t.Info().Name
 		toolByName[name] = t
 		allNames = append(allNames, name)
 	}
 	allowedSet, allowedNames := computeAllowedTools(allNames, cfg.ToolCallPolicy.AllowedTools)
 
 	maxRetries := opts.normalizedMaxRetries()
-	feedback := make([]model.ChatMessage, 0, maxRetries)
+
+	// 构建完整的对话历史：用户原始 messages + loop 过程中的 feedback
+	history := make([]*schema.Message, len(messages))
+	copy(history, messages)
+
 	var lastFailure error
 
 	for retries := 0; retries <= maxRetries; retries++ {
-		resp, runErr := boundModel.Generate(ctx, feedback)
+		resp, runErr := boundModel.Generate(ctx, history)
 		if runErr != nil {
 			return RunResult{StopReason: STOP_ERROR}, runErr
 		}
 
+		// ── 无 tool call：按策略处理 ──
 		if len(resp.ToolCalls) == 0 {
 			switch cfg.ToolCallPolicy.Mode {
 			case TOOL_REQUIRED_ONE:
 				lastFailure = errors.New("model did not call a tool")
-				feedback = append(feedback, model.ChatMessage{Role: "system", Content: requiredOneFeedback(allowedNames)})
+				history = append(history, &schema.Message{Role: schema.System, Content: requiredOneFeedback(allowedNames)})
 				continue
 			case TOOL_REQUIRED_EXACT:
 				lastFailure = errors.New("model did not call required tool")
-				feedback = append(feedback, model.ChatMessage{Role: "system", Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
+				history = append(history, &schema.Message{Role: schema.System, Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
 				continue
-			default:
+			default: // TOOL_OPTIONAL
 				return RunResult{FinalText: resp.Content, StopReason: STOP_MODEL_FINAL}, nil
 			}
 		}
 
-		call := resp.ToolCalls[0]
-		if cfg.ToolCallPolicy.Mode == TOOL_REQUIRED_EXACT && call.Name != cfg.ToolCallPolicy.RequiredToolName {
-			lastFailure = fmt.Errorf("wrong tool called: %s", call.Name)
-			feedback = append(feedback, model.ChatMessage{Role: "system", Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
+		// ── 有 tool calls：校验 + 执行 ──
+		allValid := true
+		var toolResults []ToolCallResult
+		var feedbackMsgs []*schema.Message
+
+		// 先把 assistant 的 tool call 消息加入历史
+		feedbackMsgs = append(feedbackMsgs, resp)
+
+		for _, tc := range resp.ToolCalls {
+			callName := tc.Function.Name
+			callArgs := tc.Function.Arguments
+			callID := tc.ID
+
+			// 检查 TOOL_REQUIRED_EXACT
+			if cfg.ToolCallPolicy.Mode == TOOL_REQUIRED_EXACT && callName != cfg.ToolCallPolicy.RequiredToolName {
+				lastFailure = fmt.Errorf("wrong tool called: %s", callName)
+				history = append(history, &schema.Message{Role: schema.System, Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
+				allValid = false
+				break
+			}
+
+			// 检查是否在允许列表中
+			if _, ok := allowedSet[callName]; !ok {
+				lastFailure = fmt.Errorf("tool not allowed: %s", callName)
+				history = append(history, &schema.Message{Role: schema.System, Content: toolNotAllowedFeedback(callName, allowedNames)})
+				allValid = false
+				break
+			}
+
+			// 查找工具
+			t, ok := toolByName[callName]
+			if !ok {
+				lastFailure = fmt.Errorf("tool not found: %s", callName)
+				history = append(history, &schema.Message{Role: schema.System, Content: toolNotAllowedFeedback(callName, allowedNames)})
+				allValid = false
+				break
+			}
+
+			// 参数校验
+			issues := validateToolArgs(callArgs, t.Info())
+			if len(issues) > 0 {
+				lastFailure = fmt.Errorf("validation failed for tool %s", callName)
+				history = append(history, &schema.Message{Role: schema.System, Content: buildValidationFeedback(callName, issues)})
+				allValid = false
+				break
+			}
+
+			// 执行工具
+			result, invokeErr := t.Invoke(ctx, callArgs)
+			if invokeErr != nil {
+				return RunResult{StopReason: STOP_ERROR}, invokeErr
+			}
+
+			toolResults = append(toolResults, ToolCallResult{
+				ID: callID, Name: callName, Args: callArgs, Result: result,
+			})
+
+			// 构建 tool result 消息
+			feedbackMsgs = append(feedbackMsgs, &schema.Message{
+				Role:       schema.Tool,
+				Content:    result,
+				ToolCallID: callID,
+			})
+		}
+
+		if !allValid {
 			continue
 		}
 
-		if _, ok := allowedSet[call.Name]; !ok {
-			lastFailure = fmt.Errorf("tool not allowed: %s", call.Name)
-			feedback = append(feedback, model.ChatMessage{Role: "system", Content: toolNotAllowedFeedback(call.Name, allowedNames)})
-			continue
-		}
-
-		t, ok := toolByName[call.Name]
-		if !ok {
-			lastFailure = fmt.Errorf("tool not found: %s", call.Name)
-			feedback = append(feedback, model.ChatMessage{Role: "system", Content: toolNotAllowedFeedback(call.Name, allowedNames)})
-			continue
-		}
-
-		issues := validateToolArgs(call.Arguments, t.Schema())
-		if len(issues) > 0 {
-			lastFailure = fmt.Errorf("validation failed for tool %s", call.Name)
-			feedback = append(feedback, model.ChatMessage{Role: "system", Content: buildValidationFeedback(call.Name, issues)})
-			continue
-		}
-
-		toolResultAny, invokeErr := t.Invoke(ctx, call.Arguments)
-		if invokeErr != nil {
-			return RunResult{StopReason: STOP_ERROR}, invokeErr
-		}
-		toolResult := mustJSON(toolResultAny)
-		result := RunResult{ToolName: call.Name, ToolArgs: call.Arguments, ToolResult: toolResult}
+		// ── 根据 ToolResultPolicy 决定返回 ──
+		result := RunResult{ToolCalls: toolResults}
 
 		switch cfg.ToolResultPolicy {
 		case RETURN_TOOL_RESULT:
 			result.StopReason = STOP_TOOL_RESULT_RETURNED
 			return result, nil
+
 		case RETURN_BOTH, RETURN_FINAL_ANSWER:
-			feedback = append(feedback,
-				model.ChatMessage{Role: "assistant", ToolCalls: []model.ToolCall{call}},
-				model.ChatMessage{Role: "tool", Content: string(toolResult)},
-			)
-			finalResp, finalErr := boundModel.Generate(ctx, feedback)
-			if finalErr != nil {
-				return RunResult{StopReason: STOP_ERROR}, finalErr
-			}
-			result.FinalText = finalResp.Content
-			result.StopReason = STOP_MODEL_FINAL
-			if cfg.ToolResultPolicy == RETURN_FINAL_ANSWER {
-				result.ToolResult = nil
-			}
-			return result, nil
+			// 把 assistant tool call + tool results 加入历史，继续 loop
+			history = append(history, feedbackMsgs...)
+
+			// 让模型基于 tool results 产生最终答案（或再次调用工具 — 继续循环）
+			continue
+
 		default:
 			result.StopReason = STOP_TOOL_RESULT_RETURNED
 			return result, nil
@@ -174,54 +222,75 @@ type validationFailure struct {
 	Instruction string            `json:"instruction"`
 }
 
-func validateToolArgs(args json.RawMessage, schema tool.ArgSchema) []validationIssue {
-	if len(schema.Required) == 0 && len(schema.Properties) == 0 && !schema.Strict {
+// validateToolArgs 对工具参数进行轻量校验。
+func validateToolArgs(argsStr string, info *schema.ToolInfo) []validationIssue {
+	if info == nil || info.ParamsOneOf == nil {
 		return nil
 	}
+
 	var payload map[string]any
-	if err := json.Unmarshal(args, &payload); err != nil {
+	if err := json.Unmarshal([]byte(argsStr), &payload); err != nil {
 		return []validationIssue{{Path: "$", Expected: "object", Actual: "invalid_json", Hint: "arguments must be a JSON object"}}
 	}
+
+	// 通过 ToJSONSchema 获取 schema 定义
+	jsSchema, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil || jsSchema == nil {
+		return nil
+	}
+
 	issues := make([]validationIssue, 0)
-	for _, req := range schema.Required {
-		if _, ok := payload[req]; !ok {
-			issues = append(issues, validationIssue{Path: fmt.Sprintf("$.%s", req), Expected: "present", Actual: "missing", Hint: fmt.Sprintf("field %s is required", req)})
+
+	// 检查 required 字段
+	for _, fieldName := range jsSchema.Required {
+		if _, exists := payload[fieldName]; !exists {
+			issues = append(issues, validationIssue{
+				Path: fmt.Sprintf("$.%s", fieldName), Expected: "present", Actual: "missing",
+				Hint: fmt.Sprintf("field %s is required", fieldName),
+			})
 		}
 	}
-	for key, expected := range schema.Properties {
-		val, ok := payload[key]
-		if !ok {
-			continue
-		}
-		actual := detectJSONType(val)
-		if expected != tool.JSONTypeUnknown && actual != expected {
-			issues = append(issues, validationIssue{Path: fmt.Sprintf("$.%s", key), Expected: string(expected), Actual: string(actual), Hint: fmt.Sprintf("field must be a %s", expected)})
-		}
-	}
-	if schema.Strict {
-		for key, val := range payload {
-			if _, ok := schema.Properties[key]; !ok {
-				issues = append(issues, validationIssue{Path: fmt.Sprintf("$.%s", key), Expected: "defined_property", Actual: string(detectJSONType(val)), Hint: "unknown field is not allowed"})
+
+	// 检查 properties 类型
+	if jsSchema.Properties != nil {
+		for pair := jsSchema.Properties.Oldest(); pair != nil; pair = pair.Next() {
+			key := pair.Key
+			propSchema := pair.Value
+			val, ok := payload[key]
+			if !ok || propSchema == nil {
+				continue
+			}
+			expectedType := propSchema.Type
+			if expectedType == "" {
+				continue
+			}
+			actualType := detectJSONType(val)
+			if expectedType != actualType {
+				issues = append(issues, validationIssue{
+					Path: fmt.Sprintf("$.%s", key), Expected: expectedType, Actual: actualType,
+					Hint: fmt.Sprintf("field must be a %s", expectedType),
+				})
 			}
 		}
 	}
+
 	return issues
 }
 
-func detectJSONType(v any) tool.JSONType {
+func detectJSONType(v any) string {
 	switch v.(type) {
 	case string:
-		return tool.JSONTypeString
+		return "string"
 	case float64:
-		return tool.JSONTypeNumber
+		return "number"
 	case bool:
-		return tool.JSONTypeBool
+		return "boolean"
 	case []any:
-		return tool.JSONTypeArray
+		return "array"
 	case map[string]any:
-		return tool.JSONTypeObject
+		return "object"
 	default:
-		return tool.JSONTypeUnknown
+		return "unknown"
 	}
 }
 
@@ -235,18 +304,4 @@ func buildValidationFeedback(toolName string, issues []validationIssue) string {
 	}
 	b, _ := json.Marshal(payload)
 	return string(b)
-}
-
-func mustJSON(v any) json.RawMessage {
-	if raw, ok := v.(json.RawMessage); ok && json.Valid(raw) {
-		return raw
-	}
-	if b, ok := v.([]byte); ok && json.Valid(b) {
-		return b
-	}
-	if b, err := json.Marshal(v); err == nil && json.Valid(b) {
-		return b
-	}
-	fallback, _ := json.Marshal(fmt.Sprint(v))
-	return fallback
 }

@@ -6,23 +6,28 @@ import (
 	"io"
 	"strings"
 
-	"github.com/tsopia/go-kit/llm/model"
-	"github.com/tsopia/go-kit/llm/tool"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 var ErrStreamNotSupported = errors.New("model does not support streaming")
 
-// RunToolCallLoopStream 与 RunToolCallLoop 类似，但在可流式模型上返回最终流。
-// 该函数聚焦于无工具调用的流式输出场景；当模型产生 tool call 时返回错误。
-func RunToolCallLoopStream(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (model.ChatMessageStream, error) {
-	boundModel, err := m.WithTools(tools...)
+// RunToolCallLoopStream 与 RunToolCallLoop 类似，但在可流式模型上返回流式输出。
+// 当前聚焦于「最终答案流式输出」场景；若模型返回 tool call，请使用 RunToolCallLoop。
+func RunToolCallLoopStream(
+	ctx context.Context,
+	m model.ToolCallingChatModel,
+	messages []*schema.Message,
+	tools []InvokableTool,
+	opts RunOptions,
+) (*schema.StreamReader[*schema.Message], error) {
+	toolInfos := make([]*schema.ToolInfo, len(tools))
+	for i, t := range tools {
+		toolInfos[i] = t.Info()
+	}
+	boundModel, err := m.WithTools(toolInfos)
 	if err != nil {
 		return nil, err
-	}
-
-	streamModel, ok := boundModel.(model.StreamableToolCallingChatModel)
-	if !ok {
-		return nil, ErrStreamNotSupported
 	}
 
 	cfg := ModelConfig{}.normalized()
@@ -31,30 +36,34 @@ func RunToolCallLoopStream(ctx context.Context, m model.ToolCallingChatModel, to
 	}
 
 	maxRetries := opts.normalizedMaxRetries()
-	feedback := make([]model.ChatMessage, 0, maxRetries)
+
+	history := make([]*schema.Message, len(messages))
+	copy(history, messages)
 
 	for retries := 0; retries <= maxRetries; retries++ {
-		stream, streamErr := streamModel.GenerateStream(ctx, feedback)
+		stream, streamErr := boundModel.Stream(ctx, history)
 		if streamErr != nil {
 			return nil, streamErr
 		}
 
-		messages, collectErr := collectStreamMessages(stream)
+		// 收集流内容以判断是否有 tool calls
+		collected, collectErr := collectStream(stream)
 		if collectErr != nil {
 			return nil, collectErr
 		}
 
-		last := lastNonEmptyMessage(messages)
+		last := lastNonEmptyMsg(collected)
 		if len(last.ToolCalls) == 0 {
 			if cfg.ToolCallPolicy.Mode == TOOL_REQUIRED_ONE {
-				feedback = append(feedback, model.ChatMessage{Role: "system", Content: requiredOneFeedback(nil)})
+				history = append(history, &schema.Message{Role: schema.System, Content: requiredOneFeedback(nil)})
 				continue
 			}
 			if cfg.ToolCallPolicy.Mode == TOOL_REQUIRED_EXACT {
-				feedback = append(feedback, model.ChatMessage{Role: "system", Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
+				history = append(history, &schema.Message{Role: schema.System, Content: requiredExactFeedback(cfg.ToolCallPolicy.RequiredToolName)})
 				continue
 			}
-			return model.NewSliceMessageStream(messages), nil
+			// 返回收集到的消息作为流
+			return newSliceStream(collected), nil
 		}
 
 		return nil, errors.New("stream loop does not support tool calls; use RunToolCallLoop")
@@ -64,10 +73,11 @@ func RunToolCallLoopStream(ctx context.Context, m model.ToolCallingChatModel, to
 }
 
 // ConcatStreamContent 读取流中的所有片段并拼接 Content。
-func ConcatStreamContent(stream model.ChatMessageStream) (string, error) {
+func ConcatStreamContent(stream *schema.StreamReader[*schema.Message]) (string, error) {
 	if stream == nil {
 		return "", nil
 	}
+	defer stream.Close()
 	var b strings.Builder
 	for {
 		msg, err := stream.Recv()
@@ -82,8 +92,9 @@ func ConcatStreamContent(stream model.ChatMessageStream) (string, error) {
 	return b.String(), nil
 }
 
-func collectStreamMessages(stream model.ChatMessageStream) ([]model.ChatMessage, error) {
-	messages := make([]model.ChatMessage, 0, 8)
+func collectStream(stream *schema.StreamReader[*schema.Message]) ([]*schema.Message, error) {
+	defer stream.Close()
+	msgs := make([]*schema.Message, 0, 8)
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -92,19 +103,33 @@ func collectStreamMessages(stream model.ChatMessageStream) ([]model.ChatMessage,
 			}
 			return nil, err
 		}
-		messages = append(messages, msg)
+		msgs = append(msgs, msg)
 	}
-	if len(messages) == 0 {
-		messages = append(messages, model.ChatMessage{})
+	if len(msgs) == 0 {
+		msgs = append(msgs, &schema.Message{})
 	}
-	return messages, nil
+	return msgs, nil
 }
 
-func lastNonEmptyMessage(messages []model.ChatMessage) model.ChatMessage {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Content != "" || len(messages[i].ToolCalls) > 0 {
-			return messages[i]
+func lastNonEmptyMsg(msgs []*schema.Message) *schema.Message {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Content != "" || len(msgs[i].ToolCalls) > 0 {
+			return msgs[i]
 		}
 	}
-	return messages[len(messages)-1]
+	return msgs[len(msgs)-1]
+}
+
+// newSliceStream 将消息切片包装为 StreamReader。
+func newSliceStream(msgs []*schema.Message) *schema.StreamReader[*schema.Message] {
+	idx := 0
+	sr, sw := schema.Pipe[*schema.Message](len(msgs))
+	go func() {
+		defer sw.Close()
+		for idx < len(msgs) {
+			sw.Send(msgs[idx], nil)
+			idx++
+		}
+	}()
+	return sr
 }

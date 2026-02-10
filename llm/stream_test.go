@@ -2,80 +2,115 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 
-	"github.com/tsopia/go-kit/llm/model"
-	"github.com/tsopia/go-kit/llm/tool"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 )
 
 type fakeStreamModel struct {
-	fakeModel
-	streams [][]model.ChatMessage
-	streamI int
+	cfg       ModelConfig
+	streamMsg []*schema.Message
 }
 
-func (f *fakeStreamModel) WithTools(_ ...tool.InvokableTool) (model.ToolCallingChatModel, error) {
+func (f *fakeStreamModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	return f, nil
 }
-
-func (f *fakeStreamModel) GenerateStream(_ context.Context, _ []model.ChatMessage) (model.ChatMessageStream, error) {
-	if f.streamI >= len(f.streams) {
-		return nil, io.EOF
-	}
-	stream := model.NewSliceMessageStream(f.streams[f.streamI])
-	f.streamI++
-	return stream, nil
+func (f *fakeStreamModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return nil, ErrStreamNotSupported
 }
+func (f *fakeStreamModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return newSliceStream(f.streamMsg), nil
+}
+func (f *fakeStreamModel) BindTools(_ []*schema.ToolInfo) error { return nil }
+func (f *fakeStreamModel) GetModelConfig() ModelConfig          { return f.cfg }
 
 func TestConcatStreamContent(t *testing.T) {
-	stream := model.NewSliceMessageStream([]model.ChatMessage{{Content: "hello"}, {Content: " "}, {Content: "world"}})
-	got, err := ConcatStreamContent(stream)
+	msgs := []*schema.Message{
+		{Content: "Hello "},
+		{Content: "World"},
+		{Content: "!"},
+	}
+	stream := newSliceStream(msgs)
+	result, err := ConcatStreamContent(stream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "hello world" {
-		t.Fatalf("unexpected content: %q", got)
+	if result != "Hello World!" {
+		t.Fatalf("unexpected content: %q", result)
 	}
 }
 
-func TestRunToolCallLoopStream(t *testing.T) {
-	m := &fakeStreamModel{
-		fakeModel: fakeModel{cfg: ModelConfig{ToolCallPolicy: ToolCallPolicy{Mode: TOOL_OPTIONAL}}},
-		streams:   [][]model.ChatMessage{{{Content: "你好"}, {Content: "，世界"}}},
-	}
-
-	stream, err := RunToolCallLoopStream(context.Background(), m, nil, RunOptions{})
+func TestConcatStreamContentEmpty(t *testing.T) {
+	result, err := ConcatStreamContent(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := ConcatStreamContent(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "你好，世界" {
-		t.Fatalf("unexpected stream result: %q", got)
+	if result != "" {
+		t.Fatalf("expected empty, got: %q", result)
 	}
 }
 
-func TestRunToolCallLoopStreamWithToolCallReturnsError(t *testing.T) {
+func TestRunToolCallLoopStreamNoToolCall(t *testing.T) {
 	m := &fakeStreamModel{
-		fakeModel: fakeModel{cfg: ModelConfig{ToolCallPolicy: ToolCallPolicy{Mode: TOOL_OPTIONAL}}},
-		streams:   [][]model.ChatMessage{{{ToolCalls: []model.ToolCall{{Name: "sum", Arguments: json.RawMessage(`{"a":1}`)}}}}},
+		cfg: ModelConfig{ToolCallPolicy: ToolCallPolicy{Mode: TOOL_OPTIONAL}},
+		streamMsg: []*schema.Message{
+			{Content: "part 1 "},
+			{Content: "part 2"},
+		},
 	}
+	msgs := []*schema.Message{{Role: schema.User, Content: "test"}}
+	stream, err := RunToolCallLoopStream(context.Background(), m, msgs, nil, RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ConcatStreamContent(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "part 1 part 2" {
+		t.Fatalf("unexpected content: %q", result)
+	}
+}
 
-	_, err := RunToolCallLoopStream(context.Background(), m, nil, RunOptions{})
+func TestRunToolCallLoopStreamToolCallError(t *testing.T) {
+	m := &fakeStreamModel{
+		cfg: ModelConfig{ToolCallPolicy: ToolCallPolicy{Mode: TOOL_OPTIONAL}},
+		streamMsg: []*schema.Message{
+			{ToolCalls: []schema.ToolCall{{ID: "tc1", Function: schema.FunctionCall{Name: "foo", Arguments: `{}`}}}},
+		},
+	}
+	msgs := []*schema.Message{{Role: schema.User, Content: "test"}}
+	_, err := RunToolCallLoopStream(context.Background(), m, msgs, nil, RunOptions{})
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected error for tool call in stream")
 	}
 }
 
-func TestRunToolCallLoopStreamNeedsStreamingModel(t *testing.T) {
-	m := &fakeModel{cfg: ModelConfig{ToolCallPolicy: ToolCallPolicy{Mode: TOOL_OPTIONAL}}}
-	_, err := RunToolCallLoopStream(context.Background(), m, []tool.InvokableTool{}, RunOptions{})
-	if !errors.Is(err, ErrStreamNotSupported) {
-		t.Fatalf("expected ErrStreamNotSupported, got %v", err)
+func TestNewSliceStream(t *testing.T) {
+	msgs := []*schema.Message{{Content: "a"}, {Content: "b"}}
+	s := newSliceStream(msgs)
+	defer s.Close()
+
+	m1, err := s.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m1.Content != "a" {
+		t.Fatalf("unexpected: %q", m1.Content)
+	}
+
+	m2, err := s.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.Content != "b" {
+		t.Fatalf("unexpected: %q", m2.Content)
+	}
+
+	_, err = s.Recv()
+	if err != io.EOF {
+		t.Fatalf("expected EOF, got: %v", err)
 	}
 }
