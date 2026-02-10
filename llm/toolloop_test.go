@@ -191,7 +191,7 @@ func TestValidationFailureStructuredErrorThenCorrectedArgs(t *testing.T) {
 func TestReturnFinalAnswer(t *testing.T) {
 	m := &fakeModel{
 		cfg: ModelConfig{
-			ToolCallPolicy:   ToolCallPolicy{Mode: TOOL_REQUIRED_ONE},
+			ToolCallPolicy:   ToolCallPolicy{Mode: TOOL_OPTIONAL},
 			ToolResultPolicy: RETURN_FINAL_ANSWER,
 		},
 		responses: []*schema.Message{

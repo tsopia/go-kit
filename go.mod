@@ -5,6 +5,16 @@ go 1.24.0
 toolchain go1.24.5
 
 require (
+	github.com/cloudwego/eino v0.7.32
+	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
+	github.com/cloudwego/eino-ext/components/model/arkbot v0.1.2
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.15
+	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.2
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.28
+	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
+	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4
+	github.com/cloudwego/eino-ext/components/model/qwen v0.1.5
 	github.com/gin-gonic/gin v1.11.0
 	github.com/jackc/pgx/v5 v5.4.3
 	github.com/mattn/go-sqlite3 v1.14.17
@@ -47,16 +57,6 @@ require (
 	github.com/bytedance/sonic v1.14.1 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino v0.7.32 // indirect
-	github.com/cloudwego/eino-ext/components/model/ark v0.1.64 // indirect
-	github.com/cloudwego/eino-ext/components/model/arkbot v0.1.2 // indirect
-	github.com/cloudwego/eino-ext/components/model/claude v0.1.15 // indirect
-	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.2 // indirect
-	github.com/cloudwego/eino-ext/components/model/gemini v0.1.28 // indirect
-	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8 // indirect
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
-	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4 // indirect
-	github.com/cloudwego/eino-ext/components/model/qwen v0.1.5 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -105,7 +105,6 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
-	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
