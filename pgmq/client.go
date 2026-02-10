@@ -63,7 +63,7 @@ func NewQueueWithClient[T any](ctx context.Context, name string, c ...*Client) (
 		return nil, err
 	}
 	merged := append([]Option{}, client.opts...)
-	return NewQueue(ctx, client.db, name, merged...)
+	return NewQueue[T](ctx, client.db, name, merged...)
 }
 
 // SendMsg 发送消息
