@@ -2,7 +2,7 @@
 
 `llm` 包提供一个轻量的「工具调用（tool-calling）」运行封装，核心能力包括：
 
-- 基于协议的模型路由：`OPENAI_COMPAT` / `CLAUDE_COMPAT`
+- 基于协议的模型路由：`OPENAI_COMPAT` / `CLAUDE_COMPAT` / `ARK` / `DEEPSEEK` / `ARKBOT` / `CLAUDE` / `GEMINI` / `OLLAMA` / `OPENAI` / `QIANFAN` / `QWEN`
 - 工具调用循环状态机：可选调用、必须调用一个、必须调用指定工具
 - 工具参数校验与结构化错误反馈（`SCHEMA_VALIDATION_ERROR`）
 - 工具结果返回策略：仅工具结果 / 最终答案 / 两者都返回
@@ -29,10 +29,10 @@
 `ModelConfig` 关键字段：
 
 - 路由与基础连接：
-  - `Protocol`：`OPENAI_COMPAT` / `CLAUDE_COMPAT`
-  - `BaseURL`：可选
-  - `APIKey`：必填
+  - `Protocol`：`OPENAI_COMPAT` / `CLAUDE_COMPAT` / `ARK` / `DEEPSEEK` / `ARKBOT` / `CLAUDE` / `GEMINI` / `OLLAMA` / `OPENAI` / `QIANFAN` / `QWEN`
+  - `BaseURL`：仅在 `OPENAI_COMPAT` / `CLAUDE_COMPAT` 协议下作为兼容端点参数使用
   - `Model`：必填
+  - `APIKey`：除 `OLLAMA` 外建议必填
   - `Timeout`：可选
 - 采样参数（可选）：`MaxTokens`、`Temperature`、`TopP`、`Stop`
 - 工具策略：
@@ -108,8 +108,9 @@ _ = result
 
 ## Qwen / DeepSeek 与 BaseURL
 
-- 使用 `NewToolCallingModel` 且 `Protocol=OPENAI_COMPAT` 时：
-  - `Model` 以 `qwen` 开头：可不传 `BaseURL`（会自动补为 DashScope OpenAI 兼容地址）。
-  - `Model` 以 `deepseek` 开头：可不传 `BaseURL`（会自动补为 DeepSeek OpenAI 兼容地址）。
-  - 其他模型：建议显式传入对应服务商 `BaseURL`。
+- 若走 `QWEN`、`DEEPSEEK` 原生协议，通常不需要在本封装里额外配置 `BaseURL`。
+- 若走 `OPENAI_COMPAT`：
+  - `Model` 以 `qwen` 开头：可不传 `BaseURL`（自动补为 DashScope OpenAI 兼容地址）。
+  - `Model` 以 `deepseek` 开头：可不传 `BaseURL`（自动补为 DeepSeek OpenAI 兼容地址）。
+  - 其他模型：建议显式传入对应兼容端点。
 - 若你已经在外部（例如通过 eino-ext）构建好了 `ToolCallingChatModel`，可以直接把该模型传给 `RunToolCallLoop`，无需经过 `NewToolCallingModel`。

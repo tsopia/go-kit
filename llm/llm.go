@@ -17,6 +17,15 @@ type ModelProtocol string
 const (
 	OPENAI_COMPAT ModelProtocol = "OPENAI_COMPAT"
 	CLAUDE_COMPAT ModelProtocol = "CLAUDE_COMPAT"
+	ARK           ModelProtocol = "ARK"
+	DEEPSEEK      ModelProtocol = "DEEPSEEK"
+	ARKBOT        ModelProtocol = "ARKBOT"
+	CLAUDE        ModelProtocol = "CLAUDE"
+	GEMINI        ModelProtocol = "GEMINI"
+	OLLAMA        ModelProtocol = "OLLAMA"
+	OPENAI        ModelProtocol = "OPENAI"
+	QIANFAN       ModelProtocol = "QIANFAN"
+	QWEN          ModelProtocol = "QWEN"
 )
 
 type ToolResultPolicy string
@@ -87,17 +96,24 @@ type toolCallingModel struct {
 
 func NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
 	cfg = cfg.normalized()
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.Protocol != OLLAMA {
 		return nil, errors.New("api key is required")
 	}
 	if cfg.Model == "" {
 		return nil, errors.New("model is required")
 	}
-	switch cfg.Protocol {
-	case OPENAI_COMPAT, CLAUDE_COMPAT:
+	if isSupportedProtocol(cfg.Protocol) {
 		return &toolCallingModel{cfg: cfg}, nil
+	}
+	return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
+}
+
+func isSupportedProtocol(p ModelProtocol) bool {
+	switch p {
+	case OPENAI_COMPAT, CLAUDE_COMPAT, ARK, DEEPSEEK, ARKBOT, CLAUDE, GEMINI, OLLAMA, OPENAI, QIANFAN, QWEN:
+		return true
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
+		return false
 	}
 }
 

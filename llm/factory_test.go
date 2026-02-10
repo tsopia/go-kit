@@ -13,6 +13,19 @@ func TestNewToolCallingModelValidation(t *testing.T) {
 	}
 }
 
+func TestNewToolCallingModelSupportsEinoExtProtocols(t *testing.T) {
+	protocols := []ModelProtocol{ARK, DEEPSEEK, ARKBOT, CLAUDE, GEMINI, OLLAMA, OPENAI, QIANFAN, QWEN, OPENAI_COMPAT, CLAUDE_COMPAT}
+	for _, p := range protocols {
+		cfg := ModelConfig{Protocol: p, Model: "m", APIKey: "k"}
+		if p == OLLAMA {
+			cfg.APIKey = ""
+		}
+		if _, err := NewToolCallingModel(cfg); err != nil {
+			t.Fatalf("protocol %s should be supported, got err=%v", p, err)
+		}
+	}
+}
+
 func TestModelConfigNormalizedBaseURLForKnownOpenAICompatVendors(t *testing.T) {
 	qwenCfg := (ModelConfig{Protocol: OPENAI_COMPAT, Model: "qwen-plus"}).normalized()
 	if qwenCfg.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
@@ -27,5 +40,10 @@ func TestModelConfigNormalizedBaseURLForKnownOpenAICompatVendors(t *testing.T) {
 	genericCfg := (ModelConfig{Protocol: OPENAI_COMPAT, Model: "gpt-4o-mini"}).normalized()
 	if genericCfg.BaseURL != "" {
 		t.Fatalf("unexpected generic base url: %s", genericCfg.BaseURL)
+	}
+
+	qwenNativeCfg := (ModelConfig{Protocol: QWEN, Model: "qwen-plus"}).normalized()
+	if qwenNativeCfg.BaseURL != "" {
+		t.Fatalf("native qwen protocol should not infer base url, got %s", qwenNativeCfg.BaseURL)
 	}
 }
