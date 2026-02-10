@@ -23,6 +23,8 @@
 - `RunResult`
 - `NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error)`
 - `RunToolCallLoop(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (RunResult, error)`
+- `RunToolCallLoopStream(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (model.ChatMessageStream, error)`
+- `ConcatStreamContent(stream model.ChatMessageStream) (string, error)`
 
 ## 配置说明
 
@@ -69,6 +71,15 @@
    - 把工具结果喂回模型获取最终答案；或
    - 同时返回工具结果与最终答案。
 7. 超过重试上限时返回 `STOP_MAX_RETRIES`。
+
+## 流式交互
+
+当模型实现 `model.StreamableToolCallingChatModel` 时，可使用流式接口降低长响应场景中的超时风险：
+
+- `RunToolCallLoopStream`：启动流式交互并返回 `model.ChatMessageStream`
+- `ConcatStreamContent`：将流式片段自动拼接为一个字符串，避免业务侧重复写拼接逻辑
+
+> 注意：当前 `RunToolCallLoopStream` 聚焦「最终答案流式输出」场景；若模型返回 tool call，请继续使用 `RunToolCallLoop` 完成工具调用闭环。
 
 ## 扩展点
 
