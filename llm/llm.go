@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tsopia/go-kit/llm/model"
@@ -128,5 +129,20 @@ func (c ModelConfig) normalized() ModelConfig {
 	if c.ToolResultPolicy == "" {
 		c.ToolResultPolicy = RETURN_FINAL_ANSWER
 	}
+	if c.BaseURL == "" && c.Protocol == OPENAI_COMPAT {
+		c.BaseURL = defaultBaseURLForOpenAICompatModel(c.Model)
+	}
 	return c
+}
+
+func defaultBaseURLForOpenAICompatModel(modelName string) string {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case strings.HasPrefix(name, "qwen"):
+		return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	case strings.HasPrefix(name, "deepseek"):
+		return "https://api.deepseek.com"
+	default:
+		return ""
+	}
 }

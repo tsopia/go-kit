@@ -105,3 +105,11 @@ _ = result
 ## MCP 说明
 
 本包不管理 MCP client 生命周期。调用方应先初始化 MCP client，再将 MCP 转换后的工具传入 `RunToolCallLoop`。
+
+## Qwen / DeepSeek 与 BaseURL
+
+- 使用 `NewToolCallingModel` 且 `Protocol=OPENAI_COMPAT` 时：
+  - `Model` 以 `qwen` 开头：可不传 `BaseURL`（会自动补为 DashScope OpenAI 兼容地址）。
+  - `Model` 以 `deepseek` 开头：可不传 `BaseURL`（会自动补为 DeepSeek OpenAI 兼容地址）。
+  - 其他模型：建议显式传入对应服务商 `BaseURL`。
+- 若你已经在外部（例如通过 eino-ext）构建好了 `ToolCallingChatModel`，可以直接把该模型传给 `RunToolCallLoop`，无需经过 `NewToolCallingModel`。
