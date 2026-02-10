@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/tsopia/go-kit/llm/model"
@@ -96,6 +95,9 @@ type toolCallingModel struct {
 
 func NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
 	cfg = cfg.normalized()
+	if isCompatProtocol(cfg.Protocol) && cfg.BaseURL == "" {
+		return nil, errors.New("base url is required for compat protocol")
+	}
 	if cfg.APIKey == "" && cfg.Protocol != OLLAMA {
 		return nil, errors.New("api key is required")
 	}
@@ -106,6 +108,10 @@ func NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
 		return &toolCallingModel{cfg: cfg}, nil
 	}
 	return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
+}
+
+func isCompatProtocol(p ModelProtocol) bool {
+	return p == OPENAI_COMPAT || p == CLAUDE_COMPAT
 }
 
 func isSupportedProtocol(p ModelProtocol) bool {
@@ -145,20 +151,5 @@ func (c ModelConfig) normalized() ModelConfig {
 	if c.ToolResultPolicy == "" {
 		c.ToolResultPolicy = RETURN_FINAL_ANSWER
 	}
-	if c.BaseURL == "" && c.Protocol == OPENAI_COMPAT {
-		c.BaseURL = defaultBaseURLForOpenAICompatModel(c.Model)
-	}
 	return c
-}
-
-func defaultBaseURLForOpenAICompatModel(modelName string) string {
-	name := strings.ToLower(strings.TrimSpace(modelName))
-	switch {
-	case strings.HasPrefix(name, "qwen"):
-		return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	case strings.HasPrefix(name, "deepseek"):
-		return "https://api.deepseek.com"
-	default:
-		return ""
-	}
 }

@@ -109,8 +109,5 @@ _ = result
 ## Qwen / DeepSeek 与 BaseURL
 
 - 若走 `QWEN`、`DEEPSEEK` 原生协议，通常不需要在本封装里额外配置 `BaseURL`。
-- 若走 `OPENAI_COMPAT`：
-  - `Model` 以 `qwen` 开头：可不传 `BaseURL`（自动补为 DashScope OpenAI 兼容地址）。
-  - `Model` 以 `deepseek` 开头：可不传 `BaseURL`（自动补为 DeepSeek OpenAI 兼容地址）。
-  - 其他模型：建议显式传入对应兼容端点。
+- 若走 `OPENAI_COMPAT` 或 `CLAUDE_COMPAT`：必须显式提供 `BaseURL`。
 - 若你已经在外部（例如通过 eino-ext）构建好了 `ToolCallingChatModel`，可以直接把该模型传给 `RunToolCallLoop`，无需经过 `NewToolCallingModel`。
