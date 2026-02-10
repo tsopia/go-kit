@@ -95,32 +95,81 @@ type toolCallingModel struct {
 
 func NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
 	cfg = cfg.normalized()
+
+	if cfg.Model == "" {
+		return nil, errors.New("model is required")
+	}
 	if isCompatProtocol(cfg.Protocol) && cfg.BaseURL == "" {
 		return nil, errors.New("base url is required for compat protocol")
 	}
 	if cfg.APIKey == "" && cfg.Protocol != OLLAMA {
 		return nil, errors.New("api key is required")
 	}
-	if cfg.Model == "" {
-		return nil, errors.New("model is required")
+
+	switch cfg.Protocol {
+	case OPENAI_COMPAT:
+		return newOpenAICompatModel(cfg)
+	case CLAUDE_COMPAT:
+		return newClaudeCompatModel(cfg)
+	case ARK:
+		return newARKModel(cfg)
+	case DEEPSEEK:
+		return newDeepSeekModel(cfg)
+	case ARKBOT:
+		return newARKBotModel(cfg)
+	case CLAUDE:
+		return newClaudeModel(cfg)
+	case GEMINI:
+		return newGeminiModel(cfg)
+	case OLLAMA:
+		return newOllamaModel(cfg)
+	case OPENAI:
+		return newOpenAIModel(cfg)
+	case QIANFAN:
+		return newQianfanModel(cfg)
+	case QWEN:
+		return newQwenModel(cfg)
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
 	}
-	if isSupportedProtocol(cfg.Protocol) {
-		return &toolCallingModel{cfg: cfg}, nil
-	}
-	return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
+}
+
+func newOpenAICompatModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newClaudeCompatModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newARKModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newDeepSeekModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newARKBotModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newClaudeModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newGeminiModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newOllamaModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newOpenAIModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newQianfanModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
+}
+func newQwenModel(cfg ModelConfig) (model.ToolCallingChatModel, error) {
+	return &toolCallingModel{cfg: cfg}, nil
 }
 
 func isCompatProtocol(p ModelProtocol) bool {
 	return p == OPENAI_COMPAT || p == CLAUDE_COMPAT
-}
-
-func isSupportedProtocol(p ModelProtocol) bool {
-	switch p {
-	case OPENAI_COMPAT, CLAUDE_COMPAT, ARK, DEEPSEEK, ARKBOT, CLAUDE, GEMINI, OLLAMA, OPENAI, QIANFAN, QWEN:
-		return true
-	default:
-		return false
-	}
 }
 
 func (m *toolCallingModel) WithTools(ts ...tool.InvokableTool) (model.ToolCallingChatModel, error) {

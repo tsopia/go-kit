@@ -111,3 +111,8 @@ _ = result
 - 若走 `QWEN`、`DEEPSEEK` 原生协议，通常不需要在本封装里额外配置 `BaseURL`。
 - 若走 `OPENAI_COMPAT` 或 `CLAUDE_COMPAT`：必须显式提供 `BaseURL`。
 - 若你已经在外部（例如通过 eino-ext）构建好了 `ToolCallingChatModel`，可以直接把该模型传给 `RunToolCallLoop`，无需经过 `NewToolCallingModel`。
+
+## 与 eino-ext 的关系
+
+- `NewToolCallingModel` 已按 `Protocol` 做路由选择（`OPENAI_COMPAT`、`CLAUDE_COMPAT`、`ARK`、`DEEPSEEK`、`ARKBOT`、`CLAUDE`、`GEMINI`、`OLLAMA`、`OPENAI`、`QIANFAN`、`QWEN`）。
+- 你也可以在业务侧直接创建 eino-ext 模型实例，并把该实例直接传给 `RunToolCallLoop`，从而复用官方 client。
