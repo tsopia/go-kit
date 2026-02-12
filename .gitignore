@@ -47,7 +47,7 @@ config.prod.yaml
 .env
 .env.local
 .env.production
-
+.envrc
 # 临时文件
 tmp/
 temp/
