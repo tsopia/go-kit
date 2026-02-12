@@ -1,129 +1,135 @@
-# llm
+# llm — Eino LLM 高级封装库
 
-`llm` 包提供一个轻量的「工具调用（tool-calling）」运行封装，核心能力包括：
+基于 [Eino](https://github.com/cloudwego/eino) 框架的生产级 LLM 工具调用与 Agent 封装库。本 README 旨在为 AI 编程助手提供完整的上下文索引。
 
-- 基于协议的模型路由：`OPENAI_COMPAT` / `CLAUDE_COMPAT` / `ARK` / `DEEPSEEK` / `ARKBOT` / `CLAUDE` / `GEMINI` / `OLLAMA` / `OPENAI` / `QIANFAN` / `QWEN`
-- 工具调用循环状态机：可选调用、必须调用一个、必须调用指定工具
-- 工具参数校验与结构化错误反馈（`SCHEMA_VALIDATION_ERROR`）
-- 工具结果返回策略：仅工具结果 / 最终答案 / 两者都返回
+## 🌟 核心特性
 
-> 说明：当前实现将模型与工具抽象为接口，便于单测与后续替换真实后端。
+- **多协议统一路由**：一键切换 OpenAI / Claude / DeepSeek / Gemini / Ollama / Moonshot(Kimi) 等模型协议。
+- **React Agent 增强**：内置工具调用循环、自动重试、死循环检测。
+- **StructTool**：基于 Go 结构体标签（tag）自动生成 JSON Schema，支持嵌套结构、枚举值。
+- **可观测性**：开箱即用的 Langfuse 和 Slog 集成。
+- **运行时动态控制**：支持请求级别的模型替换、工具替换、参数调整。
+- **流式完整支持**：从推理到工具调用再到最终回答的全链路流式。
 
-## 公开 API
+## 🚀 快速开始
 
-主要类型与函数：
-
-- `ModelProtocol`
-- `ToolResultPolicy`
-- `ToolCallMode`
-- `ToolCallPolicy`
-- `ModelConfig`
-- `RunOptions`
-- `StopReason`
-- `RunResult`
-- `NewToolCallingModel(cfg ModelConfig) (model.ToolCallingChatModel, error)`
-- `RunToolCallLoop(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (RunResult, error)`
-- `RunToolCallLoopStream(ctx context.Context, m model.ToolCallingChatModel, tools []tool.InvokableTool, opts RunOptions) (model.ChatMessageStream, error)`
-- `ConcatStreamContent(stream model.ChatMessageStream) (string, error)`
-
-## 配置说明
-
-`ModelConfig` 关键字段：
-
-- 路由与基础连接：
-  - `Protocol`：`OPENAI_COMPAT` / `CLAUDE_COMPAT` / `ARK` / `DEEPSEEK` / `ARKBOT` / `CLAUDE` / `GEMINI` / `OLLAMA` / `OPENAI` / `QIANFAN` / `QWEN`
-  - `BaseURL`：仅在 `OPENAI_COMPAT` / `CLAUDE_COMPAT` 协议下作为兼容端点参数使用
-  - `Model`：必填
-  - `APIKey`：除 `OLLAMA` 外建议必填
-  - `Timeout`：可选
-- 采样参数（可选）：`MaxTokens`、`Temperature`、`TopP`、`Stop`
-- 工具策略：
-  - `ToolCallPolicy.Mode`：
-    - `TOOL_OPTIONAL`
-    - `TOOL_REQUIRED_ONE`
-    - `TOOL_REQUIRED_EXACT`
-  - `ToolCallPolicy.AllowedTools`：允许调用工具白名单
-  - `ToolCallPolicy.RequiredToolName`：`TOOL_REQUIRED_EXACT` 时要求调用的工具名
-  - `ToolResultPolicy`：
-    - `RETURN_TOOL_RESULT`
-    - `RETURN_FINAL_ANSWER`
-    - `RETURN_BOTH`
-
-默认值：
-
-- `ToolCallPolicy.Mode` 默认 `TOOL_OPTIONAL`
-- `ToolResultPolicy` 默认 `RETURN_FINAL_ANSWER`
-- `RunOptions.MaxRetries` 默认 `3`
-
-## 运行流程
-
-`RunToolCallLoop` 执行流程：
-
-1. 通过 `m.WithTools(tools...)` 绑定工具。
-2. 根据 `AllowedTools` 计算可调用工具集合。
-3. 根据 `ToolCallMode` 驱动循环：
-   - 模型不调用工具时，按模式决定直接返回或反馈后重试。
-   - 模型调用不允许工具时，反馈后重试。
-4. 调用工具前进行参数校验（required/type/strict unknown-field）。
-5. 校验失败时，将结构化错误对象回传模型继续重试。
-6. 工具执行成功后按 `ToolResultPolicy` 决定：
-   - 直接返回工具结果；或
-   - 把工具结果喂回模型获取最终答案；或
-   - 同时返回工具结果与最终答案。
-7. 超过重试上限时返回 `STOP_MAX_RETRIES`。
-
-## 流式交互
-
-当模型实现 `model.StreamableToolCallingChatModel` 时，可使用流式接口降低长响应场景中的超时风险：
-
-- `RunToolCallLoopStream`：启动流式交互并返回 `model.ChatMessageStream`
-- `ConcatStreamContent`：将流式片段自动拼接为一个字符串，避免业务侧重复写拼接逻辑
-
-> 注意：当前 `RunToolCallLoopStream` 聚焦「最终答案流式输出」场景；若模型返回 tool call，请继续使用 `RunToolCallLoop` 完成工具调用闭环。
-
-## 扩展点
-
-- 模型扩展：实现 `model.ToolCallingChatModel` 接口。
-- 工具扩展：实现 `tool.InvokableTool` 接口。
-- 校验扩展：当前为轻量校验，可替换为完整 JSON Schema 校验器。
-
-## 最小示例
+### 1. 初始化模型配置
 
 ```go
 cfg := llm.ModelConfig{
-    Protocol: llm.OPENAI_COMPAT,
-    APIKey:   "<api-key>",
-    Model:    "gpt-4o-mini",
-    ToolCallPolicy: llm.ToolCallPolicy{
-        Mode: llm.TOOL_REQUIRED_ONE,
-    },
-    ToolResultPolicy: llm.RETURN_TOOL_RESULT,
+    Protocol: llm.OPENAI, // 或 llm.CLAUDE, llm.OLLAMA ...
+    BaseURL:  "https://api.openai.com/v1", // 可选
+    APIKey:   "sk-xxx",
+    Model:    "gpt-4o",
 }
-
-m, err := llm.NewToolCallingModel(cfg)
-if err != nil {
-    // handle
-}
-
-result, err := llm.RunToolCallLoop(ctx, m, tools, llm.RunOptions{MaxRetries: 3})
-if err != nil {
-    // handle
-}
-
-_ = result
 ```
 
-## MCP 说明
+### 2. 定义工具 (推荐 StructTool)
 
-本包不管理 MCP client 生命周期。调用方应先初始化 MCP client，再将 MCP 转换后的工具传入 `RunToolCallLoop`。
+使用 `struct` 定义参数，自动生成 Schema：
 
-## Qwen / DeepSeek 与 BaseURL
+```go
+type WeatherArgs struct {
+    City string `json:"city" desc:"查询城市" required:"true"`
+    Unit string `json:"unit" desc:"温度单位" enum:"celsius,fahrenheit"`
+}
 
-- 若走 `QWEN`、`DEEPSEEK` 原生协议，通常不需要在本封装里额外配置 `BaseURL`。
-- 若走 `OPENAI_COMPAT` 或 `CLAUDE_COMPAT`：必须显式提供 `BaseURL`。
-- 若你已经在外部（例如通过 eino-ext）构建好了 `ToolCallingChatModel`，可以直接把该模型传给 `RunToolCallLoop`，无需经过 `NewToolCallingModel`。
+// 创建工具
+weatherTool := llm.NewStructTool("get_weather", "查询天气", func(ctx context.Context, args *WeatherArgs) (string, error) {
+    return fmt.Sprintf("%s 的天气是 晴, 25%s", args.City, args.Unit), nil
+})
+```
 
-## 与 eino-ext 的关系
+### 3. 创建 Agent 并运行
 
-- `NewToolCallingModel` 已按 `Protocol` 做路由选择（`OPENAI_COMPAT`、`CLAUDE_COMPAT`、`ARK`、`DEEPSEEK`、`ARKBOT`、`CLAUDE`、`GEMINI`、`OLLAMA`、`OPENAI`、`QIANFAN`、`QWEN`）。
-- 你也可以在业务侧直接创建 eino-ext 模型实例，并把该实例直接传给 `RunToolCallLoop`，从而复用官方 client。
+```go
+agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+    ModelConfig:    cfg,
+    InvokableTools: []llm.InvokableTool{weatherTool}, // 自动适配
+    SystemPrompt:   "你是一个有用的助手。",
+})
+
+// 运行 (Generate)
+msg, _ := agent.Generate(ctx, []*schema.Message{
+    schema.UserMessage("海淀区天气如何？"),
+})
+fmt.Println(msg.Content)
+```
+
+## 🛠 高级功能
+
+### 1. 可观测性 (Observability)
+
+支持 Langfuse 链路追踪和标准日志记录。
+
+```go
+// 初始化 Langfuse
+lfHandler, flush, _ := llm.NewLangfuseHandler(&llm.LangfuseConfig{...})
+defer flush()
+
+// 初始化日志 (slog)
+logHandler := llm.NewLogHandler(slog.Default())
+
+// 注入 Agent
+agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+    // ...
+    Callbacks: []callbacks.Handler{lfHandler, logHandler},
+})
+```
+
+### 2. 强制工具调用与重试 (ToolChoice & Retry)
+
+```go
+forced := schema.ToolChoiceForced
+agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+    // ...
+    ToolChoice: &forced, // 强制模型必须调用工具
+    MaxRetries: 3,       // 如果工具报错，自动重试 3 次
+})
+```
+
+### 3. 工具结果直接返回 (Direct Return)
+
+某些场景下（如搜索），工具执行后不需要模型再通过 LLM 总结，直接返回工具结果可节省 Token：
+
+```go
+agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+    // ...
+    ToolReturnDirectly: map[string]struct{}{
+        "search_tool": {}, // 执行完 search_tool 后立即结束对话并返回结果
+    },
+})
+```
+
+### 4. 运行时动态控制 (Runtime Options)
+
+在 `Generate` 或 `Stream` 时动态修改行为，不影响 Agent 实例。
+
+```go
+import "github.com/cloudwego/eino/flow/agent"
+
+// 场景 A: 临时更换模型 (例如降级到 3.5)
+agent.Generate(ctx, input, agent.WithChatModel(gpt35Model))
+
+// 场景 B: 调整温度
+agent.Generate(ctx, input, agent.WithChatModelOptions(model.WithTemperature(0.1)))
+
+// 场景 C: 获取中间状态 (Result Event Stream)
+logOpt, future := agent.WithMessageFuture()
+go func() {
+    defer future.Close()
+    stream, _ := future.GetMessageStreams()
+    for { msg, _ := stream.Recv(); fmt.Println("中间状态:", msg) }
+}()
+agent.Generate(ctx, input, logOpt)
+```
+
+## 📦 架构说明
+
+`llm` 包是对 CloudWeGo Eino 框架的 Opinionated 封装：
+
+- **Model**: 实现了 `eino/components/model` 接口。
+- **Agent**: 封装了 `eino/flow/agent/react`。
+- **Tool**: 提供了 `StructTool` 到 `eino/components/tool` 的适配器。
+
+如需更复杂的编排（如多 Agent 协作），可使用 `agent.ExportGraph()` 导出底层 Graph 节点，嵌入到 Eino 的 Graph 中。
