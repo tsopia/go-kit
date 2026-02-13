@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/tsopia/go-kit/httpserver"
-	"github.com/tsopia/go-kit/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -55,14 +54,10 @@ type RouteRegistrar interface {
 // 实现各个服务
 
 // userServiceImpl 用户服务实现
-type userServiceImpl struct {
-	logger *logger.Logger
-}
+type userServiceImpl struct{}
 
 func NewUserService() UserService {
-	return &userServiceImpl{
-		logger: logger.New(),
-	}
+	return &userServiceImpl{}
 }
 
 func (s *userServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
@@ -77,9 +72,7 @@ func (s *userServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
 }
 
 func (s *userServiceImpl) ListUsers(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
-	log.Info("获取用户列表")
+	log.Println("获取用户列表")
 
 	users := []gin.H{
 		{"id": 1, "name": "张三", "email": "zhangsan@example.com", "role": "admin"},
@@ -155,14 +148,10 @@ func (s *userServiceImpl) DeleteUser(c *gin.Context) {
 }
 
 // productServiceImpl 产品服务实现
-type productServiceImpl struct {
-	logger *logger.Logger
-}
+type productServiceImpl struct{}
 
 func NewProductService() ProductService {
-	return &productServiceImpl{
-		logger: logger.New(),
-	}
+	return &productServiceImpl{}
 }
 
 func (s *productServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
@@ -177,9 +166,7 @@ func (s *productServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
 }
 
 func (s *productServiceImpl) ListProducts(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
-	log.Info("获取产品列表")
+	log.Println("获取产品列表")
 
 	products := []gin.H{
 		{"id": 1, "name": "iPhone 15", "price": 999.99, "category": "手机"},
@@ -251,14 +238,10 @@ func (s *productServiceImpl) DeleteProduct(c *gin.Context) {
 }
 
 // orderServiceImpl 订单服务实现
-type orderServiceImpl struct {
-	logger *logger.Logger
-}
+type orderServiceImpl struct{}
 
 func NewOrderService() OrderService {
-	return &orderServiceImpl{
-		logger: logger.New(),
-	}
+	return &orderServiceImpl{}
 }
 
 func (s *orderServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
@@ -326,14 +309,10 @@ func (s *orderServiceImpl) CancelOrder(c *gin.Context) {
 }
 
 // authServiceImpl 认证服务实现
-type authServiceImpl struct {
-	logger *logger.Logger
-}
+type authServiceImpl struct{}
 
 func NewAuthService() AuthService {
-	return &authServiceImpl{
-		logger: logger.New(),
-	}
+	return &authServiceImpl{}
 }
 
 func (s *authServiceImpl) RegisterRoutes(group *gin.RouterGroup) {
@@ -418,7 +397,6 @@ func (r *ServiceRegistry) RegisterAllRoutes(group *gin.RouterGroup) {
 func main() {
 	log.Println("=== 模块化服务架构演示 ===")
 	log.Println("每个服务实现自己的接口，统一注册到路由组")
-
 
 	// 3. 创建HTTP服务器
 	server := httpserver.NewServer(&httpserver.Config{

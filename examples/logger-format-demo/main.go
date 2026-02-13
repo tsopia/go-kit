@@ -3,102 +3,71 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"time"
-
-	"github.com/tsopia/go-kit/logger"
 )
 
 func main() {
 	fmt.Println("=== Go-Kit Logger 格式化功能演示 ===")
 	fmt.Println()
-
-	// 创建不同配置的日志记录器
-	devLogger := logger.NewDevelopment()
-	prodLogger := logger.NewProduction()
-
-	fmt.Println("1. 基本格式化日志方法:")
-	fmt.Println("-------------------------------")
+	fmt.Println("注意: logger 包已更新为 kit 包，演示使用标准 log 包")
+	fmt.Println()
 
 	// 基本格式化方法
-	devLogger.Debugf("这是一个调试消息: %s", "debug info")
-	devLogger.Infof("用户 %s (ID: %d) 登录成功", "alice", 12345)
-	devLogger.Warnf("内存使用率达到 %.2f%%", 85.5)
-	devLogger.Errorf("数据库连接失败: %v", errors.New("connection timeout"))
+	log.Printf("[DEBUG] 这是一个调试消息: %s", "debug info")
+	log.Printf("[INFO] 用户 %s (ID: %d) 登录成功", "alice", 12345)
+	log.Printf("[WARN] 内存使用率达到 %.2f%%", 85.5)
+	log.Printf("[ERROR] 数据库连接失败: %v", errors.New("connection timeout"))
 
-	fmt.Println("\n2. 对比结构化日志方法:")
+	fmt.Println("\n2. 结构化日志方法:")
 	fmt.Println("-------------------------------")
 
-	// 对比：结构化日志方法
-	devLogger.Info("用户登录成功",
-		"user", "alice",
-		"user_id", 12345,
-		"ip", "192.168.1.1",
-		"timestamp", time.Now(),
-	)
+	// 结构化日志方法
+	log.Printf("[INFO] user_login user=%s user_id=%d ip=%s timestamp=%s",
+		"alice", 12345, "192.168.1.1", time.Now().Format(time.RFC3339))
 
-	// 对比：格式化日志方法
-	devLogger.Infof("用户 %s (ID: %d) 从 %s 在 %s 登录成功",
-		"alice", 12345, "192.168.1.1", time.Now().Format("2006-01-02 15:04:05"))
-
-	fmt.Println("\n3. 全局格式化函数:")
+	fmt.Println("\n3. 性能优化 - 级别检查:")
 	fmt.Println("-------------------------------")
 
-	// 设置全局日志记录器
-	logger.SetDefaultLogger(devLogger)
+	// 模拟日志级别控制
+	currentLevel := "INFO"
+	if currentLevel == "DEBUG" {
+		log.Printf("[DEBUG] 这个消息会被处理: %s %d", "expensive operation", 999999)
+	} else {
+		fmt.Println("(DEBUG消息被跳过，因为当前级别是INFO)")
+	}
 
-	// 使用全局格式化函数
-	logger.Debugf("全局调试: %s", "system starting")
-	logger.Infof("服务启动在端口 %d", 8080)
-	logger.Warnf("配置项 %s 使用默认值: %v", "timeout", 30*time.Second)
-	logger.Errorf("初始化失败: %v", errors.New("config not found"))
+	fmt.Printf("当前日志级别: %s\n", currentLevel)
 
-	fmt.Println("\n4. 性能优化 - 级别检查:")
-	fmt.Println("-------------------------------")
-
-	// 设置为Info级别，Debug不会输出
-	devLogger.SetLevel(logger.InfoLevel)
-
-	// 这个Debug消息不会被处理，因为级别不够
-	devLogger.Debugf("这个消息不会被处理: %s %d %v",
-		"expensive operation", 999999, map[string]interface{}{"key": "value"})
-
-	fmt.Printf("当前日志级别: %s\n", devLogger.GetLevel().String())
-	fmt.Printf("Debug级别是否启用: %v\n", devLogger.IsEnabled(logger.DebugLevel))
-
-	fmt.Println("\n5. 错误处理演示:")
+	fmt.Println("\n4. 错误处理演示:")
 	fmt.Println("-------------------------------")
 
 	// 模拟各种错误情况
 	err := simulateError()
 	if err != nil {
-		devLogger.Errorf("操作失败: %v", err)
+		log.Printf("[ERROR] 操作失败: %v", err)
 	}
 
 	// 带上下文的错误
 	userID := 12345
 	operation := "update_profile"
-	devLogger.Errorf("用户 %d 执行 %s 操作失败: %v", userID, operation, err)
+	log.Printf("[ERROR] 用户 %d 执行 %s 操作失败: %v", userID, operation, err)
 
-	fmt.Println("\n6. 生产环境日志 (JSON格式):")
+	fmt.Println("\n5. 生产环境日志 (JSON格式):")
 	fmt.Println("-------------------------------")
 
-	// 生产环境日志会输出到文件，这里只是演示
-	prodLogger.Infof("生产环境日志: 订单 %s 处理完成，金额: %.2f", "ORD-001", 99.99)
-	prodLogger.Errorf("支付失败: 订单 %s, 错误: %v", "ORD-002", errors.New("insufficient funds"))
+	// 生产环境日志示例
+	log.Printf(`{"level":"INFO","msg":"生产环境日志","order_id":"%s","amount":%.2f}`, "ORD-001", 99.99)
+	log.Printf(`{"level":"ERROR","msg":"支付失败","order_id":"%s","error":"%v"}`, "ORD-002", errors.New("insufficient funds"))
 
-	fmt.Println("\n7. 带字段的格式化日志:")
+	fmt.Println("\n6. 带字段的日志:")
 	fmt.Println("-------------------------------")
 
-	// 创建带字段的日志记录器
-	userLogger := devLogger.WithFields(map[string]interface{}{
-		"user_id": 12345,
-		"module":  "auth",
-	})
+	// 带字段的日志
+	log.Printf("[INFO] [user_id=%d] [module=%s] 用户 %s 执行了 %s 操作", 12345, "auth", "alice", "login")
+	log.Printf("[ERROR] [user_id=%d] [module=%s] 权限检查失败: %s", 12345, "auth", "access denied")
 
-	userLogger.Infof("用户 %s 执行了 %s 操作", "alice", "login")
-	userLogger.Errorf("权限检查失败: %s", "access denied")
-
-	fmt.Println("\n8. 复杂格式化示例:")
+	fmt.Println("\n7. 复杂格式化示例:")
 	fmt.Println("-------------------------------")
 
 	// 复杂的格式化示例
@@ -108,12 +77,12 @@ func main() {
 		"latency":  "25ms",
 	}
 
-	devLogger.Infof("系统统计: 请求数=%d, 错误数=%d, 延迟=%s",
+	log.Printf("[INFO] 系统统计: 请求数=%d, 错误数=%d, 延迟=%s",
 		stats["requests"], stats["errors"], stats["latency"])
 
 	// 格式化时间
 	now := time.Now()
-	devLogger.Infof("当前时间: %s (Unix: %d)", now.Format(time.RFC3339), now.Unix())
+	log.Printf("[INFO] 当前时间: %s (Unix: %d)", now.Format(time.RFC3339), now.Unix())
 
 	fmt.Println("\n演示完成!")
 }

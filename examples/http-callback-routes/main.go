@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tsopia/go-kit/httpserver"
-	"github.com/tsopia/go-kit/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -108,9 +107,7 @@ func main() {
 
 // 路由处理器实现
 func healthCheckHandler(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
-	log.Info("健康检查请求")
+	log.Println("健康检查请求")
 
 	c.JSON(200, gin.H{
 		"status":     "healthy",

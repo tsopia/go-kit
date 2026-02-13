@@ -7,16 +7,12 @@ import (
 	"time"
 
 	"github.com/tsopia/go-kit/httpserver"
-	"github.com/tsopia/go-kit/logger"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	fmt.Println("=== HTTP 服务器改进功能演示 ===")
-
-	// 创建日志记录器
-	loggerInstance := logger.New()
 
 	// 演示1：使用便利的路由注册方法
 	fmt.Println("1. 演示便利的路由注册方法")
@@ -59,7 +55,7 @@ func main() {
 
 	// 运行服务器并自动处理优雅关闭
 	if err := server.RunWithGracefulShutdown(); err != nil {
-		loggerInstance.Error("服务器运行出错", "error", err)
+		log.Printf("服务器运行出错: %v", err)
 	}
 
 	fmt.Println("程序退出")
@@ -123,10 +119,7 @@ func demonstrateAPIComparison() {
 
 // healthHandler 健康检查处理器
 func healthHandler(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
-
-	log.Info("处理健康检查请求")
+	log.Println("[INFO] 处理健康检查请求")
 
 	traceID := httpserver.GetTraceID(c)
 	requestID := httpserver.GetRequestID(c)
@@ -142,23 +135,23 @@ func healthHandler(c *gin.Context) {
 
 // createUserHandler 创建用户处理器
 func createUserHandler(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
+	traceID := httpserver.GetTraceID(c)
+	requestID := httpserver.GetRequestID(c)
 
 	var user struct {
 		Name  string `json:"name" binding:"required"`
 		Email string `json:"email" binding:"required,email"`
 	}
 
-	log.Info("开始创建用户")
+	log.Println("[INFO] 开始创建用户")
 
 	if err := c.ShouldBindJSON(&user); err != nil {
-		log.Error("用户参数验证失败", "error", err.Error())
+		log.Printf("[ERROR] 用户参数验证失败: %v", err)
 		c.JSON(400, gin.H{
 			"error":      "请求参数无效",
 			"details":    err.Error(),
-			"trace_id":   httpserver.GetTraceID(c),
-			"request_id": httpserver.GetRequestID(c),
+			"trace_id":   traceID,
+			"request_id": requestID,
 		})
 		return
 	}
@@ -170,23 +163,21 @@ func createUserHandler(c *gin.Context) {
 		"email": user.Email,
 	}
 
-	log.Info("用户创建成功", "user_id", 123, "user_name", user.Name)
+	log.Printf("[INFO] 用户创建成功 user_id=123 user_name=%s", user.Name)
 
 	c.JSON(201, gin.H{
 		"message":    "用户创建成功",
 		"user":       newUser,
-		"trace_id":   httpserver.GetTraceID(c),
-		"request_id": httpserver.GetRequestID(c),
+		"trace_id":   traceID,
+		"request_id": requestID,
 	})
 }
 
 // updateUserHandler 更新用户处理器
 func updateUserHandler(c *gin.Context) {
 	userID := c.Param("id")
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
 
-	log.Info("更新用户信息", "user_id", userID)
+	log.Printf("[INFO] 更新用户信息 user_id=%s", userID)
 
 	var updates struct {
 		Name  string `json:"name"`
@@ -194,7 +185,7 @@ func updateUserHandler(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&updates); err != nil {
-		log.Error("更新参数验证失败", "error", err.Error())
+		log.Printf("[ERROR] 更新参数验证失败: %v", err)
 		c.JSON(400, gin.H{"error": "请求参数无效", "details": err.Error()})
 		return
 	}
@@ -210,10 +201,8 @@ func updateUserHandler(c *gin.Context) {
 // deleteUserHandler 删除用户处理器
 func deleteUserHandler(c *gin.Context) {
 	userID := c.Param("id")
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
 
-	log.Info("删除用户", "user_id", userID)
+	log.Printf("[INFO] 删除用户 user_id=%s", userID)
 
 	c.JSON(200, gin.H{
 		"message":  "用户删除成功",
@@ -225,20 +214,18 @@ func deleteUserHandler(c *gin.Context) {
 // updateUserStatusHandler 更新用户状态处理器
 func updateUserStatusHandler(c *gin.Context) {
 	userID := c.Param("id")
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
 
 	var status struct {
 		Status string `json:"status" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&status); err != nil {
-		log.Error("状态参数验证失败", "error", err.Error())
+		log.Printf("[ERROR] 状态参数验证失败: %v", err)
 		c.JSON(400, gin.H{"error": "请求参数无效", "details": err.Error()})
 		return
 	}
 
-	log.Info("更新用户状态", "user_id", userID, "status", status.Status)
+	log.Printf("[INFO] 更新用户状态 user_id=%s status=%s", userID, status.Status)
 
 	c.JSON(200, gin.H{
 		"message":  "用户状态更新成功",
@@ -250,10 +237,7 @@ func updateUserStatusHandler(c *gin.Context) {
 
 // listUsersHandler 用户列表处理器
 func listUsersHandler(c *gin.Context) {
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
-
-	log.Info("获取用户列表")
+	log.Println("[INFO] 获取用户列表")
 
 	users := []gin.H{
 		{"id": 1, "name": "张三", "email": "zhangsan@example.com", "status": "active"},
@@ -271,10 +255,8 @@ func listUsersHandler(c *gin.Context) {
 // getUserHandler 获取单个用户处理器
 func getUserHandler(c *gin.Context) {
 	userID := c.Param("id")
-	ctx := httpserver.ContextFromGin(c)
-	log := logger.FromContext(ctx)
 
-	log.Info("获取用户详情", "user_id", userID)
+	log.Printf("[INFO] 获取用户详情 user_id=%s", userID)
 
 	// 模拟查找用户
 	user := gin.H{

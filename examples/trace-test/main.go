@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/tsopia/go-kit/constants"
-	"github.com/tsopia/go-kit/logger"
 )
 
 func main() {
@@ -14,10 +14,7 @@ func main() {
 	// 1. 创建一个基础的 context
 	ctx := context.Background()
 	fmt.Println("1. 基础 context，无追踪信息")
-
-	// 用基础 context 创建 logger
-	logger1 := logger.FromContext(ctx)
-	logger1.Info("这条日志没有追踪信息")
+	log.Println("这条日志没有追踪信息")
 
 	// 2. 添加 trace ID 和 request ID
 	traceID := constants.GenerateID()
@@ -30,12 +27,10 @@ func main() {
 	// 3. 将 IDs 添加到 context 中
 	ctx = constants.WithTraceAndRequestID(ctx, traceID, requestID)
 
-	// 用带有追踪信息的 context 创建 logger
-	logger2 := logger.FromContext(ctx)
+	// 4. 使用带有追踪信息的 context
 	fmt.Println("\n3. 带有追踪信息的日志输出:")
-	logger2.Info("这条日志包含 trace_id 和 request_id")
-	logger2.Warn("警告日志也会包含追踪信息", "action", "test")
-	logger2.Error("错误日志同样包含追踪信息", "error", "这只是测试")
+	log.Printf("[trace_id=%s] 这条日志包含 trace_id\n", constants.TraceIDFromContext(ctx))
+	log.Printf("[request_id=%s] 这条日志包含 request_id\n", constants.RequestIDFromContext(ctx))
 
 	// 4. 验证从 context 中提取 IDs
 	fmt.Println("\n4. 从 context 中提取 IDs:")
