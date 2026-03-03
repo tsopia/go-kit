@@ -52,22 +52,7 @@ func (l Level) String() string {
 // ParseLevel 从字符串解析日志级别
 // 输入字符串会转成大写后匹配，如 "info", "INFO", "Info" 都能正确解析
 func ParseLevel(s string) Level {
-	switch strings.ToUpper(s) {
-	case "DEBUG":
-		return DebugLevel
-	case "INFO":
-		return InfoLevel
-	case "WARN", "WARNING":
-		return WarnLevel
-	case "ERROR":
-		return ErrorLevel
-	case "FATAL":
-		return FatalLevel
-	case "PANIC":
-		return PanicLevel
-	default:
-		return InfoLevel
-	}
+	return parseLevelWithPolicy(s, false)
 }
 
 // slogLevel 转换为标准库 slog 的级别
@@ -245,9 +230,14 @@ type WebhookConfig struct {
 // 空字符串返回 InfoLevel（无警告）
 // 无效值打印警告到 stderr 并返回 InfoLevel
 func parseLevel(s string) Level {
+	return parseLevelWithPolicy(s, true)
+}
+
+func parseLevelWithPolicy(s string, warnInvalid bool) Level {
 	if s == "" {
 		return InfoLevel
 	}
+
 	switch strings.ToUpper(s) {
 	case "DEBUG":
 		return DebugLevel
@@ -262,7 +252,9 @@ func parseLevel(s string) Level {
 	case "PANIC":
 		return PanicLevel
 	default:
-		fmt.Fprintf(os.Stderr, "[kit] invalid log level %q, using default INFO\n", s)
+		if warnInvalid {
+			fmt.Fprintf(os.Stderr, "[kit] invalid log level %q, using default INFO\n", s)
+		}
 		return InfoLevel
 	}
 }
