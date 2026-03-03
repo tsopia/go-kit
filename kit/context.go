@@ -3,7 +3,7 @@ package kit
 import (
 	"context"
 
-	"github.com/tsopia/go-kit/constants"
+	"github.com/tsopia/go-kit/utils"
 )
 
 // contextExtractor 上下文信息提取器
@@ -26,14 +26,14 @@ func (e *contextExtractor) extract(ctx context.Context) map[string]string {
 	result := make(map[string]string)
 
 	// 提取 trace ID（优先使用 constants 包）
-	if traceID := constants.TraceIDFromContext(ctx); traceID != "" {
+	if traceID := utils.TraceIDFromContext(ctx); traceID != "" {
 		result["trace_id"] = traceID
 	} else if traceID := e.findValue(ctx, e.keys.Trace); traceID != "" {
 		result["trace_id"] = traceID
 	}
 
 	// 提取 request ID（优先使用 constants 包）
-	if requestID := constants.RequestIDFromContext(ctx); requestID != "" {
+	if requestID := utils.RequestIDFromContext(ctx); requestID != "" {
 		result["request_id"] = requestID
 	} else if requestID := e.findValue(ctx, e.keys.Request); requestID != "" {
 		result["request_id"] = requestID

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tsopia/go-kit/constants"
+	"github.com/tsopia/go-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -426,7 +426,7 @@ func TestTraceIDMiddleware(t *testing.T) {
 	}
 
 	// 检查响应头中是否有 Trace ID
-	traceIDHeader := w.Header().Get(constants.TraceIDHeader)
+	traceIDHeader := w.Header().Get(utils.TraceIDHeader)
 	if traceIDHeader == "" {
 		t.Error("Expected X-Trace-ID header to be set")
 	}
@@ -461,7 +461,7 @@ func TestTraceIDMiddlewareWithCustomID(t *testing.T) {
 	customTraceID := "custom-trace-12345"
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/test", nil)
-	req.Header.Set(constants.TraceIDHeader, customTraceID)
+	req.Header.Set(utils.TraceIDHeader, customTraceID)
 
 	engine.ServeHTTP(w, req)
 
@@ -470,7 +470,7 @@ func TestTraceIDMiddlewareWithCustomID(t *testing.T) {
 	}
 
 	// 检查响应头中的 Trace ID
-	traceIDHeader := w.Header().Get(constants.TraceIDHeader)
+	traceIDHeader := w.Header().Get(utils.TraceIDHeader)
 	if traceIDHeader != customTraceID {
 		t.Errorf("Expected X-Trace-ID header to be '%s', got '%s'", customTraceID, traceIDHeader)
 	}
@@ -507,7 +507,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 	}
 
 	// 检查响应头中是否有 Request ID
-	requestIDHeader := w.Header().Get(constants.RequestIDHeader)
+	requestIDHeader := w.Header().Get(utils.RequestIDHeader)
 	if requestIDHeader == "" {
 		t.Error("Expected X-Request-ID header to be set")
 	}
@@ -570,8 +570,8 @@ func TestContextFromGin(t *testing.T) {
 		ctx := ContextFromGin(c)
 
 		// 从 context 中提取 trace_id 和 request_id
-		traceID := constants.TraceIDFromContext(ctx)
-		requestID := constants.RequestIDFromContext(ctx)
+		traceID := utils.TraceIDFromContext(ctx)
+		requestID := utils.RequestIDFromContext(ctx)
 
 		// 也从 gin context 中获取进行对比
 		ginTraceID := GetTraceID(c)
