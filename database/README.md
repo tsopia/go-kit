@@ -160,6 +160,11 @@ defer sqlDB.Close()
 
 默认实现随 `database.New/NewWithOptions` 一起注入；若需要接入自定义拨号器或观测增强，可以通过 `WithConnector`、`WithExecutor`、`WithHealthChecker` 选项替换对应组件，无需修改业务代码。
 
+### 命名与兼容约定
+
+- `GetDB()` 与 `Raw()` 属于公开 API，保持向后兼容。
+- 内部私有辅助方法可重构或去重，但不应改变导出方法行为与线程安全语义。
+
 ### PostgreSQL 高级能力示例
 
 #### LISTEN/NOTIFY（类消息队列）

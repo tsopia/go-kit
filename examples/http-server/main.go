@@ -7,16 +7,12 @@ import (
 	"time"
 
 	"github.com/tsopia/go-kit/httpserver"
-	"github.com/tsopia/go-kit/logger"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	fmt.Println("=== 最小化封装的 HTTP 服务器示例 ===")
-
-	// 创建日志记录器
-	loggerInstance := logger.New()
 
 	// 示例1：使用默认配置
 	fmt.Println("1. 使用默认配置创建服务器")
@@ -109,15 +105,15 @@ func main() {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		loggerInstance.Error("服务器关闭失败", "error", err)
+		log.Printf("服务器关闭失败: %v", err)
 	}
 
 	if err := customServer.Shutdown(ctx); err != nil {
-		loggerInstance.Error("自定义服务器关闭失败", "error", err)
+		log.Printf("自定义服务器关闭失败: %v", err)
 	}
 
 	if err := minimalServer.Shutdown(ctx); err != nil {
-		loggerInstance.Error("极简服务器关闭失败", "error", err)
+		log.Printf("极简服务器关闭失败: %v", err)
 	}
 
 	fmt.Println("服务器已关闭")
@@ -125,17 +121,10 @@ func main() {
 
 // healthHandler 健康检查处理器
 func healthHandler(c *gin.Context) {
-	// 使用新的便利函数创建带有 trace_id 和 request_id 的 logger
-	ctx := httpserver.ContextFromGin(c)
-	logger := logger.FromContext(ctx)
-
-	// 日志会自动包含 trace_id 和 request_id
-	logger.Info("处理健康检查请求")
+	log.Println("[INFO] 处理健康检查请求")
 
 	traceID := httpserver.GetTraceID(c)
 	requestID := httpserver.GetRequestID(c)
-
-	logger.Info("健康检查完成", "status", "ok")
 
 	c.JSON(200, gin.H{
 		"status":     "ok",
@@ -147,16 +136,11 @@ func healthHandler(c *gin.Context) {
 
 // traceHandler 演示 Trace ID 的处理器
 func traceHandler(c *gin.Context) {
-	// 创建带有追踪信息的 logger
-	ctx := httpserver.ContextFromGin(c)
-	logger := logger.FromContext(ctx)
-
 	traceID := httpserver.GetTraceID(c)
 	requestID := httpserver.GetRequestID(c)
 
-	// 使用 logger 记录，会自动包含 trace_id 和 request_id
-	logger.Info("开始处理 Trace ID 演示请求")
-	logger.Debug("请求详情", "method", c.Request.Method, "path", c.Request.URL.Path)
+	log.Println("[INFO] 开始处理 Trace ID 演示请求")
+	log.Printf("[DEBUG] 请求详情 method=%s path=%s", c.Request.Method, c.Request.URL.Path)
 
 	c.JSON(200, gin.H{
 		"message":    "Trace ID 演示",
@@ -165,7 +149,7 @@ func traceHandler(c *gin.Context) {
 		"tip":        "查看日志输出，每条日志都包含了 trace_id 和 request_id",
 	})
 
-	logger.Info("Trace ID 演示请求处理完成")
+	log.Println("[INFO] Trace ID 演示请求处理完成")
 }
 
 // userHandler 用户处理器
@@ -173,7 +157,7 @@ func userHandler(c *gin.Context) {
 	userID := c.Param("id")
 	traceID := httpserver.GetTraceID(c)
 
-	log.Printf("获取用户信息 - UserID: %s, TraceID: %s", userID, traceID)
+	log.Printf("[INFO] 获取用户信息 - UserID: %s, TraceID: %s", userID, traceID)
 
 	c.JSON(200, gin.H{
 		"user_id":  userID,
@@ -192,7 +176,7 @@ func listUsersHandler(c *gin.Context) {
 		{"id": 3, "name": "王五", "email": "wangwu@example.com"},
 	}
 
-	log.Printf("获取用户列表 - TraceID: %s, Count: %d", traceID, len(users))
+	log.Printf("[INFO] 获取用户列表 - TraceID: %s, Count: %d", traceID, len(users))
 
 	c.JSON(200, gin.H{
 		"users":    users,
@@ -203,10 +187,6 @@ func listUsersHandler(c *gin.Context) {
 
 // createUserHandler 创建用户处理器
 func createUserHandler(c *gin.Context) {
-	// 创建带有追踪信息的 logger
-	ctx := httpserver.ContextFromGin(c)
-	logger := logger.FromContext(ctx)
-	
 	traceID := httpserver.GetTraceID(c)
 	requestID := httpserver.GetRequestID(c)
 
@@ -215,11 +195,10 @@ func createUserHandler(c *gin.Context) {
 		Email string `json:"email" binding:"required,email"`
 	}
 
-	logger.Info("开始创建用户", "remote_addr", c.ClientIP())
+	log.Printf("[INFO] 开始创建用户 remote_addr=%s", c.ClientIP())
 
 	if err := c.ShouldBindJSON(&user); err != nil {
-		// 错误日志也会自动包含 trace_id 和 request_id
-		logger.Error("用户参数验证失败", "error", err.Error())
+		log.Printf("[ERROR] 用户参数验证失败: %v", err)
 		c.JSON(400, gin.H{
 			"error":      "请求参数无效",
 			"details":    err.Error(),
@@ -236,7 +215,7 @@ func createUserHandler(c *gin.Context) {
 		"email": user.Email,
 	}
 
-	logger.Info("用户创建成功", "user_id", 999, "user_name", user.Name, "user_email", user.Email)
+	log.Printf("[INFO] 用户创建成功 user_id=%d user_name=%s user_email=%s", 999, user.Name, user.Email)
 
 	c.JSON(201, gin.H{
 		"message":    "用户创建成功",
@@ -258,7 +237,7 @@ func getUserHandler(c *gin.Context) {
 		"email": fmt.Sprintf("user%s@example.com", userID),
 	}
 
-	log.Printf("获取用户详情 - UserID: %s, TraceID: %s", userID, traceID)
+	log.Printf("[INFO] 获取用户详情 - UserID: %s, TraceID: %s", userID, traceID)
 
 	c.JSON(200, gin.H{
 		"user":     user,

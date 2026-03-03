@@ -336,6 +336,27 @@ func TestParseLevel(t *testing.T) {
 	}
 }
 
+func TestParseLevel_Public(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  Level
+	}{
+		{"debug", "debug", DebugLevel},
+		{"warning alias", "warning", WarnLevel},
+		{"empty string", "", InfoLevel},
+		{"invalid", "invalid", InfoLevel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseLevel(tt.input); got != tt.want {
+				t.Errorf("ParseLevel(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLevel_String(t *testing.T) {
 	tests := []struct {
 		level Level

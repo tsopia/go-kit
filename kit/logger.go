@@ -137,7 +137,7 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, attrs ...slog
 	}
 
 	// 记录日志
-	l.logger.LogAttrs(ctx, slogLevel(level), msg, allAttrs...)
+	l.logger.LogAttrs(ctx, level.slogLevel(), msg, allAttrs...)
 
 	// 触发 webhook
 	record := LogRecord{
@@ -172,22 +172,6 @@ func (l *Logger) enabled(level Level) bool {
 // currentLevel 获取当前日志级别
 func (l *Logger) currentLevel() Level {
 	return l.levelValue
-}
-
-// slogLevel 转换为 slog.Level
-func slogLevel(level Level) slog.Level {
-	switch level {
-	case DebugLevel:
-		return slog.LevelDebug
-	case InfoLevel:
-		return slog.LevelInfo
-	case WarnLevel:
-		return slog.LevelWarn
-	case ErrorLevel, FatalLevel, PanicLevel:
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }
 
 // parseFields 解析字段为 slog.Attr

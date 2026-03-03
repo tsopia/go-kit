@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -18,6 +19,12 @@ func newSQLiteDB(t *testing.T) *sql.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	return db
+}
+
+func resetDefaultClientForTest() {
+	clientMu.Lock()
+	_client = nil
+	clientMu.Unlock()
 }
 
 func TestNewQueueMissingDB(t *testing.T) {
@@ -98,5 +105,38 @@ func TestSendNegativeDelay(t *testing.T) {
 	_, err = queue.SendWithDelay(context.Background(), testPayload{ID: "1"}, -1)
 	if err != ErrInvalidDelay {
 		t.Fatalf("expected ErrInvalidDelay, got %v", err)
+	}
+}
+
+func TestSDKHelpersMissingClient(t *testing.T) {
+	resetDefaultClientForTest()
+	ctx := context.Background()
+
+	if _, err := SendMsg(ctx, "orders", testPayload{ID: "1"}); err != ErrMissingClient {
+		t.Fatalf("SendMsg expected ErrMissingClient, got %v", err)
+	}
+	if _, err := SendMsgWithDelay(ctx, "orders", testPayload{ID: "1"}, time.Second); err != ErrMissingClient {
+		t.Fatalf("SendMsgWithDelay expected ErrMissingClient, got %v", err)
+	}
+	if _, err := SendBatchMsg(ctx, "orders", []testPayload{{ID: "1"}}); err != ErrMissingClient {
+		t.Fatalf("SendBatchMsg expected ErrMissingClient, got %v", err)
+	}
+	if _, err := SendBatchMsgWithDelay(ctx, "orders", []testPayload{{ID: "1"}}, time.Second); err != ErrMissingClient {
+		t.Fatalf("SendBatchMsgWithDelay expected ErrMissingClient, got %v", err)
+	}
+	if _, err := ReadMsg[testPayload](ctx, "orders", ReadOptions{}); err != ErrMissingClient {
+		t.Fatalf("ReadMsg expected ErrMissingClient, got %v", err)
+	}
+	if _, err := PopMsg[testPayload](ctx, "orders"); err != ErrMissingClient {
+		t.Fatalf("PopMsg expected ErrMissingClient, got %v", err)
+	}
+	if err := ArchiveMsg(ctx, "orders", 1); err != ErrMissingClient {
+		t.Fatalf("ArchiveMsg expected ErrMissingClient, got %v", err)
+	}
+	if err := DeleteMsg(ctx, "orders", 1); err != ErrMissingClient {
+		t.Fatalf("DeleteMsg expected ErrMissingClient, got %v", err)
+	}
+	if _, err := SetVisibilityTimeoutMsg[testPayload](ctx, "orders", 1, time.Second); err != ErrMissingClient {
+		t.Fatalf("SetVisibilityTimeoutMsg expected ErrMissingClient, got %v", err)
 	}
 }

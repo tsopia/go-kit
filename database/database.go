@@ -65,10 +65,10 @@ func NewWithOptions(config *Config, opts ...Option) (*Database, error) {
 	database.db = db
 
 	if database.executor == nil {
-		database.executor = newGormExecutor(database.getDB, database.logger)
+		database.executor = newGormExecutor(database.GetDB, database.logger)
 	}
 	if database.healthChecker == nil {
-		database.healthChecker = newGormHealthChecker(database.getDB, database.GetDriver, database.Stats, database.hooks, database.logger)
+		database.healthChecker = newGormHealthChecker(database.GetDB, database.GetDriver, database.Stats, database.hooks, database.logger)
 	}
 
 	return database, nil
@@ -81,13 +81,9 @@ func (d *Database) GetDB() *gorm.DB {
 	return d.db
 }
 
-func (d *Database) getDB() *gorm.DB {
-	return d.GetDB()
-}
-
 // WithContext 返回带有Context的GORM实例
 func (d *Database) WithContext(ctx context.Context) *gorm.DB {
-	return d.getDB().WithContext(ctx)
+	return d.GetDB().WithContext(ctx)
 }
 
 // Exec 执行写操作
@@ -112,7 +108,7 @@ func (d *Database) BeginTx(ctx context.Context, opts ...*sql.TxOptions) (*gorm.D
 
 // Raw 提供受控的底层 *gorm.DB 访问。
 func (d *Database) Raw() *gorm.DB {
-	return d.getDB()
+	return d.GetDB()
 }
 
 // SQLDB 返回底层 *sql.DB。

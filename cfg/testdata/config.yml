@@ -1,0 +1,24 @@
+app:
+  name: test-app
+  version: 1.0.0
+  debug: true
+
+db:
+  host: localhost
+  port: 5432
+  username: postgres
+  password: secret
+  pool:
+    max_open: 10
+    max_idle: 5
+    max_lifetime: 1h
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  timeout: 30s
+
+features:
+  - auth
+  - logging
+  - metrics

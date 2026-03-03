@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tsopia/go-kit/config"
+	"github.com/tsopia/go-kit/cfg"
 )
 
 // AppConfig 定义应用程序配置结构
@@ -84,29 +84,35 @@ func main() {
 }
 
 func demonstrateDefaultConfig() {
-	var cfg AppConfig
-
-	// 使用默认配置文件路径
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.New()
 	if err != nil {
-		log.Printf("加载默认配置失败: %v", err)
+		log.Printf("创建 Provider 失败: %v", err)
 		return
 	}
 
-	printConfig("默认配置", &cfg)
+	var c AppConfig
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("解析配置失败: %v", err)
+		return
+	}
+
+	printConfig("默认配置", &c)
 }
 
 func demonstrateCustomConfigPath() {
-	var cfg AppConfig
-
-	// 使用自定义配置文件路径
-	err := config.LoadConfig(&cfg, "examples/config-demo/custom-config.yml")
+	provider, err := cfg.New("examples/config-demo/custom-config.yml")
 	if err != nil {
 		log.Printf("加载自定义配置失败: %v", err)
 		return
 	}
 
-	printConfig("自定义路径配置", &cfg)
+	var c AppConfig
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("解析配置失败: %v", err)
+		return
+	}
+
+	printConfig("自定义路径配置", &c)
 }
 
 func demonstrateEnvOverride() {
@@ -127,10 +133,15 @@ func demonstrateEnvOverride() {
 		os.Unsetenv("LOGGING_LEVEL")
 	}()
 
-	var cfg AppConfig
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.New()
 	if err != nil {
-		log.Printf("加载配置失败: %v", err)
+		log.Printf("创建 Provider 失败: %v", err)
+		return
+	}
+
+	var c AppConfig
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("解析配置失败: %v", err)
 		return
 	}
 
@@ -141,7 +152,7 @@ func demonstrateEnvOverride() {
 	fmt.Println("     LOGGING_LEVEL=debug")
 	fmt.Println()
 
-	printConfig("环境变量覆盖后的配置", &cfg)
+	printConfig("环境变量覆盖后的配置", &c)
 }
 
 func demonstrateAutoPrefix() {
@@ -161,10 +172,15 @@ func demonstrateAutoPrefix() {
 		os.Unsetenv("MYAPP_DATABASE_HOST")
 	}()
 
-	var cfg AppConfig
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.NewWithPrefix("MYAPP")
 	if err != nil {
-		log.Printf("加载配置失败: %v", err)
+		log.Printf("创建 Provider 失败: %v", err)
+		return
+	}
+
+	var c AppConfig
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("解析配置失败: %v", err)
 		return
 	}
 
@@ -175,7 +191,7 @@ func demonstrateAutoPrefix() {
 	fmt.Println("     MYAPP_DATABASE_HOST=prefix-db-host")
 	fmt.Println()
 
-	printConfig("自动前缀配置", &cfg)
+	printConfig("自动前缀配置", &c)
 }
 
 func demonstrateAppNamePriority() {
@@ -194,10 +210,15 @@ func demonstrateAppNamePriority() {
 		os.Unsetenv("PRIORITY_APP_PORT")
 	}()
 
-	var cfg AppConfig
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.NewWithPrefix("PRIORITY")
 	if err != nil {
-		log.Printf("加载配置失败: %v", err)
+		log.Printf("创建 Provider 失败: %v", err)
+		return
+	}
+
+	var c AppConfig
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("解析配置失败: %v", err)
 		return
 	}
 
@@ -207,31 +228,31 @@ func demonstrateAppNamePriority() {
 	fmt.Println("     结果: 环境变量优先级更高")
 	fmt.Println()
 
-	printConfig("优先级演示配置", &cfg)
+	printConfig("优先级演示配置", &c)
 }
 
-func printConfig(title string, cfg *AppConfig) {
+func printConfig(title string, c *AppConfig) {
 	fmt.Printf("📋 %s:\n", title)
 	fmt.Printf("  应用信息:\n")
-	fmt.Printf("    名称: %s\n", cfg.App.Name)
-	fmt.Printf("    版本: %s\n", cfg.App.Version)
-	fmt.Printf("    端口: %d\n", cfg.App.Port)
-	fmt.Printf("    环境: %s\n", cfg.App.Environment)
-	fmt.Printf("    调试模式: %t\n", cfg.App.Debug)
+	fmt.Printf("    名称: %s\n", c.App.Name)
+	fmt.Printf("    版本: %s\n", c.App.Version)
+	fmt.Printf("    端口: %d\n", c.App.Port)
+	fmt.Printf("    环境: %s\n", c.App.Environment)
+	fmt.Printf("    调试模式: %t\n", c.App.Debug)
 
 	fmt.Printf("  数据库配置:\n")
-	fmt.Printf("    主机: %s\n", cfg.Database.Host)
-	fmt.Printf("    端口: %d\n", cfg.Database.Port)
-	fmt.Printf("    用户名: %s\n", cfg.Database.Username)
-	fmt.Printf("    数据库名: %s\n", cfg.Database.DBName)
+	fmt.Printf("    主机: %s\n", c.Database.Host)
+	fmt.Printf("    端口: %d\n", c.Database.Port)
+	fmt.Printf("    用户名: %s\n", c.Database.Username)
+	fmt.Printf("    数据库名: %s\n", c.Database.DBName)
 
 	fmt.Printf("  Redis配置:\n")
-	fmt.Printf("    主机: %s\n", cfg.Redis.Host)
-	fmt.Printf("    端口: %d\n", cfg.Redis.Port)
-	fmt.Printf("    数据库: %d\n", cfg.Redis.DB)
+	fmt.Printf("    主机: %s\n", c.Redis.Host)
+	fmt.Printf("    端口: %d\n", c.Redis.Port)
+	fmt.Printf("    数据库: %d\n", c.Redis.DB)
 
 	fmt.Printf("  日志配置:\n")
-	fmt.Printf("    级别: %s\n", cfg.Logging.Level)
-	fmt.Printf("    格式: %s\n", cfg.Logging.Format)
-	fmt.Printf("    输出: %s\n", cfg.Logging.Output)
+	fmt.Printf("    级别: %s\n", c.Logging.Level)
+	fmt.Printf("    格式: %s\n", c.Logging.Format)
+	fmt.Printf("    输出: %s\n", c.Logging.Output)
 }

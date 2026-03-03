@@ -192,8 +192,8 @@ func (c *Config) Validate() error {
 }
 
 // SetCustomLogger 允许在 Config 层设置 GORM 日志实现，便于与外部 logger 对齐。
-func (d *Config) SetCustomLogger(l SimpleLogger, level string) {
-	d.CustomLogger = NewGormLogger(l, level)
+func (c *Config) SetCustomLogger(l SimpleLogger, level string) {
+	c.CustomLogger = NewGormLogger(l, level)
 }
 
 // SafeString 返回安全的配置字符串（密码已脱敏）

@@ -1,3 +1,8 @@
+// Package config provides configuration management functionality.
+//
+// Deprecated: This package is deprecated. Use github.com/tsopia/go-kit/cfg instead.
+// The cfg package provides a cleaner API with better error handling and
+// a unified constructor design.
 package config
 
 import (

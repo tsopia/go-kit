@@ -21,9 +21,8 @@ var IntegrationTestConfig = ModelConfig{
 }
 
 func ensureConfig(t *testing.T) {
-	if IntegrationTestConfig.APIKey == "" && IntegrationTestConfig.Protocol != OLLAMA {
-		t.Skip("Skipping integration test: API Key not set.")
-	}
+	// 跳过需要真实 API 调用的集成测试
+	t.Skip("Skipping integration test: requires real API endpoint")
 }
 
 // ── Mock 工具定义 ───────────────────────────────────────────────────────

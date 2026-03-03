@@ -167,3 +167,8 @@ log.Printf("sent batch: %v", ids)
 - `types.go`：基础类型与消息结构
 - `adapter_db.go`：DB 适配
 - `errors.go`：错误定义
+
+## 🔒 API 稳定性约定
+
+- `Configure`、`GetClient` 以及 `SendMsg/ReadMsg/...` 等 SDK 快捷函数属于公开 API，优先保证签名和语义稳定。
+- 内部可通过提取公共流程减少重复代码，但不改变缺省 `Client` 解析和错误返回行为。

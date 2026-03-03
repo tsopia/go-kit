@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tsopia/go-kit/config"
+	"github.com/tsopia/go-kit/cfg"
 )
 
 // Config 应用配置结构（使用 mapstructure 标签）
@@ -68,17 +68,22 @@ func main() {
 }
 
 func demonstrateDefaultConfig() {
-	var cfg Config
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.New()
 	if err != nil {
-		log.Printf("  ❌ 加载默认配置失败: %v", err)
+		log.Printf("  ❌ 创建 Provider 失败: %v", err)
 		return
 	}
 
-	fmt.Printf("  ✅ 服务器配置: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("  ✅ 数据库配置: %s:%d (%s)\n", cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
-	fmt.Printf("  ✅ 数据库用户: %s\n", cfg.Database.Username)
-	fmt.Printf("  ✅ 调试模式: %v\n", cfg.Debug)
+	var c Config
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("  ❌ 解析配置失败: %v", err)
+		return
+	}
+
+	fmt.Printf("  ✅ 服务器配置: %s:%d\n", c.Server.Host, c.Server.Port)
+	fmt.Printf("  ✅ 数据库配置: %s:%d (%s)\n", c.Database.Host, c.Database.Port, c.Database.Name)
+	fmt.Printf("  ✅ 数据库用户: %s\n", c.Database.Username)
+	fmt.Printf("  ✅ 调试模式: %v\n", c.Debug)
 }
 
 func demonstrateEnvOverride() {
@@ -101,16 +106,21 @@ func demonstrateEnvOverride() {
 		os.Unsetenv("DATABASE_NAME")
 	}()
 
-	var cfg Config
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.New()
 	if err != nil {
-		log.Printf("  ❌ 加载配置失败: %v", err)
+		log.Printf("  ❌ 创建 Provider 失败: %v", err)
 		return
 	}
 
-	fmt.Printf("  ✅ 环境变量覆盖后 - 服务器: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("  ✅ 环境变量覆盖后 - 数据库名: %s\n", cfg.Database.Name)
-	fmt.Printf("  ✅ 环境变量覆盖后 - 调试模式: %v\n", cfg.Debug)
+	var c Config
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("  ❌ 解析配置失败: %v", err)
+		return
+	}
+
+	fmt.Printf("  ✅ 环境变量覆盖后 - 服务器: %s:%d\n", c.Server.Host, c.Server.Port)
+	fmt.Printf("  ✅ 环境变量覆盖后 - 数据库名: %s\n", c.Database.Name)
+	fmt.Printf("  ✅ 环境变量覆盖后 - 调试模式: %v\n", c.Debug)
 
 	fmt.Println("  📝 使用的环境变量:")
 	fmt.Println("     SERVER_HOST=env-override-host")
@@ -138,16 +148,21 @@ func demonstrateAutoPrefix() {
 		os.Unsetenv("MYAPP_DEBUG")
 	}()
 
-	var cfg Config
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.NewWithPrefix("MYAPP")
 	if err != nil {
-		log.Printf("  ❌ 加载配置失败: %v", err)
+		log.Printf("  ❌ 创建 Provider 失败: %v", err)
 		return
 	}
 
-	fmt.Printf("  ✅ 自动前缀模式 - 服务器: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("  ✅ 自动前缀模式 - 数据库主机: %s\n", cfg.Database.Host)
-	fmt.Printf("  ✅ 自动前缀模式 - 调试模式: %v\n", cfg.Debug)
+	var c Config
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("  ❌ 解析配置失败: %v", err)
+		return
+	}
+
+	fmt.Printf("  ✅ 自动前缀模式 - 服务器: %s:%d\n", c.Server.Host, c.Server.Port)
+	fmt.Printf("  ✅ 自动前缀模式 - 数据库主机: %s\n", c.Database.Host)
+	fmt.Printf("  ✅ 自动前缀模式 - 调试模式: %v\n", c.Debug)
 
 	fmt.Println("  📝 使用的环境变量:")
 	fmt.Println("     APP_NAME=myapp (启用MYAPP_前缀)")
@@ -161,16 +176,21 @@ func demonstrateCustomPath() {
 	// 尝试使用自定义配置文件路径
 	customPath := "examples/basic-config/config.yaml"
 
-	var cfg Config
-	err := config.LoadConfig(&cfg, customPath)
+	provider, err := cfg.New(customPath)
 	if err != nil {
 		log.Printf("  ❌ 加载自定义路径配置失败: %v", err)
 		fmt.Println("  💡 提示: 确保配置文件存在于指定路径")
 		return
 	}
 
-	fmt.Printf("  ✅ 自定义路径配置 - 服务器: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("  ✅ 自定义路径配置 - 数据库: %s\n", cfg.Database.Name)
+	var c Config
+	if err := provider.Unmarshal(&c); err != nil {
+		log.Printf("  ❌ 解析配置失败: %v", err)
+		return
+	}
+
+	fmt.Printf("  ✅ 自定义路径配置 - 服务器: %s:%d\n", c.Server.Host, c.Server.Port)
+	fmt.Printf("  ✅ 自定义路径配置 - 数据库: %s\n", c.Database.Name)
 	fmt.Printf("  ✅ 使用的配置文件: %s\n", customPath)
 }
 
@@ -200,11 +220,11 @@ func demonstrateBestPractices() {
 	fmt.Println("     • 支持 YAML (.yml, .yaml)")
 	fmt.Println("     • 支持 JSON (.json)")
 	fmt.Println("     • 支持 TOML (.toml)")
-	fmt.Println("     • 支持 HCL (.hcl)")
+	fmt.Println("     • 支持 .env 文件")
 	fmt.Println()
 
 	fmt.Println("  5️⃣ 错误处理:")
-	fmt.Println("     • 总是检查 LoadConfig 的返回错误")
+	fmt.Println("     • 总是检查 cfg.New() 的返回错误")
 	fmt.Println("     • 提供有意义的错误信息")
 	fmt.Println("     • 考虑配置验证逻辑")
 	fmt.Println()
@@ -217,23 +237,28 @@ func demonstrateBestPractices() {
 
 	// 展示一个完整的生产级示例
 	fmt.Println("\n  🏆 生产级配置加载示例:")
-	var cfg Config
-	err := config.LoadConfig(&cfg)
+	provider, err := cfg.New()
 	if err != nil {
 		fmt.Printf("     ❌ 配置加载失败: %v\n", err)
 		return
 	}
 
+	var c Config
+	if err := provider.Unmarshal(&c); err != nil {
+		fmt.Printf("     ❌ 解析配置失败: %v\n", err)
+		return
+	}
+
 	// 简单的配置验证
-	if cfg.Server.Host == "" {
+	if c.Server.Host == "" {
 		fmt.Println("     ⚠️  警告: 服务器主机未设置")
 	}
-	if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		fmt.Println("     ⚠️  警告: 服务器端口设置无效")
 	}
-	if cfg.Database.Name == "" {
+	if c.Database.Name == "" {
 		fmt.Println("     ⚠️  警告: 数据库名称未设置")
 	}
 
-	fmt.Printf("     ✅ 配置验证通过 - 服务器将在 %s:%d 启动\n", cfg.Server.Host, cfg.Server.Port)
+	fmt.Printf("     ✅ 配置验证通过 - 服务器将在 %s:%d 启动\n", c.Server.Host, c.Server.Port)
 }
