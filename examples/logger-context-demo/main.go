@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/tsopia/go-kit/constants"
+	"github.com/tsopia/go-kit/utils"
 )
 
 func main() {
@@ -42,11 +42,11 @@ func main() {
 	// 6. 带上下文的日志
 	fmt.Println("\n6. 带上下文的日志")
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, constants.TraceIDKey, "trace-12345")
-	ctx = context.WithValue(ctx, constants.RequestIDKey, "req-67890")
+	ctx = context.WithValue(ctx, utils.TraceIDKey, "trace-12345")
+	ctx = context.WithValue(ctx, utils.RequestIDKey, "req-67890")
 
-	traceID := constants.TraceIDFromContext(ctx)
-	requestID := constants.RequestIDFromContext(ctx)
+	traceID := utils.TraceIDFromContext(ctx)
+	requestID := utils.RequestIDFromContext(ctx)
 	log.Printf("[WARN] [trace_id=%s] [request_id=%s] 带上下文的日志", traceID, requestID)
 
 	// 7. 格式化日志

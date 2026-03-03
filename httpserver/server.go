@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tsopia/go-kit/constants"
+	"github.com/tsopia/go-kit/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,7 +23,7 @@ type Config struct {
 	IdleTimeout     time.Duration
 	MaxHeaderBytes  int
 	ShutdownTimeout time.Duration
-	
+
 	// 健康检查配置
 	EnableHealthCheck bool   // 是否启用健康检查
 	HealthCheckPath   string // 健康检查路径，默认为 /health
@@ -40,7 +40,7 @@ func DefaultConfig() *Config {
 		IdleTimeout:     60 * time.Second,
 		MaxHeaderBytes:  1 << 20, // 1MB
 		ShutdownTimeout: 10 * time.Second,
-		
+
 		// 健康检查默认配置
 		EnableHealthCheck: true,
 		HealthCheckPath:   "/health",
@@ -262,20 +262,20 @@ func (s *Server) IsRunning() bool {
 func TraceIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 检查请求头中是否已有 trace id
-		traceID := c.GetHeader(constants.TraceIDHeader)
+		traceID := c.GetHeader(utils.TraceIDHeader)
 		if traceID == "" {
 			// 生成新的 trace id
-			traceID = constants.GenerateID()
+			traceID = utils.GenerateID()
 		}
 
 		// 设置到响应头
-		c.Header(constants.TraceIDHeader, traceID)
+		c.Header(utils.TraceIDHeader, traceID)
 
 		// 设置到 gin context 和 request context 中
-		c.Set(constants.TraceIDKey, traceID)
+		c.Set(utils.TraceIDKey, traceID)
 
 		// 为了与 logger 包联动，也要设置到 request context 中
-		ctx := constants.WithTraceID(c.Request.Context(), traceID)
+		ctx := utils.WithTraceID(c.Request.Context(), traceID)
 		c.Request = c.Request.WithContext(ctx)
 
 		c.Next()
@@ -285,16 +285,16 @@ func TraceIDMiddleware() gin.HandlerFunc {
 // RequestIDMiddleware 添加 Request ID 的中间件（每个请求唯一）
 func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		requestID := constants.GenerateID()
+		requestID := utils.GenerateID()
 
 		// 设置到响应头
-		c.Header(constants.RequestIDHeader, requestID)
+		c.Header(utils.RequestIDHeader, requestID)
 
 		// 设置到 gin context 和 request context 中
-		c.Set(constants.RequestIDKey, requestID)
+		c.Set(utils.RequestIDKey, requestID)
 
 		// 为了与 logger 包联动，也要设置到 request context 中
-		ctx := constants.WithRequestID(c.Request.Context(), requestID)
+		ctx := utils.WithRequestID(c.Request.Context(), requestID)
 		c.Request = c.Request.WithContext(ctx)
 
 		c.Next()
@@ -306,8 +306,8 @@ func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", fmt.Sprintf("Content-Type, Authorization, %s, %s", constants.TraceIDHeader, constants.RequestIDHeader))
-		c.Header("Access-Control-Expose-Headers", fmt.Sprintf("%s, %s", constants.TraceIDHeader, constants.RequestIDHeader))
+		c.Header("Access-Control-Allow-Headers", fmt.Sprintf("Content-Type, Authorization, %s, %s", utils.TraceIDHeader, utils.RequestIDHeader))
+		c.Header("Access-Control-Expose-Headers", fmt.Sprintf("%s, %s", utils.TraceIDHeader, utils.RequestIDHeader))
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -320,7 +320,7 @@ func CORSMiddleware() gin.HandlerFunc {
 
 // GetTraceID 从 context 中获取 trace id
 func GetTraceID(c *gin.Context) string {
-	if traceID, exists := c.Get(constants.TraceIDKey); exists {
+	if traceID, exists := c.Get(utils.TraceIDKey); exists {
 		if id, ok := traceID.(string); ok {
 			return id
 		}
@@ -330,7 +330,7 @@ func GetTraceID(c *gin.Context) string {
 
 // GetRequestID 从 context 中获取 request id
 func GetRequestID(c *gin.Context) string {
-	if requestID, exists := c.Get(constants.RequestIDKey); exists {
+	if requestID, exists := c.Get(utils.RequestIDKey); exists {
 		if id, ok := requestID.(string); ok {
 			return id
 		}
@@ -353,12 +353,12 @@ func ContextFromGin(c *gin.Context) context.Context {
 
 // HealthStatus 健康检查状态
 type HealthStatus struct {
-	Status    string                 `json:"status"`              // healthy, unhealthy
-	Timestamp int64                  `json:"timestamp"`           // Unix时间戳
-	Version   string                 `json:"version,omitempty"`   // 应用版本
-	Uptime    int64                  `json:"uptime,omitempty"`    // 运行时间（秒）
-	Checks    map[string]interface{} `json:"checks,omitempty"`    // 详细检查结果
-	Error     string                 `json:"error,omitempty"`     // 错误信息
+	Status    string                 `json:"status"`            // healthy, unhealthy
+	Timestamp int64                  `json:"timestamp"`         // Unix时间戳
+	Version   string                 `json:"version,omitempty"` // 应用版本
+	Uptime    int64                  `json:"uptime,omitempty"`  // 运行时间（秒）
+	Checks    map[string]interface{} `json:"checks,omitempty"`  // 详细检查结果
+	Error     string                 `json:"error,omitempty"`   // 错误信息
 }
 
 // HealthChecker 健康检查器接口
@@ -369,7 +369,7 @@ type HealthChecker interface {
 
 // HealthCheckManager 健康检查管理器
 type HealthCheckManager struct {
-	checkers []HealthChecker
+	checkers  []HealthChecker
 	startTime time.Time
 	version   string
 }
@@ -523,22 +523,22 @@ func (hhc *HTTPHealthChecker) CheckHealth(ctx context.Context) error {
 	client := &http.Client{
 		Timeout: hhc.timeout,
 	}
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", hhc.url, nil)
 	if err != nil {
 		return err
 	}
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
-	
+
 	return fmt.Errorf("HTTP服务返回状态码: %d", resp.StatusCode)
 }
 
