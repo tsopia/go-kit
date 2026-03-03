@@ -83,3 +83,6 @@ examples/*/logs/
 *.bak
 *.backup
 .history
+
+# Git worktrees
+.worktrees/
