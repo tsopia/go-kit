@@ -230,6 +230,55 @@ func TestNewFromMap(t *testing.T) {
 	}
 }
 
+func TestMapProvider_Unmarshal(t *testing.T) {
+	data := map[string]any{
+		"app": map[string]any{
+			"name":  "test-app",
+			"debug": true,
+		},
+		"db": map[string]any{
+			"host": "localhost",
+			"port": 5432,
+		},
+	}
+	provider := NewFromMap(data)
+
+	type config struct {
+		App struct {
+			Name  string `mapstructure:"name"`
+			Debug bool   `mapstructure:"debug"`
+		} `mapstructure:"app"`
+		DB struct {
+			Host string `mapstructure:"host"`
+			Port int    `mapstructure:"port"`
+		} `mapstructure:"db"`
+	}
+
+	var cfg config
+	if err := provider.Unmarshal(&cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.App.Name != "test-app" {
+		t.Errorf("got %q, want %q", cfg.App.Name, "test-app")
+	}
+	if !cfg.App.Debug {
+		t.Errorf("got %v, want %v", cfg.App.Debug, true)
+	}
+	if cfg.DB.Host != "localhost" {
+		t.Errorf("got %q, want %q", cfg.DB.Host, "localhost")
+	}
+	if cfg.DB.Port != 5432 {
+		t.Errorf("got %d, want %d", cfg.DB.Port, 5432)
+	}
+}
+
+func TestMapProvider_UnmarshalNilTarget(t *testing.T) {
+	provider := NewFromMap(map[string]any{"app": map[string]any{"name": "test-app"}})
+	if err := provider.Unmarshal(nil); err == nil {
+		t.Fatal("expected error for nil target")
+	}
+}
+
 // TestEmptyProvider 测试空 Provider
 func TestEmptyProvider(t *testing.T) {
 	empty := EmptyProvider()

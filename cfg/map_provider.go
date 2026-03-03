@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/cast"
 )
 
@@ -449,7 +450,22 @@ func (p *mapProvider) Exists(key string) bool {
 
 // Unmarshal 将配置反序列化到目标结构体
 func (p *mapProvider) Unmarshal(dst any) error {
-	return fmt.Errorf("mapProvider.Unmarshal not fully implemented, use Get methods directly")
+	if dst == nil {
+		return fmt.Errorf("unmarshal config: destination cannot be nil")
+	}
+
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:           dst,
+		TagName:          "mapstructure",
+		WeaklyTypedInput: true,
+	})
+	if err != nil {
+		return fmt.Errorf("unmarshal config: create decoder: %w", err)
+	}
+	if err := decoder.Decode(p.data); err != nil {
+		return fmt.Errorf("unmarshal config: %w", err)
+	}
+	return nil
 }
 
 // Sub 获取子配置
