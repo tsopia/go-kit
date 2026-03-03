@@ -1,7 +1,6 @@
 package cfg
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -13,14 +12,6 @@ type emptyProvider struct{}
 // emptyProviderInstance 是 emptyProvider 的单例实例
 var emptyProviderInstance = &emptyProvider{}
 
-// checkDefaultCount 检查默认值参数个数
-func checkDefaultCountEmpty[T any](key string, defaults []T) error {
-	if len(defaults) > 1 {
-		return fmt.Errorf("%w: key %q expects at most one default value, got %d", ErrTypeMismatch, key, len(defaults))
-	}
-	return nil
-}
-
 // Get 返回 nil
 func (p *emptyProvider) Get(string) any {
 	return nil
@@ -28,7 +19,7 @@ func (p *emptyProvider) Get(string) any {
 
 // GetString 返回零值或默认值
 func (p *emptyProvider) GetString(key string, defaultValue ...string) (string, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return "", err
 	}
 	if len(defaultValue) > 0 {
@@ -39,7 +30,7 @@ func (p *emptyProvider) GetString(key string, defaultValue ...string) (string, e
 
 // GetBool 返回零值或默认值
 func (p *emptyProvider) GetBool(key string, defaultValue ...bool) (bool, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return false, err
 	}
 	if len(defaultValue) > 0 {
@@ -50,7 +41,7 @@ func (p *emptyProvider) GetBool(key string, defaultValue ...bool) (bool, error) 
 
 // GetInt 返回零值或默认值
 func (p *emptyProvider) GetInt(key string, defaultValue ...int) (int, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -61,7 +52,7 @@ func (p *emptyProvider) GetInt(key string, defaultValue ...int) (int, error) {
 
 // GetInt32 返回零值或默认值
 func (p *emptyProvider) GetInt32(key string, defaultValue ...int32) (int32, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -72,7 +63,7 @@ func (p *emptyProvider) GetInt32(key string, defaultValue ...int32) (int32, erro
 
 // GetInt64 返回零值或默认值
 func (p *emptyProvider) GetInt64(key string, defaultValue ...int64) (int64, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -83,7 +74,7 @@ func (p *emptyProvider) GetInt64(key string, defaultValue ...int64) (int64, erro
 
 // GetUint 返回零值或默认值
 func (p *emptyProvider) GetUint(key string, defaultValue ...uint) (uint, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -94,7 +85,7 @@ func (p *emptyProvider) GetUint(key string, defaultValue ...uint) (uint, error) 
 
 // GetUint8 返回零值或默认值
 func (p *emptyProvider) GetUint8(key string, defaultValue ...uint8) (uint8, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -105,7 +96,7 @@ func (p *emptyProvider) GetUint8(key string, defaultValue ...uint8) (uint8, erro
 
 // GetUint16 返回零值或默认值
 func (p *emptyProvider) GetUint16(key string, defaultValue ...uint16) (uint16, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -116,7 +107,7 @@ func (p *emptyProvider) GetUint16(key string, defaultValue ...uint16) (uint16, e
 
 // GetUint32 返回零值或默认值
 func (p *emptyProvider) GetUint32(key string, defaultValue ...uint32) (uint32, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -127,7 +118,7 @@ func (p *emptyProvider) GetUint32(key string, defaultValue ...uint32) (uint32, e
 
 // GetUint64 返回零值或默认值
 func (p *emptyProvider) GetUint64(key string, defaultValue ...uint64) (uint64, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -138,7 +129,7 @@ func (p *emptyProvider) GetUint64(key string, defaultValue ...uint64) (uint64, e
 
 // GetFloat64 返回零值或默认值
 func (p *emptyProvider) GetFloat64(key string, defaultValue ...float64) (float64, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -149,7 +140,7 @@ func (p *emptyProvider) GetFloat64(key string, defaultValue ...float64) (float64
 
 // GetDuration 返回零值或默认值
 func (p *emptyProvider) GetDuration(key string, defaultValue ...time.Duration) (time.Duration, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {
@@ -160,7 +151,7 @@ func (p *emptyProvider) GetDuration(key string, defaultValue ...time.Duration) (
 
 // GetTime 返回零值或默认值
 func (p *emptyProvider) GetTime(key string, defaultValue ...time.Time) (time.Time, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return time.Time{}, err
 	}
 	if len(defaultValue) > 0 {
@@ -171,7 +162,7 @@ func (p *emptyProvider) GetTime(key string, defaultValue ...time.Time) (time.Tim
 
 // GetSizeInBytes 返回零值或默认值
 func (p *emptyProvider) GetSizeInBytes(key string, defaultValue ...uint64) (uint64, error) {
-	if err := checkDefaultCountEmpty(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if len(defaultValue) > 0 {

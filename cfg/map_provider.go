@@ -59,14 +59,6 @@ func deepCopyValue(v any) any {
 	}
 }
 
-// checkDefaultCountMap 检查默认值参数个数
-func checkDefaultCountMap[T any](key string, defaults []T) error {
-	if len(defaults) > 1 {
-		return fmt.Errorf("%w: key %q expects at most one default value, got %d", ErrTypeMismatch, key, len(defaults))
-	}
-	return nil
-}
-
 // Get 获取原始值
 func (p *mapProvider) Get(key string) any {
 	return p.getValue(key)
@@ -74,7 +66,7 @@ func (p *mapProvider) Get(key string) any {
 
 // GetString 获取字符串值
 func (p *mapProvider) GetString(key string, defaultValue ...string) (string, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return "", err
 	}
 	if !p.Exists(key) {
@@ -93,7 +85,7 @@ func (p *mapProvider) GetString(key string, defaultValue ...string) (string, err
 
 // GetBool 获取布尔值
 func (p *mapProvider) GetBool(key string, defaultValue ...bool) (bool, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return false, err
 	}
 	if !p.Exists(key) {
@@ -112,7 +104,7 @@ func (p *mapProvider) GetBool(key string, defaultValue ...bool) (bool, error) {
 
 // GetInt 获取整数值
 func (p *mapProvider) GetInt(key string, defaultValue ...int) (int, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -131,7 +123,7 @@ func (p *mapProvider) GetInt(key string, defaultValue ...int) (int, error) {
 
 // GetInt32 获取 int32 值
 func (p *mapProvider) GetInt32(key string, defaultValue ...int32) (int32, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -150,7 +142,7 @@ func (p *mapProvider) GetInt32(key string, defaultValue ...int32) (int32, error)
 
 // GetInt64 获取 int64 值
 func (p *mapProvider) GetInt64(key string, defaultValue ...int64) (int64, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -169,7 +161,7 @@ func (p *mapProvider) GetInt64(key string, defaultValue ...int64) (int64, error)
 
 // GetUint 获取无符号整数值
 func (p *mapProvider) GetUint(key string, defaultValue ...uint) (uint, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -188,7 +180,7 @@ func (p *mapProvider) GetUint(key string, defaultValue ...uint) (uint, error) {
 
 // GetUint8 获取 uint8 值
 func (p *mapProvider) GetUint8(key string, defaultValue ...uint8) (uint8, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -207,7 +199,7 @@ func (p *mapProvider) GetUint8(key string, defaultValue ...uint8) (uint8, error)
 
 // GetUint16 获取 uint16 值
 func (p *mapProvider) GetUint16(key string, defaultValue ...uint16) (uint16, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -226,7 +218,7 @@ func (p *mapProvider) GetUint16(key string, defaultValue ...uint16) (uint16, err
 
 // GetUint32 获取 uint32 值
 func (p *mapProvider) GetUint32(key string, defaultValue ...uint32) (uint32, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -245,7 +237,7 @@ func (p *mapProvider) GetUint32(key string, defaultValue ...uint32) (uint32, err
 
 // GetUint64 获取 uint64 值
 func (p *mapProvider) GetUint64(key string, defaultValue ...uint64) (uint64, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -264,7 +256,7 @@ func (p *mapProvider) GetUint64(key string, defaultValue ...uint64) (uint64, err
 
 // GetFloat64 获取 float64 值
 func (p *mapProvider) GetFloat64(key string, defaultValue ...float64) (float64, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -283,7 +275,7 @@ func (p *mapProvider) GetFloat64(key string, defaultValue ...float64) (float64, 
 
 // GetDuration 获取时间间隔值
 func (p *mapProvider) GetDuration(key string, defaultValue ...time.Duration) (time.Duration, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
@@ -302,7 +294,7 @@ func (p *mapProvider) GetDuration(key string, defaultValue ...time.Duration) (ti
 
 // GetTime 获取时间值
 func (p *mapProvider) GetTime(key string, defaultValue ...time.Time) (time.Time, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return time.Time{}, err
 	}
 	if !p.Exists(key) {
@@ -321,7 +313,7 @@ func (p *mapProvider) GetTime(key string, defaultValue ...time.Time) (time.Time,
 
 // GetSizeInBytes 获取字节大小
 func (p *mapProvider) GetSizeInBytes(key string, defaultValue ...uint64) (uint64, error) {
-	if err := checkDefaultCountMap(key, defaultValue); err != nil {
+	if err := checkDefaultCount(key, defaultValue); err != nil {
 		return 0, err
 	}
 	if !p.Exists(key) {
