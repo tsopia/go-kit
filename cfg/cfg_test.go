@@ -286,6 +286,9 @@ func TestGlobalFunctions(t *testing.T) {
 		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("expected ErrNotFound, got %v", err)
 		}
+		if errors.Is(err, ErrNotInitialized) {
+			t.Errorf("expected not ErrNotInitialized, got %v", err)
+		}
 
 		val, err := GetString("key", "default")
 		if err != nil {

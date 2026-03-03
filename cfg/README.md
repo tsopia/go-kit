@@ -489,7 +489,7 @@ cfg.Sub(key string) Provider
 var (
     ErrNotFound       = errors.New("cfg: key not found")       // 键不存在且未提供默认值
     ErrTypeMismatch   = errors.New("cfg: type mismatch")       // 默认值类型不匹配或传了多个默认值
-    ErrNotInitialized = errors.New("cfg: provider not initialized") // 全局 Provider 未初始化
+    ErrNotInitialized = errors.New("cfg: provider not initialized") // 保留错误类型，当前全局函数默认不会返回
 )
 ```
 
@@ -515,7 +515,7 @@ if errors.Is(err, cfg.ErrNotFound) {
 
 ## 注意事项
 
-1. **必须先调用 Init**: 使用全局函数前必须先调用 `cfg.Init()`，否则返回 `ErrNotInitialized`
+1. **Init 是可选的**: 未调用 `cfg.Init()` 时，全局函数会回退到 `EmptyProvider`，返回 `ErrNotFound` 或默认值
 2. **Init 只执行一次**: 多次调用 `Init` 只有第一次生效
 3. **错误处理**: `New` 和 `Init` 返回的错误必须处理
 4. **线程安全**: Provider 是线程安全的，可以在多个 goroutine 中并发使用
