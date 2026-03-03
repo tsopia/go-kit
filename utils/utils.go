@@ -576,39 +576,6 @@ func IgnoreError(value interface{}, err error) interface{} {
 	return value
 }
 
-// === 并发工具 ===
-
-// Retry 重试执行函数
-func Retry(attempts int, delay time.Duration, fn func() error) error {
-	var err error
-	for i := 0; i < attempts; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		if i < attempts-1 {
-			time.Sleep(delay)
-		}
-	}
-	return err
-}
-
-// RetryWithBackoff 带退避的重试
-func RetryWithBackoff(attempts int, initialDelay time.Duration, backoffFactor float64, fn func() error) error {
-	var err error
-	delay := initialDelay
-
-	for i := 0; i < attempts; i++ {
-		if err = fn(); err == nil {
-			return nil
-		}
-		if i < attempts-1 {
-			time.Sleep(delay)
-			delay = time.Duration(float64(delay) * backoffFactor)
-		}
-	}
-	return err
-}
-
 // === 工具集合 ===
 
 // Utils 工具集合
