@@ -311,18 +311,32 @@ func IsTooManyRequests(err error) bool {
 	return Is(err, CodeTooManyRequests)
 }
 
+var databaseErrorCodeSet = map[int]struct{}{
+	CodeDatabaseError.Code:     {},
+	CodeRecordNotFound.Code:    {},
+	CodeDuplicateKey.Code:      {},
+	CodeForeignKeyViolation.Code: {},
+}
+
+var externalServiceErrorCodeSet = map[int]struct{}{
+	CodeExternalServiceError.Code: {},
+	CodeNetworkError.Code:         {},
+	CodeTimeoutError.Code:         {},
+}
+
+func containsCode(code ErrorCode, codeSet map[int]struct{}) bool {
+	_, ok := codeSet[code.Code]
+	return ok
+}
+
 // IsDatabaseError 检查是否为数据库错误
 func IsDatabaseError(err error) bool {
-	code := GetCode(err)
-	return code.Equal(CodeDatabaseError) || code.Equal(CodeRecordNotFound) ||
-		code.Equal(CodeDuplicateKey) || code.Equal(CodeForeignKeyViolation)
+	return containsCode(GetCode(err), databaseErrorCodeSet)
 }
 
 // IsExternalServiceError 检查是否为外部服务错误
 func IsExternalServiceError(err error) bool {
-	code := GetCode(err)
-	return code.Equal(CodeExternalServiceError) || code.Equal(CodeNetworkError) ||
-		code.Equal(CodeTimeoutError)
+	return containsCode(GetCode(err), externalServiceErrorCodeSet)
 }
 
 // Unwrap 解包错误
