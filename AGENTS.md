@@ -1,36 +1,124 @@
-# 工具包封装架构规范（由 `database` 包抽象而来）
+# Go-Kit 开发规范与 AI 指南
 
-本规范提炼自 `database` 包的封装思路，供本仓库所有工具/基础设施包复用，确保不同能力（HTTP、gRPC、消息、缓存等）在架构层面保持一致。
+## 角色与目标
 
-## SDK 风格封装规范（Client 与 Helper）
-- **全局客户端约定**：包内维护未导出的全局 `_client *Client`，通过 `Configure(...)` 初始化/替换，通过 `GetClient()` 获取当前默认实例。
-- **可选 Client 覆盖**：所有高层工具函数/快捷方法统一支持可选 `*Client` 参数（形如 `func SendMsg(ctx context.Context, ..., c ...*Client)`），调用时若传入则优先使用传入实例，否则回退到 `_client`。
-- **显式错误提示**：当未调用 `Configure(...)` 且未传入 `*Client` 时，应返回清晰的 `ErrMissingClient`。
-- **Client 角色**：`Client` 只持有配置与依赖（如 DB/Options），不承载业务逻辑；业务逻辑保持在 `Queue/Manager` 或包内工具函数中。
-- **示例与文档**：README 与 examples 优先展示 SDK 风格调用（Configure + helper），并保留显式构造实例的方式作为高级用法。
+你是 go-kit 工具库的开发专家。go-kit 是一个为公司内部项目提供基础能力的 Go 工具库，包含日志、数据库、消息队列、HTTP、配置管理等组件。
 
-## 核心理念
-- **职责解耦、接口优先**：用接口定义核心能力（如连接、执行、探活、关闭、指标暴露），通过管理器结构体组合各组件。默认实现可被 `WithXXX` 选项替换，避免具体依赖渗透业务。
-- **配置中心化**：以配置结构体为单一入口，统一提供 `SetDefaults`/`Validate` 或 Builder 流程，先补齐安全默认值，再做严格校验，实例化前确保配置可用且语义清晰。
-- **生命周期与可观察性**：为关键动作提供钩子（前/后），并通过可插拔日志器或指标接口输出关键信息，便于监控、调试与审计。钩子执行应保持幂等、无阻塞或可配置超时。
-- **受控逃逸**：公开完善的高层能力（如请求封装、事务包装、健康检查），只在必要时暴露底层客户端/连接句柄，并用只读副本或包装防止外部破坏内部状态。
-- **并发安全与资源管理**：管理器内共享状态需加锁或用原子操作保护；连接池、队列、goroutine 等资源的生命周期应可控，可通过配置设置上限并在关闭时确保释放。
-- **健壮性与重试**：连接或拨号流程应具备重试（指数退避+抖动）、命名策略、可选超时/限流；对外暴露的操作要支持上下文取消与超时传播。
-- **扩展友好**：新增能力应沿用现有接口/选项模式，避免破坏旧有默认行为；选择语义化命名，便于其他工具包复用或替换。
+## 开发规范
 
-## 结构约定
-- **管理器结构体**：统一持有配置、日志器、钩子、底层客户端与各组件接口；初始化顺序为“配置默认化→校验→应用选项→创建默认组件→注入自定义组件→导出实例”。
-- **组件接口**：根据能力领域拆分，例如连接器（拨号、重试、命名、资源配置）、执行器（核心操作、上下文透传、可选事务/批量包装）、健康检查器（探活、指标、依赖检查）、关闭器（优雅停机）、可选指标/追踪提供器等。组件内部若需访问当前客户端，优先使用注入的回调而非直接依赖全局变量。
-- **选项注入模式**：使用可变参数 `Option` 设置日志器、钩子、替换组件或调整行为。构造函数应保证选项生效顺序明确、可测试，并在缺省时提供安全默认值。
-- **目录结构（参考 `database` 包）**：
-  - `config.go`（配置结构与默认化/校验）、`options.go`（选项定义与应用顺序）、`errors.go`（包级错误）、`<pkg>.go`（管理器/入口）、`connector.go`/`executor.go`/`health.go`（核心组件接口与默认实现）、`adapter_*.go`（可选适配层）、`api.go`（对外高层 API）、`*_test.go`（单元/集成测试）、`README.md`（使用说明与设计要点）。
-  - 若有示例或可执行样例，集中放在 `examples/<scenario>` 目录，避免与主逻辑文件混杂。
+### 代码风格
+- 所有 `error` 必须显式处理（禁止 `_` 忽略）
+- 使用 `fmt.Errorf("context: %w", err)` 包装错误
+- 导出用 `PascalCase`，内部用 `camelCase`，缩写全大写（`JSON`, `API`, `ID`）
+- 优先使用指针接收者 `(s *Service)`
+- 必须支持 `context.Context` 传播
 
-## 实践要求
-- 新增或修改工具包时，保持接口解耦、默认可用、选项可替换；避免在公共接口中泄露具体驱动类型。
-- 生命周期钩子需覆盖关键路径（初始化、连接、执行、探活、关闭），且不应吞掉错误。日志输出要贴合上下文，避免高频操作产生过多噪声。
-- 并发与资源管理策略必须可配置并有合理默认，公开的配置读取应返回副本。公共 API 要求线程安全，或在文档中清晰标注限制。
-- 每个工具包必须提供：
-  - 覆盖关键路径的测试用例（单元测试为主，涉及外部依赖时可提供可控的集成/模拟测试）。
-  - `README.md`，描述包的角色、依赖、初始化方式、配置项、默认值与可选注入点。
-  - 示例（可选但推荐）：当使用方式非“望文知意”或涉及跨组件/外部依赖时，提供 `examples/` 目录演示典型用法；简单包可在 README 中直接给出最小可运行示例。
+### 测试要求
+- 强制使用 **Table-driven tests**
+- 测试文件与被测代码同级目录，命名 `*_test.go`
+- 优先通过 Interface 抽象进行 Mock
+
+### 构建命令
+```bash
+go mod tidy          # 安装依赖
+go build ./...       # 构建
+go test -v ./...     # 测试
+golangci-lint run    # 代码检查
+```
+
+### 包封装架构（SDK 风格）
+- 包内维护未导出的全局 `_client *Client`
+- 通过 `Configure(...)` 初始化，通过 `GetClient()` 获取
+- 高层函数支持可选 `*Client` 参数：`func Do(ctx context.Context, ..., c ...*Client)`
+- 未配置时返回 `ErrMissingClient`
+- `Client` 只持配置，业务逻辑在 `Manager/Queue` 或工具函数中
+
+### 目录结构
+```
+database/
+├── config.go          # 配置结构与默认化/校验
+├── options.go         # 选项定义
+├── errors.go          # 包级错误
+├── database.go        # 管理器/入口
+├── connector.go       # 连接器组件
+├── executor.go        # 执行器组件
+├── health.go          # 健康检查组件
+├── api.go             # 对外高层 API
+├── README.md          # 使用说明
+└── examples/          # 使用示例
+```
+
+## 新包开发检查清单
+
+- [ ] 创建 `doc.go` 包含 AI 使用提示
+- [ ] 创建 `.ai-snippet.md` 描述使用场景
+- [ ] **更新 `.ai/capabilities.yaml` 添加能力定义**
+- [ ] 提供 `README.md` 说明角色、依赖、初始化方式
+- [ ] 覆盖关键路径的测试用例
+- [ ] 遵循 SDK 封装规范（Configure + Helper 模式）
+
+## 能力清单规范
+
+每个新包必须更新 `.ai/capabilities.yaml`：
+
+```yaml
+- name: 包名（与目录名一致）
+  description: 一句话描述功能
+  import: 完整 import 路径
+  scenarios:
+    - name: 使用场景名称
+      snippet: 单行或简短代码示例
+  dependencies: [依赖的其他 go-kit 包]
+```
+
+**示例**：
+
+```yaml
+- name: database
+  description: 数据库连接管理（GORM 封装）
+  import: github.com/yourcompany/go-kit/database
+  scenarios:
+    - name: 初始化数据库
+      snippet: |
+        db, err := database.New(cfg)
+        if err != nil {
+            return fmt.Errorf("init db: %w", err)
+        }
+    - name: 获取连接
+      snippet: db := database.GetClient()
+  dependencies: [kit]
+```
+
+## 库能力速查（给使用方 AI）
+
+| 场景 | 使用包 | 典型调用 |
+|------|--------|----------|
+| 打印日志 | `kit` | `kit.Info(ctx, "msg", fields...)` |
+| 数据库连接 | `database` | `database.New(cfg)` |
+| 消息队列 | `pgmq` | `pgmq.New(cfg)` |
+| 配置管理 | `cfg` | `cfg.Load(path, &config)` |
+| HTTP 服务 | `httpserver` | `httpserver.New(cfg)` |
+| HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
+
+## 项目迁移指南
+
+### CLI 工具拆分到独立仓库
+
+当需要将 `cmd/gokit` 拆分为独立项目 `go-kit-cli`：
+
+```bash
+# 1. 在 go-kit 根目录执行子树拆分
+git subtree split --prefix=cmd/gokit -b go-kit-cli-main
+
+# 2. 推送到新仓库
+git push https://github.com/yourcompany/go-kit-cli.git go-kit-cli-main:main
+
+# 3. 本地清理
+git branch -D go-kit-cli-main
+```
+
+### 多 AI 工具配置
+
+- `AGENTS.md` - 主规范文件（跨工具支持）
+- `CLAUDE.md` - Claude Code 专用入口
+- `.cursorrules` - Cursor 专用（如有需要）
