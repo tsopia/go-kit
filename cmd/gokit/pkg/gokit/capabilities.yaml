@@ -33,3 +33,35 @@ capabilities:
       - name: 加载配置
         snippet: err := cfg.Load("config.yaml", &config)
     dependencies: []
+
+  - name: httpclient
+    description: HTTP 客户端
+    import: github.com/tsopia/go-kit/httpclient
+    scenarios:
+      - name: 发送 GET 请求
+        snippet: resp, err := httpclient.Get(ctx, url)
+    dependencies: [kit]
+
+  - name: httpserver
+    description: HTTP 服务器
+    import: github.com/tsopia/go-kit/httpserver
+    scenarios:
+      - name: 创建服务器
+        snippet: srv := httpserver.New(cfg)
+    dependencies: [kit]
+
+  - name: errors
+    description: 错误处理
+    import: github.com/tsopia/go-kit/errors
+    scenarios:
+      - name: 创建错误
+        snippet: err := errors.New(errors.CodeInvalidParam, "参数错误")
+    dependencies: []
+
+  - name: llm
+    description: 大模型客户端
+    import: github.com/tsopia/go-kit/llm
+    scenarios:
+      - name: 创建 LLM 客户端
+        snippet: client, err := llm.New(cfg)
+    dependencies: [kit]

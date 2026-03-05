@@ -122,3 +122,10 @@ git branch -D go-kit-cli-main
 - `AGENTS.md` - 主规范文件（跨工具支持）
 - `CLAUDE.md` - Claude Code 专用入口
 - `.cursorrules` - Cursor 专用（如有需要）
+
+## AI 文档维护检查清单
+
+- [ ] 新包添加时更新 `.ai/capabilities.yaml`
+- [ ] 验证 YAML 格式正确
+- [ ] 运行 `gokit list` 确认新能力显示
+- [ ] 更新此文档中的库能力速查表
