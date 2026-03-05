@@ -1,4 +1,19 @@
 version: "1.0.0"
 updated_at: "2026-03-05"
 
-capabilities: []
+capabilities:
+  - name: kit
+    description: 日志和基础工具（Zap 封装，支持结构化日志和追踪）
+    import: github.com/tsopia/go-kit/kit
+    scenarios:
+      - name: 打印信息日志
+        snippet: kit.Info(ctx, "message", "key", value)
+      - name: 打印调试日志
+        snippet: kit.Debug(ctx, "debug info")
+      - name: 打印错误日志
+        snippet: kit.Error(ctx, "error occurred", "error", err)
+      - name: 创建带追踪的上下文
+        snippet: ctx = kit.WithTrace(ctx, "operation-name")
+      - name: 获取追踪 ID
+        snippet: traceID := kit.TraceID(ctx)
+    dependencies: []
