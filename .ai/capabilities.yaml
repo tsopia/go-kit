@@ -41,3 +41,103 @@ capabilities:
               return fmt.Errorf("db unhealthy: %w", err)
           }
     dependencies: [kit]
+
+  - name: cfg
+    description: 配置管理（Viper 封装，支持 YAML/JSON/环境变量）
+    import: github.com/tsopia/go-kit/cfg
+    scenarios:
+      - name: 加载配置文件
+        snippet: |
+          var config AppConfig
+          if err := cfg.Load("config.yaml", &config); err != nil {
+              return fmt.Errorf("load config: %w", err)
+          }
+      - name: 从环境变量加载
+        snippet: |
+          cfg.SetEnvPrefix("MYAPP")
+          err := cfg.Load("", &config)
+      - name: 获取配置值
+        snippet: port := cfg.GetInt("server.port")
+    dependencies: []
+
+  - name: httpclient
+    description: HTTP 客户端（支持重试、熔断、调试）
+    import: github.com/tsopia/go-kit/httpclient
+    scenarios:
+      - name: 发送 GET 请求
+        snippet: |
+          resp, err := httpclient.Get(ctx, "https://api.example.com/data")
+          if err != nil {
+              return fmt.Errorf("fetch data: %w", err)
+          }
+      - name: 发送 POST 请求
+        snippet: |
+          resp, err := httpclient.PostJSON(ctx, url, requestBody)
+      - name: 创建带配置的客户端
+        snippet: |
+          client := httpclient.New(httpclient.Config{
+              Timeout: 30 * time.Second,
+              Retries: 3,
+          })
+    dependencies: [kit]
+
+  - name: httpserver
+    description: HTTP 服务器（Gin 封装，支持中间件链）
+    import: github.com/tsopia/go-kit/httpserver
+    scenarios:
+      - name: 创建服务器
+        snippet: |
+          srv := httpserver.New(httpserver.Config{
+              Port: 8080,
+          })
+      - name: 注册路由
+        snippet: |
+          srv.GET("/health", func(c *gin.Context) {
+              c.JSON(200, gin.H{"status": "ok"})
+          })
+      - name: 启动服务器
+        snippet: |
+          if err := srv.Start(); err != nil {
+              log.Fatal(err)
+          }
+    dependencies: [kit]
+
+  - name: errors
+    description: 错误处理（统一错误码、错误包装）
+    import: github.com/tsopia/go-kit/errors
+    scenarios:
+      - name: 创建错误
+        snippet: err := errors.New(errors.CodeInvalidParam, "参数错误")
+      - name: 包装错误
+        snippet: err := errors.Wrap(err, errors.CodeInternal, "数据库查询失败")
+      - name: 判断错误码
+        snippet: |
+          if errors.IsCode(err, errors.CodeNotFound) {
+              // 处理 404
+          }
+    dependencies: []
+
+  - name: llm
+    description: 大模型客户端统一封装（Eino 兼容）
+    import: github.com/tsopia/go-kit/llm
+    scenarios:
+      - name: 创建 LLM 客户端
+        snippet: |
+          client, err := llm.New(llm.Config{
+              Provider: llm.ProviderOpenAI,
+              APIKey:   os.Getenv("OPENAI_API_KEY"),
+          })
+      - name: 发送聊天请求
+        snippet: |
+          resp, err := client.Chat(ctx, llm.ChatRequest{
+              Messages: []llm.Message{
+                  {Role: llm.RoleUser, Content: "Hello"},
+              },
+          })
+      - name: 流式响应
+        snippet: |
+          stream, err := client.ChatStream(ctx, request)
+          for chunk := range stream {
+              fmt.Print(chunk.Content)
+          }
+    dependencies: [kit]
