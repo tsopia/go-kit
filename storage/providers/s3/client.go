@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -124,7 +125,52 @@ func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, e
 }
 
 func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration, opts ...providers.SignOptionFunc) (string, error) {
-	return "", fmt.Errorf("signed url not implemented for s3")
+	options := &providers.SignOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if expire == 0 {
+		expire = c.config.DefaultSignExpire
+		if expire == 0 {
+			expire = 15 * time.Minute
+		}
+	}
+
+	presignClient := awss3.NewPresignClient(c.client)
+
+	method := "GET"
+	if options.Method != "" {
+		method = options.Method
+	}
+
+	var req *v4.PresignedHTTPRequest
+	var err error
+
+	switch method {
+	case "GET", "get":
+		req, err = presignClient.PresignGetObject(ctx, &awss3.GetObjectInput{
+			Bucket: aws.String(c.bucket),
+			Key:    aws.String(key),
+		}, func(o *awss3.PresignOptions) {
+			o.Expires = expire
+		})
+	case "PUT", "put":
+		req, err = presignClient.PresignPutObject(ctx, &awss3.PutObjectInput{
+			Bucket: aws.String(c.bucket),
+			Key:    aws.String(key),
+		}, func(o *awss3.PresignOptions) {
+			o.Expires = expire
+		})
+	default:
+		return "", fmt.Errorf("unsupported method: %s", method)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	return req.URL, nil
 }
 
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
