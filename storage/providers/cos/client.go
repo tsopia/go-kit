@@ -14,8 +14,9 @@ import (
 
 // client COS 客户端实现
 type client struct {
-	client *cos.Client
-	config *providers.Config
+	client     *cos.Client
+	config     *providers.Config
+	uploadKeys map[string]string // uploadID -> key 映射，用于分片上传
 }
 
 // NewClient 创建 COS 客户端
@@ -52,8 +53,9 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	c := cos.NewClient(baseURL, httpClient)
 
 	return &client{
-		client: c,
-		config: cfg,
+		client:     c,
+		config:     cfg,
+		uploadKeys: make(map[string]string),
 	}, nil
 }
 
@@ -141,19 +143,118 @@ func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration
 }
 
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
-	return nil, fmt.Errorf("multipart upload not implemented for cos")
+	// 处理上传选项
+	options := &providers.UploadOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// 构建初始化选项
+	var initOpt *cos.InitiateMultipartUploadOptions
+	if options.ContentType != "" {
+		initOpt = &cos.InitiateMultipartUploadOptions{
+			ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+				ContentType: options.ContentType,
+			},
+		}
+	}
+
+	// 调用 COS SDK 初始化分片上传
+	resp, _, err := c.client.Object.InitiateMultipartUpload(ctx, key, initOpt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initiate multipart upload: %w", err)
+	}
+
+	// 保存 uploadID 到 key 的映射，用于后续操作
+	c.uploadKeys[resp.UploadID] = key
+
+	return &providers.MultipartUpload{
+		UploadID: resp.UploadID,
+		Key:      key,
+		Bucket:   c.config.Bucket,
+	}, nil
 }
 
 func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...providers.UploadOptionFunc) (*providers.PartInfo, error) {
-	return nil, fmt.Errorf("multipart upload not implemented for cos")
+	// 从映射中获取对应的 key
+	key, ok := c.uploadKeys[uploadID]
+	if !ok {
+		return nil, fmt.Errorf("upload ID not found: %s", uploadID)
+	}
+
+	// 处理上传选项
+	options := &providers.UploadOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	// 构建上传选项
+	uploadOpt := &cos.ObjectUploadPartOptions{}
+
+	resp, err := c.client.Object.UploadPart(ctx, key, uploadID, partNum, reader, uploadOpt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload part %d: %w", partNum, err)
+	}
+
+	// 从响应头中获取 ETag
+	etag := resp.Header.Get("ETag")
+
+	return &providers.PartInfo{
+		PartNumber: partNum,
+		ETag:       etag,
+	}, nil
 }
 
 func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts []*providers.PartInfo, opts ...providers.UploadOptionFunc) error {
-	return fmt.Errorf("multipart upload not implemented for cos")
+	// 从映射中获取对应的 key
+	key, ok := c.uploadKeys[uploadID]
+	if !ok {
+		return fmt.Errorf("upload ID not found: %s", uploadID)
+	}
+
+	// 转换 parts 为 COS SDK 需要的格式
+	cosParts := make([]cos.Object, len(parts))
+	for i, p := range parts {
+		cosParts[i] = cos.Object{
+			ETag:       p.ETag,
+			PartNumber: p.PartNumber,
+		}
+	}
+
+	// 构建完成选项，包含 parts 信息
+	completeOpt := &cos.CompleteMultipartUploadOptions{
+		Parts: cosParts,
+	}
+
+	// 调用 COS SDK 完成分片上传
+	_, _, err := c.client.Object.CompleteMultipartUpload(ctx, key, uploadID, completeOpt)
+	if err != nil {
+		return fmt.Errorf("failed to complete multipart upload: %w", err)
+	}
+
+	// 清理映射
+	delete(c.uploadKeys, uploadID)
+
+	return nil
 }
 
 func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
-	return fmt.Errorf("multipart upload not implemented for cos")
+	// 从映射中获取对应的 key
+	key, ok := c.uploadKeys[uploadID]
+	if !ok {
+		return fmt.Errorf("upload ID not found: %s", uploadID)
+	}
+
+	// 调用 COS SDK 中止分片上传
+	_, err := c.client.Object.AbortMultipartUpload(ctx, key, uploadID)
+	if err != nil {
+		return fmt.Errorf("failed to abort multipart upload: %w", err)
+	}
+
+	// 清理映射
+	delete(c.uploadKeys, uploadID)
+
+	return nil
 }
 
 func (c *client) DeleteBatch(ctx context.Context, keys []string) error {
