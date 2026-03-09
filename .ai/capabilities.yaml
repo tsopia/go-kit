@@ -193,3 +193,27 @@ capabilities:
           client, err := pgmq.Configure(db)
           msgID, err := pgmq.SendMsg[MyMessage](ctx, "my_queue", payload)
     dependencies: []
+
+  - name: storage
+    description: 对象存储统一封装（OSS/COS/S3）
+    import: github.com/tsopia/go-kit/storage
+    scenarios:
+      - name: 初始化存储客户端
+        snippet: |
+          storage.Configure(&storage.Config{
+              Type: storage.TypeOSS,
+              Bucket: "my-bucket",
+              Region: "cn-hangzhou",
+              AccessKeyID: "...",
+              AccessKeySecret: "...",
+          })
+      - name: 上传文件
+        snippet: storage.Upload(ctx, "file.txt", reader)
+      - name: 生成临时访问链接
+        snippet: storage.SignedURL(ctx, "file.txt", 30*time.Minute)
+      - name: 分片上传大文件
+        snippet: |
+          upload, _ := storage.InitMultipart(ctx, "large.zip")
+          part, _ := storage.UploadPart(ctx, upload.UploadID, 1, reader)
+          storage.CompleteMultipart(ctx, upload.UploadID, []*storage.PartInfo{part})
+    dependencies: [kit]
