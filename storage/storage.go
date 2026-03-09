@@ -35,12 +35,12 @@ func GetClient() Client {
 }
 
 // Upload 上传文件
-func Upload(ctx context.Context, key string, reader io.Reader, opts ...UploadOption) error {
+func Upload(ctx context.Context, key string, reader io.Reader, opts ...UploadOptionFunc) error {
 	return UploadWithClient(ctx, GetClient(), key, reader, opts...)
 }
 
 // UploadWithClient 使用指定客户端上传
-func UploadWithClient(ctx context.Context, c Client, key string, reader io.Reader, opts ...UploadOption) error {
+func UploadWithClient(ctx context.Context, c Client, key string, reader io.Reader, opts ...UploadOptionFunc) error {
 	if c == nil {
 		return ErrMissingClient
 	}
@@ -48,12 +48,12 @@ func UploadWithClient(ctx context.Context, c Client, key string, reader io.Reade
 }
 
 // Download 下载文件
-func Download(ctx context.Context, key string, opts ...DownloadOption) (io.ReadCloser, error) {
+func Download(ctx context.Context, key string, opts ...DownloadOptionFunc) (io.ReadCloser, error) {
 	return DownloadWithClient(ctx, GetClient(), key, opts...)
 }
 
 // DownloadWithClient 使用指定客户端下载
-func DownloadWithClient(ctx context.Context, c Client, key string, opts ...DownloadOption) (io.ReadCloser, error) {
+func DownloadWithClient(ctx context.Context, c Client, key string, opts ...DownloadOptionFunc) (io.ReadCloser, error) {
 	if c == nil {
 		return nil, ErrMissingClient
 	}
@@ -87,12 +87,12 @@ func ExistsWithClient(ctx context.Context, c Client, key string) (bool, error) {
 }
 
 // SignedURL 生成签名 URL
-func SignedURL(ctx context.Context, key string, expire time.Duration, opts ...SignOption) (string, error) {
+func SignedURL(ctx context.Context, key string, expire time.Duration, opts ...SignOptionFunc) (string, error) {
 	return SignedURLWithClient(ctx, GetClient(), key, expire, opts...)
 }
 
 // SignedURLWithClient 使用指定客户端生成签名 URL
-func SignedURLWithClient(ctx context.Context, c Client, key string, expire time.Duration, opts ...SignOption) (string, error) {
+func SignedURLWithClient(ctx context.Context, c Client, key string, expire time.Duration, opts ...SignOptionFunc) (string, error) {
 	if c == nil {
 		return "", ErrMissingClient
 	}
@@ -100,12 +100,12 @@ func SignedURLWithClient(ctx context.Context, c Client, key string, expire time.
 }
 
 // InitMultipart 初始化分片上传
-func InitMultipart(ctx context.Context, key string, opts ...UploadOption) (*MultipartUpload, error) {
+func InitMultipart(ctx context.Context, key string, opts ...UploadOptionFunc) (*MultipartUpload, error) {
 	return InitMultipartWithClient(ctx, GetClient(), key, opts...)
 }
 
 // InitMultipartWithClient 使用指定客户端初始化分片上传
-func InitMultipartWithClient(ctx context.Context, c Client, key string, opts ...UploadOption) (*MultipartUpload, error) {
+func InitMultipartWithClient(ctx context.Context, c Client, key string, opts ...UploadOptionFunc) (*MultipartUpload, error) {
 	if c == nil {
 		return nil, ErrMissingClient
 	}
@@ -113,12 +113,12 @@ func InitMultipartWithClient(ctx context.Context, c Client, key string, opts ...
 }
 
 // UploadPart 上传分片
-func UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...UploadOption) (*PartInfo, error) {
+func UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...UploadOptionFunc) (*PartInfo, error) {
 	return UploadPartWithClient(ctx, GetClient(), uploadID, partNum, reader, opts...)
 }
 
 // UploadPartWithClient 使用指定客户端上传分片
-func UploadPartWithClient(ctx context.Context, c Client, uploadID string, partNum int, reader io.Reader, opts ...UploadOption) (*PartInfo, error) {
+func UploadPartWithClient(ctx context.Context, c Client, uploadID string, partNum int, reader io.Reader, opts ...UploadOptionFunc) (*PartInfo, error) {
 	if c == nil {
 		return nil, ErrMissingClient
 	}
@@ -126,12 +126,12 @@ func UploadPartWithClient(ctx context.Context, c Client, uploadID string, partNu
 }
 
 // CompleteMultipart 完成分片上传
-func CompleteMultipart(ctx context.Context, uploadID string, parts []*PartInfo, opts ...UploadOption) error {
+func CompleteMultipart(ctx context.Context, uploadID string, parts []*PartInfo, opts ...UploadOptionFunc) error {
 	return CompleteMultipartWithClient(ctx, GetClient(), uploadID, parts, opts...)
 }
 
 // CompleteMultipartWithClient 使用指定客户端完成分片上传
-func CompleteMultipartWithClient(ctx context.Context, c Client, uploadID string, parts []*PartInfo, opts ...UploadOption) error {
+func CompleteMultipartWithClient(ctx context.Context, c Client, uploadID string, parts []*PartInfo, opts ...UploadOptionFunc) error {
 	if c == nil {
 		return ErrMissingClient
 	}
@@ -149,4 +149,17 @@ func AbortMultipartWithClient(ctx context.Context, c Client, uploadID string) er
 		return ErrMissingClient
 	}
 	return c.AbortMultipart(ctx, uploadID)
+}
+
+// DeleteBatch 批量删除文件
+func DeleteBatch(ctx context.Context, keys []string) error {
+	return DeleteBatchWithClient(ctx, GetClient(), keys)
+}
+
+// DeleteBatchWithClient 使用指定客户端批量删除
+func DeleteBatchWithClient(ctx context.Context, c Client, keys []string) error {
+	if c == nil {
+		return ErrMissingClient
+	}
+	return c.DeleteBatch(ctx, keys)
 }
