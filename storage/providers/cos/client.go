@@ -113,7 +113,31 @@ func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, e
 }
 
 func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration, opts ...providers.SignOptionFunc) (string, error) {
-	return "", fmt.Errorf("signed url not implemented for cos")
+	options := &providers.SignOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if expire == 0 {
+		expire = c.config.DefaultSignExpire
+		if expire == 0 {
+			expire = 15 * time.Minute
+		}
+	}
+
+	// 根据 Method 决定 HTTP 方法，默认为 GET
+	method := http.MethodGet
+	if options.Method != "" {
+		method = options.Method
+	}
+
+	// 生成预签名 URL
+	presignedURL, err := c.client.Object.GetPresignedURL(ctx, method, key, c.config.AccessKeyID, c.config.AccessKeySecret, expire, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return presignedURL.String(), nil
 }
 
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
