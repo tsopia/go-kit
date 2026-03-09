@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,9 +17,11 @@ import (
 
 // client S3 客户端实现
 type client struct {
-	client *awss3.Client
-	bucket string
-	config *providers.Config
+	client     *awss3.Client
+	bucket     string
+	config     *providers.Config
+	uploadKeys map[string]string // uploadID -> key
+	mu         sync.RWMutex
 }
 
 // NewClient 创建 S3 客户端
@@ -41,9 +44,10 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	})
 
 	return &client{
-		client: c,
-		bucket: cfg.Bucket,
-		config: cfg,
+		client:     c,
+		bucket:     cfg.Bucket,
+		config:     cfg,
+		uploadKeys: make(map[string]string),
 	}, nil
 }
 
@@ -174,19 +178,124 @@ func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration
 }
 
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
-	return nil, fmt.Errorf("multipart upload not implemented for s3")
+	input := &awss3.CreateMultipartUploadInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	}
+
+	resp, err := c.client.CreateMultipartUpload(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	uploadID := *resp.UploadId
+
+	// 存储 uploadID -> key 的映射
+	c.mu.Lock()
+	c.uploadKeys[uploadID] = key
+	c.mu.Unlock()
+
+	return &providers.MultipartUpload{
+		UploadID: uploadID,
+		Key:      key,
+		Bucket:   c.bucket,
+	}, nil
 }
 
 func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...providers.UploadOptionFunc) (*providers.PartInfo, error) {
-	return nil, fmt.Errorf("multipart upload not implemented for s3")
+	// 从 map 获取 key
+	c.mu.RLock()
+	key, ok := c.uploadKeys[uploadID]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("upload not found: %s", uploadID)
+	}
+
+	input := &awss3.UploadPartInput{
+		Bucket:     aws.String(c.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(int32(partNum)),
+		Body:       reader,
+	}
+
+	resp, err := c.client.UploadPart(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return &providers.PartInfo{
+		PartNumber: partNum,
+		ETag:       *resp.ETag,
+	}, nil
 }
 
 func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts []*providers.PartInfo, opts ...providers.UploadOptionFunc) error {
-	return fmt.Errorf("multipart upload not implemented for s3")
+	// 从 map 获取 key
+	c.mu.RLock()
+	key, ok := c.uploadKeys[uploadID]
+	c.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("upload not found: %s", uploadID)
+	}
+
+	// 构建 CompletedParts
+	var completedParts []types.CompletedPart
+	for _, part := range parts {
+		completedParts = append(completedParts, types.CompletedPart{
+			PartNumber: aws.Int32(int32(part.PartNumber)),
+			ETag:       aws.String(part.ETag),
+		})
+	}
+
+	input := &awss3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(c.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: completedParts,
+		},
+	}
+
+	_, err := c.client.CompleteMultipartUpload(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	// 完成后删除映射
+	c.mu.Lock()
+	delete(c.uploadKeys, uploadID)
+	c.mu.Unlock()
+
+	return nil
 }
 
 func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
-	return fmt.Errorf("multipart upload not implemented for s3")
+	// 从 map 获取 key
+	c.mu.RLock()
+	key, ok := c.uploadKeys[uploadID]
+	c.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("upload not found: %s", uploadID)
+	}
+
+	input := &awss3.AbortMultipartUploadInput{
+		Bucket:   aws.String(c.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	}
+
+	_, err := c.client.AbortMultipartUpload(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	// 中止后删除映射
+	c.mu.Lock()
+	delete(c.uploadKeys, uploadID)
+	c.mu.Unlock()
+
+	return nil
 }
 
 func (c *client) DeleteBatch(ctx context.Context, keys []string) error {
