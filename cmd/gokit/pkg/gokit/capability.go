@@ -71,3 +71,36 @@ func GetCapability(name string) (*Capability, error) {
 
 	return nil, fmt.Errorf("capability not found: %s", name)
 }
+
+// DumpCapabilities 将能力清单序列化为 YAML
+func DumpCapabilities(caps []Capability) (string, error) {
+	// 获取现有版本信息
+	var version, updatedAt string
+	if data, err := capabilitiesFS.ReadFile("capabilities.yaml"); err == nil {
+		var registry CapabilityRegistry
+		if err := yaml.Unmarshal(data, &registry); err == nil {
+			version = registry.Version
+			updatedAt = registry.UpdatedAt
+		}
+	}
+
+	if version == "" {
+		version = "1.0.0"
+	}
+	if updatedAt == "" {
+		updatedAt = "unknown"
+	}
+
+	registry := CapabilityRegistry{
+		Version:      version,
+		UpdatedAt:    updatedAt,
+		Capabilities: caps,
+	}
+
+	data, err := yaml.Marshal(&registry)
+	if err != nil {
+		return "", fmt.Errorf("marshal capabilities: %w", err)
+	}
+
+	return string(data), nil
+}

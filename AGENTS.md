@@ -129,3 +129,8 @@ git branch -D go-kit-cli-main
 - [ ] 验证 YAML 格式正确
 - [ ] 运行 `gokit list` 确认新能力显示
 - [ ] 更新此文档中的库能力速查表
+
+
+## 工具库引用
+
+本项目使用 go-kit 提供基础能力，详细指南请参考 [.go-kit/GUIDE.md](.go-kit/GUIDE.md)。
