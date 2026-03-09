@@ -141,3 +141,55 @@ capabilities:
               fmt.Print(chunk.Content)
           }
     dependencies: [kit]
+
+  - name: pgmq
+    description: PostgreSQL 消息队列（基于 pgmq 扩展，支持延迟消息、死信队列、批量操作）
+    import: github.com/tsopia/go-kit/pgmq
+    scenarios:
+      - name: 创建队列
+        snippet: |
+          queue, err := pgmq.NewQueue[MyMessage](ctx, db, "my_queue")
+          if err != nil {
+              return fmt.Errorf("init queue: %w", err)
+          }
+      - name: 发送消息
+        snippet: |
+          msgID, err := queue.Send(ctx, MyMessage{Data: "hello"})
+      - name: 发送延迟消息
+        snippet: |
+          msgID, err := queue.SendWithDelay(ctx, msg, 5*time.Minute)
+      - name: 批量发送消息
+        snippet: |
+          ids, err := queue.SendBatch(ctx, []MyMessage{msg1, msg2, msg3})
+      - name: 读取消息
+        snippet: |
+          msgs, err := queue.Read(ctx, pgmq.ReadOptions{
+              Quantity:          10,
+              VisibilityTimeout: 30 * time.Second,
+          })
+      - name: 读取并删除消息
+        snippet: |
+          msg, err := queue.Pop(ctx)
+      - name: 启动消费者
+        snippet: |
+          consumer, err := queue.StartConsumer(ctx, func(ctx context.Context, msg *pgmq.Message[MyMessage]) error {
+              // 处理消息，返回 nil 表示成功，会自动归档
+              return processMessage(msg.Body)
+          })
+      - name: 阻塞消费消息
+        snippet: |
+          err := queue.Consume(ctx, handler)
+      - name: 归档消息
+        snippet: |
+          err := queue.Archive(ctx, msgID)
+      - name: 删除消息
+        snippet: |
+          err := queue.Delete(ctx, msgID)
+      - name: 使用 SDK 风格发送消息
+        snippet: |
+          msgID, err := pgmq.SendMsg[MyMessage](ctx, "my_queue", payload)
+      - name: 配置全局客户端后使用
+        snippet: |
+          client, err := pgmq.Configure(db)
+          msgID, err := pgmq.SendMsg[MyMessage](ctx, "my_queue", payload)
+    dependencies: []
