@@ -6,6 +6,7 @@ import (
 	"github.com/tsopia/go-kit/storage/providers"
 	"github.com/tsopia/go-kit/storage/providers/cos"
 	"github.com/tsopia/go-kit/storage/providers/oss"
+	"github.com/tsopia/go-kit/storage/providers/s3"
 )
 
 // NewClient 根据配置创建对应客户端
@@ -20,7 +21,7 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	case providers.TypeCOS:
 		return cos.NewClient(cfg)
 	case providers.TypeS3:
-		return nil, fmt.Errorf("s3 not implemented yet")
+		return s3.NewClient(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported storage type: %s", cfg.Type)
 	}
