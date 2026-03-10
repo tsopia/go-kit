@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -50,13 +51,15 @@ func DefaultConfig() *Config {
 
 // Server HTTP服务器 - 最小化封装
 type Server struct {
-	config *Config
-	engine *gin.Engine
-	server *http.Server
+	config     *Config
+	engine     *gin.Engine
+	server     *http.Server
+	serveErrCh chan error
+	hooks      Hooks
 }
 
 // NewServer 创建新的HTTP服务器
-func NewServer(config *Config) *Server {
+func NewServer(config *Config, opts ...Option) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -65,14 +68,17 @@ func NewServer(config *Config) *Server {
 	engine := gin.New()
 
 	server := &Server{
-		config: config,
-		engine: engine,
+		config:     config,
+		engine:     engine,
+		serveErrCh: make(chan error, 4),
 	}
 
 	// 如果启用了健康检查，自动注册健康检查路由
 	if config.EnableHealthCheck {
 		server.EnableHealthCheck()
 	}
+
+	server.applyOptions(opts...)
 
 	return server
 }
@@ -139,59 +145,131 @@ func (s *Server) Use(middleware ...gin.HandlerFunc) {
 	s.engine.Use(middleware...)
 }
 
-// Start 启动服务器（非阻塞）
-func (s *Server) Start() error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
+func (s *Server) buildHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:           addr,
-		Handler:        s.engine,
+		Handler:        handler,
 		ReadTimeout:    s.config.ReadTimeout,
 		WriteTimeout:   s.config.WriteTimeout,
 		IdleTimeout:    s.config.IdleTimeout,
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
+}
 
-	// 启动服务器（非阻塞）
+func (s *Server) emitHook(fn func(context.Context, LifecycleEvent), event LifecycleEvent) {
+	if fn == nil {
+		return
+	}
+
+	fn(context.Background(), event)
+}
+
+func (s *Server) lifecycleEvent(err error) LifecycleEvent {
+	return LifecycleEvent{
+		Addr: s.Addr(),
+		Err:  err,
+	}
+}
+
+func (s *Server) reportServeError(err error) {
+	if err == nil || err == http.ErrServerClosed {
+		return
+	}
+
+	event := s.lifecycleEvent(err)
+	s.emitHook(s.hooks.OnServeError, event)
+
+	select {
+	case s.serveErrCh <- err:
+	default:
+	}
+}
+
+func (s *Server) configuredAddr() string {
+	return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+}
+
+func (s *Server) prepareMainServer(ln net.Listener) {
+	s.server = s.buildHTTPServer(ln.Addr().String(), s.engine)
+}
+
+func (s *Server) serveMainListener(ln net.Listener) error {
+	err := s.server.Serve(ln)
+	if err != nil && err != http.ErrServerClosed {
+		s.reportServeError(err)
+		return err
+	}
+
+	return nil
+}
+
+// Errors 返回服务器运行期错误通道。
+func (s *Server) Errors() <-chan error {
+	return s.serveErrCh
+}
+
+// Serve 使用现成的 listener 启动服务器（阻塞）。
+func (s *Server) Serve(ln net.Listener) error {
+	if ln == nil {
+		return fmt.Errorf("listener is nil")
+	}
+
+	s.prepareMainServer(ln)
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	return s.serveMainListener(ln)
+}
+
+// Start 启动服务器（非阻塞）
+func (s *Server) Start() error {
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	s.prepareMainServer(ln)
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			panic(fmt.Sprintf("HTTP server failed to start: %v", err))
-		}
+		_ = s.serveMainListener(ln)
 	}()
 
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 	return nil
 }
 
 // Run 启动服务器（阻塞）
 func (s *Server) Run() error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
-		Addr:           addr,
-		Handler:        s.engine,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		IdleTimeout:    s.config.IdleTimeout,
-		MaxHeaderBytes: s.config.MaxHeaderBytes,
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
 	}
 
-	return s.server.ListenAndServe()
+	return s.Serve(ln)
 }
 
 // RunTLS 启动HTTPS服务器（阻塞）
 func (s *Server) RunTLS(certFile, keyFile string) error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
-		Addr:           addr,
-		Handler:        s.engine,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		IdleTimeout:    s.config.IdleTimeout,
-		MaxHeaderBytes: s.config.MaxHeaderBytes,
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
 	}
 
-	return s.server.ListenAndServeTLS(certFile, keyFile)
+	s.prepareMainServer(ln)
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	err = s.server.ServeTLS(ln, certFile, keyFile)
+	if err != nil && err != http.ErrServerClosed {
+		s.reportServeError(err)
+		return err
+	}
+
+	return nil
 }
 
 // RunWithGracefulShutdown 启动服务器并自动处理优雅关闭（阻塞）
@@ -210,10 +288,11 @@ func (s *Server) WaitForShutdown() error {
 	// 创建信号通道
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
 
 	// 阻塞等待信号
 	<-quit
-	fmt.Println("收到关闭信号，开始优雅关闭服务器...")
+	s.emitHook(s.hooks.OnShuttingDown, s.lifecycleEvent(nil))
 
 	// 创建关闭context
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
@@ -224,7 +303,7 @@ func (s *Server) WaitForShutdown() error {
 		return fmt.Errorf("服务器关闭失败: %w", err)
 	}
 
-	fmt.Println("服务器已优雅关闭")
+	s.emitHook(s.hooks.OnShutdownComplete, s.lifecycleEvent(nil))
 	return nil
 }
 
