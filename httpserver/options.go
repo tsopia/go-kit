@@ -28,6 +28,13 @@ func WithHooks(h Hooks) Option {
 	}
 }
 
+// WithModules 在构造时批量注册路由模块。
+func WithModules(modules ...RouteModule) Option {
+	return func(s *Server) {
+		s.RegisterModules(modules...)
+	}
+}
+
 func (s *Server) applyOptions(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {
