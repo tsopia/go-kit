@@ -135,7 +135,7 @@ database/
 | 数据库连接 | `database` | `database.New(cfg)` |
 | 消息队列 | `pgmq` | `pgmq.New(cfg)` |
 | 配置管理 | `cfg` | `cfg.Load(path, &config)` |
-| HTTP 服务 | `httpserver` | `httpserver.New(cfg)` |
+| HTTP 服务 | `httpserver` | `httpserver.NewServer(cfg)` |
 | HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
 | 对象存储 | `storage` | `storage.Upload(ctx, "file", reader)` |
 

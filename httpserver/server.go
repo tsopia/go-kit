@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -50,13 +51,19 @@ func DefaultConfig() *Config {
 
 // Server HTTP服务器 - 最小化封装
 type Server struct {
-	config *Config
-	engine *gin.Engine
-	server *http.Server
+	config                *Config
+	engine                *gin.Engine
+	server                *http.Server
+	healthServer          *http.Server
+	serveErrCh            chan error
+	hooks                 Hooks
+	healthHandler         gin.HandlerFunc
+	healthRouteRegistered bool
+	healthAddr            string
 }
 
 // NewServer 创建新的HTTP服务器
-func NewServer(config *Config) *Server {
+func NewServer(config *Config, opts ...Option) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -65,14 +72,18 @@ func NewServer(config *Config) *Server {
 	engine := gin.New()
 
 	server := &Server{
-		config: config,
-		engine: engine,
+		config:        config,
+		engine:        engine,
+		serveErrCh:    make(chan error, 4),
+		healthHandler: DefaultHealthHandler(),
 	}
 
 	// 如果启用了健康检查，自动注册健康检查路由
 	if config.EnableHealthCheck {
 		server.EnableHealthCheck()
 	}
+
+	server.applyOptions(opts...)
 
 	return server
 }
@@ -139,59 +150,234 @@ func (s *Server) Use(middleware ...gin.HandlerFunc) {
 	s.engine.Use(middleware...)
 }
 
-// Start 启动服务器（非阻塞）
-func (s *Server) Start() error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
+func (s *Server) buildHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:           addr,
-		Handler:        s.engine,
+		Handler:        handler,
 		ReadTimeout:    s.config.ReadTimeout,
 		WriteTimeout:   s.config.WriteTimeout,
 		IdleTimeout:    s.config.IdleTimeout,
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
+}
 
-	// 启动服务器（非阻塞）
-	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			panic(fmt.Sprintf("HTTP server failed to start: %v", err))
+func (s *Server) emitHook(fn func(context.Context, LifecycleEvent), event LifecycleEvent) {
+	if fn == nil {
+		return
+	}
+
+	fn(context.Background(), event)
+}
+
+func (s *Server) lifecycleEvent(err error) LifecycleEvent {
+	healthAddr := s.healthAddr
+	if healthAddr == "" && s.config.EnableHealthCheck && s.config.HealthCheckPort == 0 {
+		healthAddr = s.Addr()
+	}
+
+	return LifecycleEvent{
+		Addr:       s.Addr(),
+		HealthAddr: healthAddr,
+		Err:        err,
+	}
+}
+
+func (s *Server) reportServeError(err error) {
+	if err == nil || err == http.ErrServerClosed {
+		return
+	}
+
+	event := s.lifecycleEvent(err)
+	s.emitHook(s.hooks.OnServeError, event)
+
+	select {
+	case s.serveErrCh <- err:
+	default:
+	}
+}
+
+func (s *Server) configuredAddr() string {
+	return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+}
+
+func (s *Server) prepareMainServer(ln net.Listener) {
+	s.server = s.buildHTTPServer(ln.Addr().String(), s.engine)
+}
+
+func (s *Server) healthEndpoint() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.healthHandler == nil {
+			c.Status(http.StatusNotFound)
+			return
 		}
-	}()
 
+		s.healthHandler(c)
+	}
+}
+
+func (s *Server) registerHealthRoute() {
+	if !s.config.EnableHealthCheck || s.config.HealthCheckPort != 0 || s.healthRouteRegistered {
+		return
+	}
+
+	s.engine.GET(s.config.HealthCheckPath, s.healthEndpoint())
+	s.healthRouteRegistered = true
+}
+
+func (s *Server) prepareHealthServer() (net.Listener, error) {
+	if !s.config.EnableHealthCheck || s.config.HealthCheckPort == 0 {
+		s.healthServer = nil
+		s.healthAddr = ""
+		return nil, nil
+	}
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.config.Host, s.config.HealthCheckPort))
+	if err != nil {
+		return nil, err
+	}
+
+	engine := gin.New()
+	engine.GET(s.config.HealthCheckPath, s.healthEndpoint())
+	s.healthServer = s.buildHTTPServer(ln.Addr().String(), engine)
+	s.healthAddr = ln.Addr().String()
+
+	return ln, nil
+}
+
+func (s *Server) serveMainListener(ln net.Listener) error {
+	err := s.server.Serve(ln)
+	if err != nil && err != http.ErrServerClosed {
+		s.reportServeError(err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *Server) serveHealthListener(ln net.Listener) error {
+	err := s.healthServer.Serve(ln)
+	if err != nil && err != http.ErrServerClosed {
+		s.reportServeError(err)
+		return err
+	}
+
+	return nil
+}
+
+// Errors 返回服务器运行期错误通道。
+func (s *Server) Errors() <-chan error {
+	return s.serveErrCh
+}
+
+// Serve 使用现成的 listener 启动服务器（阻塞）。
+func (s *Server) Serve(ln net.Listener) error {
+	if ln == nil {
+		return fmt.Errorf("listener is nil")
+	}
+
+	s.prepareMainServer(ln)
+	healthLn, err := s.prepareHealthServer()
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+	if healthLn != nil {
+		go func() {
+			_ = s.serveHealthListener(healthLn)
+		}()
+	}
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	return s.serveMainListener(ln)
+}
+
+// Start 启动服务器（非阻塞）
+func (s *Server) Start() error {
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	s.prepareMainServer(ln)
+	healthLn, err := s.prepareHealthServer()
+	if err != nil {
+		_ = ln.Close()
+		s.reportServeError(err)
+		return err
+	}
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+
+	go func() {
+		_ = s.serveMainListener(ln)
+	}()
+	if healthLn != nil {
+		go func() {
+			_ = s.serveHealthListener(healthLn)
+		}()
+	}
+
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 	return nil
 }
 
 // Run 启动服务器（阻塞）
 func (s *Server) Run() error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
-		Addr:           addr,
-		Handler:        s.engine,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		IdleTimeout:    s.config.IdleTimeout,
-		MaxHeaderBytes: s.config.MaxHeaderBytes,
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
 	}
 
-	return s.server.ListenAndServe()
+	s.prepareMainServer(ln)
+	healthLn, err := s.prepareHealthServer()
+	if err != nil {
+		_ = ln.Close()
+		s.reportServeError(err)
+		return err
+	}
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+	if healthLn != nil {
+		go func() {
+			_ = s.serveHealthListener(healthLn)
+		}()
+	}
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	return s.serveMainListener(ln)
 }
 
 // RunTLS 启动HTTPS服务器（阻塞）
 func (s *Server) RunTLS(certFile, keyFile string) error {
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
-
-	s.server = &http.Server{
-		Addr:           addr,
-		Handler:        s.engine,
-		ReadTimeout:    s.config.ReadTimeout,
-		WriteTimeout:   s.config.WriteTimeout,
-		IdleTimeout:    s.config.IdleTimeout,
-		MaxHeaderBytes: s.config.MaxHeaderBytes,
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
 	}
 
-	return s.server.ListenAndServeTLS(certFile, keyFile)
+	s.prepareMainServer(ln)
+	healthLn, err := s.prepareHealthServer()
+	if err != nil {
+		_ = ln.Close()
+		s.reportServeError(err)
+		return err
+	}
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+	if healthLn != nil {
+		go func() {
+			_ = s.serveHealthListener(healthLn)
+		}()
+	}
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	err = s.server.ServeTLS(ln, certFile, keyFile)
+	if err != nil && err != http.ErrServerClosed {
+		s.reportServeError(err)
+		return err
+	}
+
+	return nil
 }
 
 // RunWithGracefulShutdown 启动服务器并自动处理优雅关闭（阻塞）
@@ -210,10 +396,11 @@ func (s *Server) WaitForShutdown() error {
 	// 创建信号通道
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
 
 	// 阻塞等待信号
 	<-quit
-	fmt.Println("收到关闭信号，开始优雅关闭服务器...")
+	s.emitHook(s.hooks.OnShuttingDown, s.lifecycleEvent(nil))
 
 	// 创建关闭context
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
@@ -224,13 +411,13 @@ func (s *Server) WaitForShutdown() error {
 		return fmt.Errorf("服务器关闭失败: %w", err)
 	}
 
-	fmt.Println("服务器已优雅关闭")
+	s.emitHook(s.hooks.OnShutdownComplete, s.lifecycleEvent(nil))
 	return nil
 }
 
 // Shutdown 优雅关闭服务器
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.server == nil {
+	if s.server == nil && s.healthServer == nil {
 		return nil
 	}
 
@@ -240,7 +427,21 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		defer cancel()
 	}
 
-	return s.server.Shutdown(ctx)
+	if s.healthServer != nil {
+		if err := s.healthServer.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown health server: %w", err)
+		}
+	}
+
+	if s.server == nil {
+		return nil
+	}
+
+	if err := s.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("shutdown server: %w", err)
+	}
+
+	return nil
 }
 
 // Addr 返回服务器地址
@@ -448,15 +649,16 @@ func HealthHandlerWithManager(manager *HealthCheckManager) gin.HandlerFunc {
 // EnableHealthCheck 启用健康检查
 func (s *Server) EnableHealthCheck() {
 	if s.config.EnableHealthCheck {
-		// 使用默认健康检查处理器
-		s.engine.GET(s.config.HealthCheckPath, DefaultHealthHandler())
+		s.healthHandler = DefaultHealthHandler()
+		s.registerHealthRoute()
 	}
 }
 
 // EnableHealthCheckWithManager 启用带管理器的健康检查
 func (s *Server) EnableHealthCheckWithManager(manager *HealthCheckManager) {
-	// 无论是否启用默认健康检查，都注册带管理器的健康检查
-	s.engine.GET(s.config.HealthCheckPath, HealthHandlerWithManager(manager))
+	s.config.EnableHealthCheck = true
+	s.healthHandler = HealthHandlerWithManager(manager)
+	s.registerHealthRoute()
 }
 
 // SetHealthCheckPath 设置健康检查路径

@@ -1,1048 +1,422 @@
 # HTTP服务器 (httpserver)
 
-基于Gin的轻量级HTTP服务器，提供中间件、路由管理、上下文追踪等企业级特性。
+`httpserver` 是基于 Gin 的轻量 HTTP 传输层封装。它保留 Gin 直写能力，同时提供可选的 typed handler 契约，方便项目统一接口写法，也更适合 AI coding。
 
-## 🚀 特性
+## 特性
 
-- ✅ 基于Gin的高性能HTTP框架
-- ✅ 内置中间件系统
-- ✅ 上下文追踪和日志集成
-- ✅ 优雅关闭和健康检查
-- ✅ 路由管理和分组
-- ✅ 请求/响应拦截器
-- ✅ 线程安全
-- ✅ 默认健康检查接口
-- ✅ 可扩展的健康检查管理器
-- ✅ 内置健康检查器（数据库、HTTP等）
+- 基于 Gin 的路由与中间件能力
+- `Start` / `Run` / `Serve` / `Shutdown` 生命周期管理
+- 可选独立 `HealthCheckPort`
+- 生命周期 hooks，便于接入任意日志与观测系统
+- `RouteModule` 批量注册模块路由
+- `Handle` / `HandleJSON` typed handler 契约
+- Trace ID / Request ID / CORS 中间件
 
-## 📖 快速开始
+## 快速开始
 
-### 基本使用
+### 方式一：直接使用 Gin 风格路由
 
 ```go
 package main
 
 import (
-    "log"
-    "github.com/tsopia/go-kit/httpserver"
-    "github.com/tsopia/go-kit/logger"
+	"log"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tsopia/go-kit/httpserver"
 )
 
 func main() {
-    // 创建服务器（默认启用健康检查）
-    server := httpserver.NewServer(nil)
-    
-    // 注册业务路由
-    server.POST("/users", createUserHandler)
-    server.GET("/users/:id", getUserHandler)
-    
-    // 启动服务器
-    log := logger.New()
-    log.Info("启动HTTP服务器", "port", 8080)
-    log.Info("健康检查端点", "path", "/health")
-    
-    if err := server.Run(); err != nil {
-        log.Fatal("服务器启动失败", "error", err)
-    }
-}
+	srv := httpserver.NewServer(&httpserver.Config{
+		Host: "0.0.0.0",
+		Port: 8080,
+	})
 
-func createUserHandler(c *gin.Context) {
-    var user User
-    if err := c.ShouldBindJSON(&user); err != nil {
-        c.JSON(400, gin.H{"error": "无效的请求数据"})
-        return
-    }
-    
-    // 处理用户创建逻辑...
-    c.JSON(201, user)
-}
+	srv.GET("/healthz", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 
-func getUserHandler(c *gin.Context) {
-    userID := c.Param("id")
-    
-    // 获取用户逻辑...
-    user := &User{ID: userID, Name: "张三"}
-    c.JSON(200, user)
+	srv.POST("/users", func(c *gin.Context) {
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(201, gin.H{"name": req.Name})
+	})
+
+	if err := srv.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-### 带健康检查管理器的使用
+### 方式二：推荐的 typed handler 写法
 
 ```go
 package main
 
 import (
-    "context"
-    "log"
-    "time"
-    
-    "github.com/tsopia/go-kit/httpserver"
-    "github.com/tsopia/go-kit/logger"
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tsopia/go-kit/httpserver"
 )
 
+type AuthService struct{}
+
+func (s *AuthService) Login(ctx context.Context, req LoginRequest) (LoginResponse, error) {
+	return LoginResponse{Token: "token-123"}, nil
+}
+
+type LoginRequest struct {
+	Email string `json:"email"`
+}
+
+func (r LoginRequest) Validate() error {
+	if r.Email == "" {
+		return fmt.Errorf("email is required")
+	}
+	return nil
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+}
+
+type UserModule struct {
+	auth *AuthService
+}
+
+func NewUserModule(auth *AuthService) *UserModule {
+	return &UserModule{auth: auth}
+}
+
+func (m *UserModule) RegisterRoutes(r gin.IRoutes) {
+	r.POST("/login", httpserver.HandleJSON(
+		m.Login,
+		httpserver.WithSuccessStatus(http.StatusOK),
+	))
+}
+
+func (m *UserModule) Login(ctx context.Context, req LoginRequest) (LoginResponse, error) {
+	return m.auth.Login(ctx, req)
+}
+
 func main() {
-    // 创建健康检查管理器
-    manager := httpserver.NewHealthCheckManager("1.0.0")
-    
-    // 添加各种健康检查器
-    manager.AddChecker(httpserver.NewDatabaseHealthChecker("mysql", mysqlDB))
-    manager.AddChecker(httpserver.NewHTTPHealthChecker("payment_service", "http://payment.example.com/health", 5*time.Second))
-    manager.AddChecker(httpserver.NewCustomHealthChecker("file_system", checkDiskSpace))
-    
-    // 创建服务器
-    server := httpserver.NewServer(&httpserver.Config{
-        Host:            "0.0.0.0",
-        Port:            8080,
-        EnableHealthCheck: true,
-        HealthCheckPath: "/health",
-    })
-    
-    // 启用带管理器的健康检查
-    server.EnableHealthCheckWithManager(manager)
-    
-    // 注册业务路由
-    server.POST("/users", createUserHandler)
-    server.GET("/users/:id", getUserHandler)
-    
-    // 启动服务器
-    log := logger.New()
-    log.Info("启动HTTP服务器", "port", 8080)
-    log.Info("健康检查端点", "path", "/health")
-    
-    if err := server.Run(); err != nil {
-        log.Fatal("服务器启动失败", "error", err)
-    }
-}
+	srv := httpserver.NewServer(nil, httpserver.WithModules(
+		NewUserModule(&AuthService{}),
+	))
 
-func checkDiskSpace(ctx context.Context) error {
-    // 检查磁盘空间
-    // 返回nil表示健康，返回error表示不健康
-    return nil
+	if err := srv.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-### 带中间件的服务器
+## 配置
 
-```go
-func main() {
-    server := httpserver.New(&httpserver.Config{
-        Host: "0.0.0.0",
-        Port: 8080,
-        Mode: "release",
-    })
-    
-    // 添加全局中间件
-    server.Use(
-        httpserver.LoggerMiddleware(),
-        httpserver.RecoveryMiddleware(),
-        httpserver.CorsMiddleware(),
-    )
-    
-    // 添加路由组
-    api := server.Group("/api/v1")
-    {
-        api.GET("/users", getUsersHandler)
-        api.POST("/users", createUserHandler)
-        api.GET("/users/:id", getUserHandler)
-        api.PUT("/users/:id", updateUserHandler)
-        api.DELETE("/users/:id", deleteUserHandler)
-    }
-    
-    // 启动服务器
-    server.Run()
-}
-```
-
-## 🔧 API 参考
-
-### 创建服务器
-
-#### New
-使用配置创建HTTP服务器
-
-```go
-server := httpserver.New(&httpserver.Config{
-    Host: "0.0.0.0",
-    Port: 8080,
-    Mode: "debug", // debug, release, test
-})
-```
-
-#### NewWithOptions
-使用选项创建服务器
-
-```go
-server := httpserver.NewWithOptions(httpserver.Options{
-    Host: "0.0.0.0",
-    Port: 8080,
-    Mode: "release",
-    
-    // 中间件配置
-    Middlewares: []gin.HandlerFunc{
-        httpserver.LoggerMiddleware(),
-        httpserver.RecoveryMiddleware(),
-    },
-    
-    // 路由配置
-    Routes: func(r *gin.Engine) {
-        r.GET("/health", healthHandler)
-        r.POST("/users", createUserHandler)
-    },
-})
-```
-
-### 配置选项
-
-#### Config 结构体
+当前 `Config` 只包含传输层需要的字段：
 
 ```go
 type Config struct {
-    // 基础配置
-    Host string `mapstructure:"host"`
-    Port int    `mapstructure:"port"`
-    Mode string `mapstructure:"mode"` // debug, release, test
-    
-    // 超时配置
-    ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-    WriteTimeout time.Duration `mapstructure:"write_timeout"`
-    IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
-    
-    // 中间件配置
-    EnableLogger    bool `mapstructure:"enable_logger"`
-    EnableRecovery  bool `mapstructure:"enable_recovery"`
-    EnableCors      bool `mapstructure:"enable_cors"`
-    EnableMetrics   bool `mapstructure:"enable_metrics"`
-    
-    // 日志配置
-    LogFormat string `mapstructure:"log_format"` // json, console
-    LogLevel  string `mapstructure:"log_level"`  // debug, info, warn, error
-    
-    // 安全配置
-    TrustedProxies []string `mapstructure:"trusted_proxies"`
-    MaxBodySize     int64   `mapstructure:"max_body_size"`
+	Host            string
+	Port            int
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	MaxHeaderBytes  int
+	ShutdownTimeout time.Duration
+
+	EnableHealthCheck bool
+	HealthCheckPath   string
+	HealthCheckPort   int
 }
 ```
 
-### 路由管理
+默认值可通过 `httpserver.DefaultConfig()` 获取。
 
-#### 基本路由
+## 生命周期
+
+### `NewServer`
 
 ```go
-// GET请求
-server.GET("/users", getUsersHandler)
-
-// POST请求
-server.POST("/users", createUserHandler)
-
-// PUT请求
-server.PUT("/users/:id", updateUserHandler)
-
-// DELETE请求
-server.DELETE("/users/:id", deleteUserHandler)
-
-// PATCH请求
-server.PATCH("/users/:id", patchUserHandler)
-
-// 任意方法
-server.Any("/webhook", webhookHandler)
-
-// 静态文件
-server.Static("/static", "./static")
-server.StaticFile("/favicon.ico", "./favicon.ico")
+srv := httpserver.NewServer(cfg, opts...)
 ```
 
-#### 路由组
+- 保留现有 Gin 路由注册方式
+- 支持通过 `Option` 注入 hooks、模块等扩展能力
+
+### `Start`
 
 ```go
-// API v1 路由组
-apiV1 := server.Group("/api/v1")
-{
-    // 用户相关路由
-    users := apiV1.Group("/users")
-    {
-        users.GET("", getUsersHandler)
-        users.POST("", createUserHandler)
-        users.GET("/:id", getUserHandler)
-        users.PUT("/:id", updateUserHandler)
-        users.DELETE("/:id", deleteUserHandler)
-    }
-    
-    // 订单相关路由
-    orders := apiV1.Group("/orders")
-    {
-        orders.GET("", getOrdersHandler)
-        orders.POST("", createOrderHandler)
-        orders.GET("/:id", getOrderHandler)
-    }
-}
-
-// 管理后台路由组
-admin := server.Group("/admin")
-admin.Use(authMiddleware, adminMiddleware)
-{
-    admin.GET("/dashboard", dashboardHandler)
-    admin.GET("/users", adminGetUsersHandler)
-    admin.GET("/orders", adminGetOrdersHandler)
+if err := srv.Start(); err != nil {
+	return fmt.Errorf("start server: %w", err)
 }
 ```
 
-### 中间件
+- 非阻塞启动
+- 同步返回监听失败错误
+- 不再 `panic`
 
-#### 内置中间件
-
-```go
-// 日志中间件
-server.Use(httpserver.LoggerMiddleware())
-
-// 恢复中间件
-server.Use(httpserver.RecoveryMiddleware())
-
-// CORS中间件
-server.Use(httpserver.CorsMiddleware())
-
-// 请求ID中间件
-server.Use(httpserver.RequestIDMiddleware())
-
-// 超时中间件
-server.Use(httpserver.TimeoutMiddleware(30 * time.Second))
-
-// 限流中间件
-server.Use(httpserver.RateLimitMiddleware(100, time.Minute))
-
-// 指标中间件
-server.Use(httpserver.MetricsMiddleware())
-```
-
-#### 自定义中间件
+### `Serve`
 
 ```go
-// 认证中间件
-func authMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        token := c.GetHeader("Authorization")
-        if token == "" {
-            c.JSON(401, gin.H{"error": "未授权"})
-            c.Abort()
-            return
-        }
-        
-        // 验证token...
-        userID := validateToken(token)
-        if userID == "" {
-            c.JSON(401, gin.H{"error": "无效的token"})
-            c.Abort()
-            return
-        }
-        
-        // 设置用户信息到上下文
-        c.Set("user_id", userID)
-        c.Next()
-    }
+ln, err := net.Listen("tcp", "127.0.0.1:8080")
+if err != nil {
+	return fmt.Errorf("listen: %w", err)
 }
 
-// 使用自定义中间件
-server.Use(authMiddleware())
-```
-
-### 上下文管理
-
-#### 从Gin Context获取请求上下文
-
-```go
-func userHandler(c *gin.Context) {
-    // 获取请求上下文
-    ctx := httpserver.ContextFromGin(c)
-    
-    // 创建带上下文的日志记录器
-    log := logger.FromContext(ctx)
-    
-    // 获取请求ID
-    requestID := httpserver.GetRequestID(c)
-    
-    // 获取用户ID（从中间件设置）
-    userID, exists := c.Get("user_id")
-    if !exists {
-        c.JSON(401, gin.H{"error": "用户未认证"})
-        return
-    }
-    
-    log.Info("处理用户请求", "user_id", userID, "request_id", requestID)
-    
-    // 处理请求...
-    c.JSON(200, gin.H{"message": "success"})
+if err := srv.Serve(ln); err != nil {
+	return fmt.Errorf("serve: %w", err)
 }
 ```
 
-#### 设置上下文值
+- 使用调用方提供的 `net.Listener`
+- 会同时启动独立健康检查端口（如果配置了 `HealthCheckPort`）
+
+### `Run`
 
 ```go
-func setContextMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        // 设置请求开始时间
-        c.Set("start_time", time.Now())
-        
-        // 设置客户端IP
-        c.Set("client_ip", c.ClientIP())
-        
-        // 设置用户代理
-        c.Set("user_agent", c.GetHeader("User-Agent"))
-        
-        c.Next()
-    }
+if err := srv.Run(); err != nil {
+	return fmt.Errorf("run server: %w", err)
 }
 ```
 
-### 错误处理
+- 阻塞运行
+- 内部自己创建 listener
 
-#### 全局错误处理
-
-```go
-// 注册全局错误处理器
-server.SetErrorHandler(func(c *gin.Context, err error) {
-    log := logger.FromContext(httpserver.ContextFromGin(c))
-    
-    // 记录错误
-    log.Error("请求处理失败", "error", err, "path", c.Request.URL.Path)
-    
-    // 根据错误类型返回不同的响应
-    switch {
-    case errors.IsInvalidParam(err):
-        c.JSON(400, gin.H{"error": "参数错误", "message": err.Error()})
-        
-    case errors.IsNotFound(err):
-        c.JSON(404, gin.H{"error": "资源不存在", "message": err.Error()})
-        
-    case errors.IsUnauthorized(err):
-        c.JSON(401, gin.H{"error": "未授权", "message": err.Error()})
-        
-    default:
-        c.JSON(500, gin.H{"error": "服务器内部错误"})
-    }
-})
-```
-
-#### 中间件错误处理
+### `Errors`
 
 ```go
-func errorRecoveryMiddleware() gin.HandlerFunc {
-    return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
-        log := logger.FromContext(httpserver.ContextFromGin(c))
-        
-        log.Error("请求panic", "panic", recovered, "path", c.Request.URL.Path)
-        
-        c.JSON(500, gin.H{
-            "error": "服务器内部错误",
-            "request_id": httpserver.GetRequestID(c),
-        })
-    })
+select {
+case err := <-srv.Errors():
+	log.Printf("serve error: %v", err)
+default:
 }
 ```
 
-### 健康检查
+- 暴露运行期服务错误
+- 适合配合 `Start()` 使用
 
-#### 默认健康检查
-
-服务器默认启用健康检查功能，无需额外配置：
+### `Shutdown`
 
 ```go
-// 创建服务器（默认启用健康检查）
-server := httpserver.NewServer(nil)
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
 
-// 健康检查端点自动注册为 GET /health
-// 返回简单的健康状态
+if err := srv.Shutdown(ctx); err != nil {
+	return fmt.Errorf("shutdown server: %w", err)
+}
 ```
 
-#### 带管理器的健康检查
+- 同时关闭主服务和独立健康检查服务
 
-使用健康检查管理器可以添加多个检查器：
+## 生命周期 hooks
+
+`httpserver` 不依赖 `kit` 或任何具体日志库。需要日志、指标或审计时，用 hooks 接入你自己的实现。
 
 ```go
-// 创建健康检查管理器
-manager := httpserver.NewHealthCheckManager("1.0.0")
-
-// 添加数据库检查器
-manager.AddChecker(httpserver.NewDatabaseHealthChecker("database", db))
-
-// 添加HTTP服务检查器
-manager.AddChecker(httpserver.NewHTTPHealthChecker("api_service", "http://api.example.com/health", 5*time.Second))
-
-// 添加自定义检查器
-manager.AddChecker(httpserver.NewCustomHealthChecker("custom_check", func(ctx context.Context) error {
-    // 自定义检查逻辑
-    return nil
+srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
+	OnStarted: func(ctx context.Context, event httpserver.LifecycleEvent) {
+		log.Printf("server started addr=%s health=%s", event.Addr, event.HealthAddr)
+	},
+	OnServeError: func(ctx context.Context, event httpserver.LifecycleEvent) {
+		log.Printf("server error addr=%s err=%v", event.Addr, event.Err)
+	},
 }))
-
-// 启用带管理器的健康检查
-server.EnableHealthCheckWithManager(manager)
 ```
 
-#### 健康检查配置
+## 健康检查
+
+### 共享主端口
 
 ```go
-server := httpserver.NewServer(&httpserver.Config{
-    Host:            "0.0.0.0",
-    Port:            8080,
-    EnableHealthCheck: true,        // 启用健康检查
-    HealthCheckPath: "/health",     // 健康检查路径
-    HealthCheckPort: 0,             // 健康检查端口（0表示使用主端口）
+srv := httpserver.NewServer(&httpserver.Config{
+	Host:              "0.0.0.0",
+	Port:              8080,
+	EnableHealthCheck: true,
+	HealthCheckPath:   "/healthz",
+	HealthCheckPort:   0,
 })
 ```
 
-#### 健康检查响应格式
+此时健康检查接口和业务接口共用主端口。
 
-**默认健康检查响应：**
-```json
-{
-    "status": "healthy",
-    "timestamp": 1640995200,
-    "version": "1.0.0"
-}
-```
+### 独立健康检查端口
 
-**带管理器的健康检查响应：**
-```json
-{
-    "status": "healthy",
-    "timestamp": 1640995200,
-    "version": "1.0.0",
-    "uptime": 3600,
-    "checks": {
-        "database": {
-            "status": "healthy"
-        },
-        "api_service": {
-            "status": "healthy"
-        },
-        "custom_check": {
-            "status": "healthy"
-        }
-    }
-}
-```
-
-**不健康时的响应：**
-```json
-{
-    "status": "unhealthy",
-    "timestamp": 1640995200,
-    "version": "1.0.0",
-    "uptime": 3600,
-    "checks": {
-        "database": {
-            "status": "unhealthy",
-            "error": "connection timeout"
-        }
-    },
-    "error": "service unavailable"
-}
-```
-
-#### 内置健康检查器
-
-**数据库健康检查器：**
 ```go
-// 适用于任何实现了Ping()方法的数据库连接
+srv := httpserver.NewServer(&httpserver.Config{
+	Host:              "0.0.0.0",
+	Port:              8080,
+	EnableHealthCheck: true,
+	HealthCheckPath:   "/healthz",
+	HealthCheckPort:   18080,
+})
+```
+
+此时：
+
+- 业务接口监听 `8080`
+- 健康检查只监听 `18080`
+
+### 带健康检查管理器
+
+```go
+manager := httpserver.NewHealthCheckManager("1.0.0")
 manager.AddChecker(httpserver.NewDatabaseHealthChecker("mysql", mysqlDB))
-manager.AddChecker(httpserver.NewDatabaseHealthChecker("redis", redisDB))
+manager.AddChecker(httpserver.NewHTTPHealthChecker("payment", "http://payment/healthz", 5*time.Second))
+
+srv := httpserver.NewServer(&httpserver.Config{
+	Host:              "0.0.0.0",
+	Port:              8080,
+	EnableHealthCheck: true,
+	HealthCheckPath:   "/healthz",
+	HealthCheckPort:   18080,
+})
+
+srv.EnableHealthCheckWithManager(manager)
 ```
 
-**HTTP服务健康检查器：**
+## 模块化路由
+
+如果你希望项目按业务模块组织路由，可以实现 `RouteModule`：
+
 ```go
-// 检查外部HTTP服务的健康状态
-manager.AddChecker(httpserver.NewHTTPHealthChecker(
-    "payment_service", 
-    "http://payment.example.com/health", 
-    5*time.Second,
+type RouteModule interface {
+	RegisterRoutes(r gin.IRoutes)
+}
+```
+
+推荐由应用装配层做构造函数注入：
+
+```go
+db, err := database.New(dbConfig)
+if err != nil {
+	return fmt.Errorf("init db: %w", err)
+}
+
+userRepo := NewUserRepo(db)
+authSvc := NewAuthService(userRepo)
+userModule := NewUserModule(authSvc)
+
+srv := httpserver.NewServer(cfg, httpserver.WithModules(userModule))
+```
+
+这样 `httpserver` 只负责路由与传输层，不负责依赖注入容器。
+
+## Typed handler
+
+### `HandleJSON`
+
+适用于 JSON body 请求：
+
+```go
+r.POST("/login", httpserver.HandleJSON(login))
+```
+
+### `Handle`
+
+适用于自定义 decoder：
+
+```go
+r.GET("/users", httpserver.Handle(
+	listUsers,
+	httpserver.WithDecoder(httpserver.DecodeQuery[ListUsersRequest]()),
 ))
 ```
 
-**自定义健康检查器：**
+### 可用 decoder
+
 ```go
-// 实现自定义检查逻辑
-manager.AddChecker(httpserver.NewCustomHealthChecker("file_system", func(ctx context.Context) error {
-    // 检查磁盘空间
-    if diskUsage > 90 {
-        return fmt.Errorf("磁盘使用率过高: %.1f%%", diskUsage)
-    }
-    return nil
-}))
+httpserver.DecodeJSON[Req]()
+httpserver.DecodeQuery[Req]()
+httpserver.DecodeURI[Req]()
+httpserver.ComposeDecoder(
+	httpserver.DecodeURI[Req](),
+	httpserver.DecodeQuery[Req](),
+)
 ```
 
-#### 禁用健康检查
+### 自动校验
+
+如果请求类型实现以下任一方法，handler 会自动调用：
 
 ```go
-server := httpserver.NewServer(&httpserver.Config{
-    EnableHealthCheck: false,  // 禁用健康检查
+Validate() error
+Validate(context.Context) error
+```
+
+### 错误映射
+
+默认行为：
+
+- 解码失败 -> `400`
+- 校验失败 -> `422`
+- 业务错误 -> `500`
+
+也可以自定义：
+
+```go
+httpserver.WithErrorMapper(func(err error) (int, any) {
+	if errors.Is(err, ErrDuplicateUser) {
+		return http.StatusConflict, gin.H{"error": "duplicate"}
+	}
+
+	return http.StatusInternalServerError, gin.H{"error": err.Error()}
 })
 ```
 
-## 🏗️ 最佳实践
-
-### 1. 服务器配置
-
-#### 从配置文件加载
+### 成功状态码与自定义编码器
 
 ```go
-type ServerConfig struct {
-    Host string `mapstructure:"host"`
-    Port int    `mapstructure:"port"`
-    Mode string `mapstructure:"mode"`
-    
-    // 超时配置
-    ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-    WriteTimeout time.Duration `mapstructure:"write_timeout"`
-    IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
-    
-    // 中间件配置
-    EnableLogger   bool `mapstructure:"enable_logger"`
-    EnableRecovery bool `mapstructure:"enable_recovery"`
-    EnableCors     bool `mapstructure:"enable_cors"`
-}
-
-func loadServerConfig() (*httpserver.Config, error) {
-    var cfg struct {
-        Server ServerConfig `mapstructure:"server"`
-    }
-    
-    if err := config.LoadConfig(&cfg); err != nil {
-        return nil, err
-    }
-    
-    return &httpserver.Config{
-        Host:          cfg.Server.Host,
-        Port:          cfg.Server.Port,
-        Mode:          cfg.Server.Mode,
-        ReadTimeout:   cfg.Server.ReadTimeout,
-        WriteTimeout:  cfg.Server.WriteTimeout,
-        IdleTimeout:   cfg.Server.IdleTimeout,
-        EnableLogger:  cfg.Server.EnableLogger,
-        EnableRecovery: cfg.Server.EnableRecovery,
-        EnableCors:    cfg.Server.EnableCors,
-    }, nil
-}
+httpserver.HandleJSON(
+	createUser,
+	httpserver.WithSuccessStatus(http.StatusCreated),
+	httpserver.WithEncoder(func(c *gin.Context, status int, resp any) {
+		c.JSON(status, gin.H{
+			"data": resp,
+		})
+	}),
+)
 ```
 
-### 2. 路由组织
+## 中间件与上下文
 
-#### 模块化路由
+### Trace / Request ID
 
 ```go
-// 用户路由模块
-func registerUserRoutes(server *httpserver.Server) {
-    users := server.Group("/api/v1/users")
-    {
-        users.GET("", getUsersHandler)
-        users.POST("", createUserHandler)
-        users.GET("/:id", getUserHandler)
-        users.PUT("/:id", updateUserHandler)
-        users.DELETE("/:id", deleteUserHandler)
-    }
-}
-
-// 订单路由模块
-func registerOrderRoutes(server *httpserver.Server) {
-    orders := server.Group("/api/v1/orders")
-    {
-        orders.GET("", getOrdersHandler)
-        orders.POST("", createOrderHandler)
-        orders.GET("/:id", getOrderHandler)
-        orders.PUT("/:id", updateOrderHandler)
-        orders.DELETE("/:id", deleteOrderHandler)
-    }
-}
-
-// 主函数
-func main() {
-    server := httpserver.New(config)
-    
-    // 注册路由模块
-    registerUserRoutes(server)
-    registerOrderRoutes(server)
-    
-    server.Run()
-}
+srv.Use(
+	httpserver.TraceIDMiddleware(),
+	httpserver.RequestIDMiddleware(),
+)
 ```
 
-### 3. 中间件链
-
-#### 中间件顺序
+### CORS
 
 ```go
-func setupMiddlewares(server *httpserver.Server) {
-    // 1. 基础中间件（最先执行）
-    server.Use(httpserver.RequestIDMiddleware())
-    server.Use(httpserver.LoggerMiddleware())
-    server.Use(httpserver.RecoveryMiddleware())
-    
-    // 2. 安全中间件
-    server.Use(httpserver.CorsMiddleware())
-    server.Use(httpserver.RateLimitMiddleware(100, time.Minute))
-    
-    // 3. 业务中间件
-    server.Use(authMiddleware())
-    server.Use(permissionMiddleware())
-    
-    // 4. 监控中间件（最后执行）
-    server.Use(httpserver.MetricsMiddleware())
-}
+srv.Use(httpserver.CORSMiddleware())
 ```
 
-### 4. 处理器设计
-
-#### 结构化处理器
+### 从 Gin 提取请求上下文
 
 ```go
-// 用户处理器
-type UserHandler struct {
-    userService *UserService
-    logger      *logger.Logger
-}
-
-func NewUserHandler(userService *UserService, logger *logger.Logger) *UserHandler {
-    return &UserHandler{
-        userService: userService,
-        logger:      logger,
-    }
-}
-
-func (h *UserHandler) GetUsers(c *gin.Context) {
-    ctx := httpserver.ContextFromGin(c)
-    log := logger.FromContext(ctx)
-    
-    // 获取查询参数
-    page := c.DefaultQuery("page", "1")
-    size := c.DefaultQuery("size", "10")
-    
-    // 调用服务层
-    users, total, err := h.userService.GetUsers(ctx, page, size)
-    if err != nil {
-        log.Error("获取用户列表失败", "error", err)
-        c.JSON(500, gin.H{"error": "获取用户列表失败"})
-        return
-    }
-    
-    log.Info("获取用户列表成功", "count", len(users), "total", total)
-    
-    c.JSON(200, gin.H{
-        "data": users,
-        "total": total,
-        "page": page,
-        "size": size,
-    })
-}
-
-func (h *UserHandler) CreateUser(c *gin.Context) {
-    ctx := httpserver.ContextFromGin(c)
-    log := logger.FromContext(ctx)
-    
-    var user User
-    if err := c.ShouldBindJSON(&user); err != nil {
-        log.Warn("请求数据绑定失败", "error", err)
-        c.JSON(400, gin.H{"error": "无效的请求数据"})
-        return
-    }
-    
-    // 调用服务层
-    createdUser, err := h.userService.CreateUser(ctx, &user)
-    if err != nil {
-        log.Error("创建用户失败", "error", err)
-        c.JSON(500, gin.H{"error": "创建用户失败"})
-        return
-    }
-    
-    log.Info("创建用户成功", "user_id", createdUser.ID)
-    
-    c.JSON(201, createdUser)
-}
-```
-
-### 5. 错误处理
-
-#### 统一错误响应
-
-```go
-// 错误响应结构
-type ErrorResponse struct {
-    Error   string                 `json:"error"`
-    Message string                 `json:"message,omitempty"`
-    Code    int                   `json:"code,omitempty"`
-    Details map[string]interface{} `json:"details,omitempty"`
-}
-
-// 成功响应结构
-type SuccessResponse struct {
-    Data    interface{}            `json:"data"`
-    Message string                 `json:"message,omitempty"`
-    Meta    map[string]interface{} `json:"meta,omitempty"`
-}
-
-// 统一响应函数
-func sendError(c *gin.Context, statusCode int, err error) {
-    response := ErrorResponse{
-        Error:   err.Error(),
-        Code:    statusCode,
-    }
-    
-    // 如果是自定义错误，获取更多信息
-    if customErr, ok := err.(*errors.Error); ok {
-        response.Message = customErr.GetMessage()
-        response.Details = errors.GetContext(err)
-    }
-    
-    c.JSON(statusCode, response)
-}
-
-func sendSuccess(c *gin.Context, data interface{}, message string) {
-    response := SuccessResponse{
-        Data:    data,
-        Message: message,
-    }
-    
-    c.JSON(200, response)
-}
-```
-
-### 6. 监控和指标
-
-#### 请求指标收集
-
-```go
-func metricsMiddleware() gin.HandlerFunc {
-    return func(c *gin.Context) {
-        start := time.Now()
-        
-        // 处理请求
-        c.Next()
-        
-        // 记录指标
-        duration := time.Since(start)
-        statusCode := c.Writer.Status()
-        
-        // 记录请求计数
-        requestCounter.WithLabelValues(
-            c.Request.Method,
-            c.FullPath(),
-            fmt.Sprintf("%d", statusCode),
-        ).Inc()
-        
-        // 记录请求延迟
-        requestDuration.WithLabelValues(
-            c.Request.Method,
-            c.FullPath(),
-        ).Observe(duration.Seconds())
-        
-        // 记录响应大小
-        responseSize.WithLabelValues(
-            c.Request.Method,
-            c.FullPath(),
-        ).Observe(float64(c.Writer.Size()))
-    }
-}
-```
-
-### 7. 优雅关闭
-
-```go
-func gracefulShutdown(server *httpserver.Server) {
-    // 等待中断信号
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
-    
-    log := logger.New()
-    log.Info("正在关闭服务器...")
-    
-    // 设置关闭超时
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
-    
-    if err := server.Shutdown(ctx); err != nil {
-        log.Error("服务器关闭失败", "error", err)
-    }
-    
-    log.Info("服务器已关闭")
-}
-```
-
-## 🧪 测试
-
-### 单元测试
-
-```go
-func TestUserHandler_GetUsers(t *testing.T) {
-    // 创建测试服务器
-    server := httpserver.New(&httpserver.Config{
-        Host: "localhost",
-        Port: 0, // 使用随机端口
-        Mode: "test",
-    })
-    
-    // 创建模拟服务
-    mockUserService := &MockUserService{}
-    handler := NewUserHandler(mockUserService, logger.New())
-    
-    // 注册路由
-    server.GET("/users", handler.GetUsers)
-    
-    // 启动测试服务器
-    go server.Run()
-    
-    // 等待服务器启动
-    time.Sleep(100 * time.Millisecond)
-    
-    // 发送测试请求
-    resp, err := http.Get("http://localhost:8080/users")
-    if err != nil {
-        t.Fatalf("请求失败: %v", err)
-    }
-    defer resp.Body.Close()
-    
-    // 验证响应
-    if resp.StatusCode != 200 {
-        t.Errorf("期望状态码 200，实际 %d", resp.StatusCode)
-    }
-    
-    var response map[string]interface{}
-    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-        t.Fatalf("解析响应失败: %v", err)
-    }
-    
-    if response["data"] == nil {
-        t.Error("响应中缺少data字段")
-    }
-}
-```
-
-### 集成测试
-
-```go
-func TestUserAPI_Integration(t *testing.T) {
-    // 创建测试数据库
-    db := setupTestDatabase(t)
-    defer cleanupTestDatabase(t, db)
-    
-    // 创建服务
-    userService := NewUserService(db)
-    handler := NewUserHandler(userService, logger.New())
-    
-    // 创建测试服务器
-    server := httpserver.New(&httpserver.Config{
-        Host: "localhost",
-        Port: 0,
-        Mode: "test",
-    })
-    
-    // 注册路由
-    server.POST("/users", handler.CreateUser)
-    server.GET("/users/:id", handler.GetUser)
-    
-    // 启动服务器
-    go server.Run()
-    time.Sleep(100 * time.Millisecond)
-    
-    // 测试创建用户
-    userData := map[string]interface{}{
-        "name":  "测试用户",
-        "email": "test@example.com",
-    }
-    
-    userJSON, _ := json.Marshal(userData)
-    resp, err := http.Post("http://localhost:8080/users", 
-        "application/json", bytes.NewBuffer(userJSON))
-    if err != nil {
-        t.Fatalf("创建用户请求失败: %v", err)
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != 201 {
-        t.Errorf("期望状态码 201，实际 %d", resp.StatusCode)
-    }
-    
-    // 验证用户创建成功
-    var createdUser User
-    if err := json.NewDecoder(resp.Body).Decode(&createdUser); err != nil {
-        t.Fatalf("解析响应失败: %v", err)
-    }
-    
-    if createdUser.ID == "" {
-        t.Error("用户ID为空")
-    }
-}
-```
-
-## 🔍 故障排除
-
-### 常见问题
-
-#### 1. 端口被占用
-
-```bash
-# 检查端口占用
-lsof -i :8080
-
-# 杀死占用进程
-kill -9 <PID>
-
-# 或者使用不同的端口
-server := httpserver.New(&httpserver.Config{
-    Host: "0.0.0.0",
-    Port: 8081, // 使用不同端口
-})
-```
-
-#### 2. 中间件顺序问题
-
-```go
-// ❌ 错误的中间件顺序
-server.Use(authMiddleware())        // 需要用户信息
-server.Use(httpserver.LoggerMiddleware()) // 但日志中间件在认证之前
-
-// ✅ 正确的中间件顺序
-server.Use(httpserver.LoggerMiddleware()) // 日志中间件最先
-server.Use(authMiddleware())        // 认证中间件在日志之后
-```
-
-#### 3. 上下文传递问题
-
-```go
-// ❌ 错误的方式
 func handler(c *gin.Context) {
-    ctx := context.Background() // 丢失请求上下文
-    // ...
-}
-
-// ✅ 正确的方式
-func handler(c *gin.Context) {
-    ctx := httpserver.ContextFromGin(c) // 获取请求上下文
-    // ...
+	ctx := httpserver.ContextFromGin(c)
+	_ = ctx
 }
 ```
 
-### 性能优化
+## 推荐实践
 
-```go
-// 1. 启用Gin的发布模式
-server := httpserver.New(&httpserver.Config{
-    Mode: "release", // 禁用调试信息
-})
-
-// 2. 配置连接池
-server.SetMaxConnections(1000)
-
-// 3. 启用压缩
-server.Use(gin.Recovery())
-
-// 4. 配置静态文件缓存
-server.Static("/static", "./static")
-
-// 5. 使用连接池
-server.SetConnState(func(conn net.Conn, state http.ConnState) {
-    // 监控连接状态
-})
-```
-
-## 📚 相关链接
-
-- [Gin官方文档](https://gin-gonic.com/)
-- [示例项目](./examples/http-server/)
-- [返回首页](../README.md) 
+- 需要灵活时，直接使用 Gin 风格路由
+- 需要统一接口契约时，优先用 `Handle` / `HandleJSON`
+- 依赖装配放到 `internal/app` 或类似的 composition root
+- 模块通过 `RouteModule` 接入，不在 `httpserver` 里做容器
+- 日志、指标、审计通过 hooks 接入，不强绑任何具体实现

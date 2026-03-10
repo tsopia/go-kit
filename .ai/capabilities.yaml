@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated_at: "2026-03-05"
+updated_at: "2026-03-10"
 
 capabilities:
   - name: kit
@@ -82,25 +82,28 @@ capabilities:
     dependencies: [kit]
 
   - name: httpserver
-    description: HTTP 服务器（Gin 封装，支持中间件链）
+    description: HTTP 服务器（Gin 封装，支持 typed handler、模块注册与健康检查）
     import: github.com/tsopia/go-kit/httpserver
     scenarios:
       - name: 创建服务器
         snippet: |
-          srv := httpserver.New(httpserver.Config{
+          srv := httpserver.NewServer(&httpserver.Config{
               Port: 8080,
           })
-      - name: 注册路由
+      - name: 注册 Gin 路由
         snippet: |
           srv.GET("/health", func(c *gin.Context) {
               c.JSON(200, gin.H{"status": "ok"})
           })
+      - name: 注册 typed handler
+        snippet: |
+          srv.POST("/login", httpserver.HandleJSON(login))
       - name: 启动服务器
         snippet: |
           if err := srv.Start(); err != nil {
               log.Fatal(err)
           }
-    dependencies: [kit]
+    dependencies: []
 
   - name: errors
     description: 错误处理（统一错误码、错误包装）
