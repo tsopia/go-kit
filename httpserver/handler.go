@@ -40,6 +40,7 @@ type HandlerOption func(*handlerConfig)
 
 type handlerConfig struct {
 	successStatus int
+	decoder       func(*gin.Context, any) error
 	encoder       func(*gin.Context, int, any)
 	errorMapper   ErrorMapper
 }
@@ -65,14 +66,35 @@ func WithEncoder(encoder func(*gin.Context, int, any)) HandlerOption {
 	}
 }
 
-// HandleJSON 将强类型业务函数适配成 JSON HTTP handler。
-func HandleJSON[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
-	cfg := handlerConfig{
+// WithDecoder 覆盖默认请求解码器。
+func WithDecoder[Req any](decoder func(*gin.Context, *Req) error) HandlerOption {
+	return func(cfg *handlerConfig) {
+		cfg.decoder = func(c *gin.Context, target any) error {
+			req, ok := target.(*Req)
+			if !ok {
+				return fmt.Errorf("decode target type mismatch")
+			}
+
+			return decoder(c, req)
+		}
+	}
+}
+
+func newHandlerConfig() handlerConfig {
+	return handlerConfig{
 		successStatus: http.StatusOK,
+		decoder: func(c *gin.Context, target any) error {
+			return c.ShouldBindJSON(target)
+		},
 		encoder: func(c *gin.Context, status int, resp any) {
 			c.JSON(status, resp)
 		},
 	}
+}
+
+// Handle 将强类型业务函数适配成通用 HTTP handler。
+func Handle[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	cfg := newHandlerConfig()
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -82,7 +104,7 @@ func HandleJSON[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOpt
 
 	return func(c *gin.Context) {
 		var req Req
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := cfg.decoder(c, &req); err != nil {
 			renderHandlerError(c, cfg, &handlerRequestError{
 				kind: handlerErrorKindDecode,
 				err:  fmt.Errorf("decode request: %w", err),
@@ -106,6 +128,52 @@ func HandleJSON[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOpt
 		}
 
 		cfg.encoder(c, cfg.successStatus, resp)
+	}
+}
+
+// HandleJSON 将强类型业务函数适配成 JSON HTTP handler。
+func HandleJSON[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	combined := make([]HandlerOption, 0, len(opts)+1)
+	combined = append(combined, WithDecoder(DecodeJSON[Req]()))
+	combined = append(combined, opts...)
+
+	return Handle(fn, combined...)
+}
+
+// DecodeJSON 使用 JSON body 填充请求对象。
+func DecodeJSON[Req any]() func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		return c.ShouldBindJSON(req)
+	}
+}
+
+// DecodeQuery 使用 query string 填充请求对象。
+func DecodeQuery[Req any]() func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		return c.ShouldBindQuery(req)
+	}
+}
+
+// DecodeURI 使用 URI 参数填充请求对象。
+func DecodeURI[Req any]() func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		return c.ShouldBindUri(req)
+	}
+}
+
+// ComposeDecoder 顺序执行多个 decoder。
+func ComposeDecoder[Req any](decoders ...func(*gin.Context, *Req) error) func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		for _, decoder := range decoders {
+			if decoder == nil {
+				continue
+			}
+			if err := decoder(c, req); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	}
 }
 
