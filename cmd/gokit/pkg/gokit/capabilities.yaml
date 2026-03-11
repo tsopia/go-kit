@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated_at: "2026-03-05"
+updated_at: "2026-03-11"
 
 capabilities:
   - name: kit
@@ -49,6 +49,17 @@ capabilities:
       - name: 创建服务器
         snippet: srv := httpserver.New(cfg)
     dependencies: [kit]
+
+  - name: swagger
+    description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）
+    import: github.com/tsopia/go-kit/httpserver/swagger
+    scenarios:
+      - name: 挂载 Swagger UI
+        snippet: |
+          httpswagger.Register(public, httpswagger.Config{
+              Path: "/swagger/*any",
+          })
+    dependencies: [httpserver]
 
   - name: errors
     description: 错误处理

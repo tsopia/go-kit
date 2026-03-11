@@ -19,3 +19,20 @@ func TestLoadCapabilities(t *testing.T) {
 		t.Error("Capability name should not be empty")
 	}
 }
+
+func TestGetCapabilitySwagger(t *testing.T) {
+	t.Parallel()
+
+	capability, err := GetCapability("swagger")
+	if err != nil {
+		t.Fatalf("GetCapability(swagger) failed: %v", err)
+	}
+
+	if capability.Import != "github.com/tsopia/go-kit/httpserver/swagger" {
+		t.Fatalf("unexpected import: %s", capability.Import)
+	}
+
+	if len(capability.Scenarios) == 0 {
+		t.Fatal("expected swagger scenarios")
+	}
+}

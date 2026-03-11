@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated_at: "2026-03-10"
+updated_at: "2026-03-11"
 
 capabilities:
   - name: kit
@@ -104,6 +104,23 @@ capabilities:
               log.Fatal(err)
           }
     dependencies: []
+
+  - name: swagger
+    description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）
+    import: github.com/tsopia/go-kit/httpserver/swagger
+    scenarios:
+      - name: 挂载 Swagger UI
+        snippet: |
+          httpswagger.Register(public, httpswagger.Config{
+              Path: "/swagger/*any",
+          })
+      - name: 公开 Swagger 并保护业务路由
+        snippet: |
+          public := srv.Group("")
+          protected := srv.Group("/api/v1")
+          protected.Use(AuthMiddleware())
+          httpswagger.Register(public, httpswagger.Config{})
+    dependencies: [httpserver]
 
   - name: errors
     description: 错误处理（统一错误码、错误包装）

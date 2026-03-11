@@ -25,6 +25,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `RouteModule` 支持按模块注册路由
 - `Handle` / `HandleJSON` 支持 typed handler
 - `DecodeJSON` / `DecodeQuery` / `DecodeURI` / `ComposeDecoder` 支持请求解码组合
+- `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
 ## 快速开始
 
@@ -237,12 +238,130 @@ Validate() error
 Validate(context.Context) error
 ```
 
+## Swagger 集成
+
+推荐通过 `httpserver/swagger` 子包挂载 Swagger UI，而不是把文档路由和业务鉴权揉在一起。
+
+安装依赖：
+
+```bash
+go get github.com/tsopia/go-kit/httpserver/swagger
+go install github.com/swaggo/swag/cmd/swag@latest
+```
+
+生成文档：
+
+```bash
+swag init -g cmd/server/main.go -o internal/docs
+```
+
+推荐路由组织：
+
+```go
+import (
+	_ "your/module/internal/docs"
+
+	"github.com/tsopia/go-kit/httpserver"
+	httpswagger "github.com/tsopia/go-kit/httpserver/swagger"
+)
+
+srv := httpserver.NewServer(nil)
+
+public := srv.Group("")
+protected := srv.Group("/api/v1")
+protected.Use(AuthMiddleware())
+
+httpswagger.Register(public, httpswagger.Config{})
+```
+
+推荐约定：
+
+- Swagger 默认公开访问，注册在 `public` 路由组
+- 业务鉴权只挂到受保护的 `Group()`，不要直接全局 `srv.Use(AuthMiddleware())`
+- 历史项目如果已经使用全局鉴权，中间件需要对白名单路径 `/swagger/` 放行
+- `swaggo` 注释写在 transport 层 typed handler 上，不写在 service 层
+
+### Swagger 注释模板
+
+推荐把 `swaggo` 注释写在被 `Handle...` 包装的 handler 上：
+
+```go
+type LoginRequest struct {
+	Email string `json:"email" binding:"required"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+}
+
+// login godoc
+// @Summary 用户登录
+// @Description 使用邮箱登录并返回访问令牌
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body LoginRequest true "登录请求"
+// @Success 200 {object} LoginResponse
+// @Failure 400 {object} map[string]string
+// @Failure 422 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /auth/login [post]
+func (m *UserModule) login(ctx context.Context, req LoginRequest) (LoginResponse, error) {
+	return m.auth.Login(ctx, req)
+}
+
+r.POST("/auth/login", httpserver.HandleJSON(m.login))
+```
+
+鉴权接口模板：
+
+```go
+// profile godoc
+// @Summary 获取当前用户信息
+// @Tags user
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} ProfileResponse
+// @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /users/me [get]
+func (m *UserModule) profile(ctx context.Context, req ProfileRequest) (ProfileResponse, error) {
+	return m.user.Profile(ctx, req)
+}
+```
+
+Query 接口模板：
+
+```go
+type ListUsersRequest struct {
+	Page int `form:"page"`
+	Size int `form:"size"`
+}
+
+// listUsers godoc
+// @Summary 用户列表
+// @Tags user
+// @Produce json
+// @Param page query int false "页码"
+// @Param size query int false "每页数量"
+// @Security BearerAuth
+// @Success 200 {object} ListUsersResponse
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /users [get]
+func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListUsersResponse, error) {
+	return m.user.List(ctx, req)
+}
+```
+
 ## 推荐实践
 
 - 需要灵活性时，直接使用 Gin 原生 handler
 - 需要统一接口契约时，优先使用 `Handle` / `HandleJSON`
 - 模块依赖在业务装配层注入，不在 `httpserver` 内做容器
 - 日志、指标、审计统一通过 `Hooks` 接入
+- Swagger 建议通过 `httpserver/swagger` 注册在公共路由组
 
 ## 更多说明
 

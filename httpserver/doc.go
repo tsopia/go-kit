@@ -16,5 +16,16 @@
 //
 //	srv.POST("/login", httpserver.HandleJSON(login))
 //
-// 更多信息请参考 README.md 和 docs/httpserver.md
+// Swagger 集成：
+//
+//	import (
+//	    _ "your/module/internal/docs"
+//
+//	    httpswagger "github.com/tsopia/go-kit/httpserver/swagger"
+//	)
+//
+//	public := srv.Group("")
+//	httpswagger.Register(public, httpswagger.Config{})
+//
+// 更多信息请参考 README.md、httpserver/swagger/README.md 和 docs/httpserver.md
 package httpserver
