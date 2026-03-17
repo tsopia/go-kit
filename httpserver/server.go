@@ -19,20 +19,20 @@ import (
 
 // Server HTTP服务器 - 最小化封装
 type Server struct {
-	config                *Config
-	engine                *gin.Engine
-	server                *http.Server
-	healthServer          *http.Server
-	serveErrCh            chan error
-	hooks                 Hooks
-	healthHandler         gin.HandlerFunc
-	healthRouteRegistered bool
+	config                   *Config
+	engine                   *gin.Engine
+	server                   *http.Server
+	healthServer             *http.Server
+	serveErrCh               chan error
+	hooks                    Hooks
+	healthHandler            gin.HandlerFunc
+	healthRouteRegistered    bool
 	readinessRouteRegistered bool
 	livenessRouteRegistered  bool
-	healthAddr            string
-	manualReady           bool
-	stateMu               sync.RWMutex
-	state                 State
+	healthAddr               string
+	manualReady              bool
+	stateMu                  sync.RWMutex
+	state                    State
 }
 
 // NewServer 创建新的HTTP服务器

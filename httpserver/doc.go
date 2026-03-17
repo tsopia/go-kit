@@ -16,6 +16,20 @@
 //
 //	srv.POST("/login", httpserver.HandleJSON(login))
 //
+// 通用中间件：
+//
+//	srv.Use(middleware.Recovery())
+//	srv.Use(middleware.Timeout(2 * time.Second))
+//
+// 可观测性扩展：
+//
+//	prometheus.Register(public, prometheus.Config{Path: "/metrics"})
+//	srv.Use(otel.Middleware(otel.Config{TracerName: "user-service"}))
+//
+// 官方默认装配：
+//
+//	srv := preset.NewProductionServer(nil)
+//
 // Swagger 集成：
 //
 //	import (

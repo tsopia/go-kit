@@ -25,8 +25,8 @@ func TestReadinessAndLivenessEndpoints(t *testing.T) {
 			wantLiveStatus:  http.StatusOK,
 		},
 		{
-			name: "manual readiness starts unready",
-			opts: []Option{WithManualReadiness()},
+			name:            "manual readiness starts unready",
+			opts:            []Option{WithManualReadiness()},
 			wantReadyStatus: http.StatusServiceUnavailable,
 			wantLiveStatus:  http.StatusOK,
 		},

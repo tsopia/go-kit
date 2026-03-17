@@ -43,12 +43,61 @@ capabilities:
     dependencies: [kit]
 
   - name: httpserver
-    description: HTTP 服务器
+    description: HTTP 服务器（Gin 封装，支持 typed handler、模块注册与健康检查）
     import: github.com/tsopia/go-kit/httpserver
     scenarios:
       - name: 创建服务器
-        snippet: srv := httpserver.New(cfg)
-    dependencies: [kit]
+        snippet: |
+          srv := httpserver.NewServer(&httpserver.Config{
+              Port: 8080,
+          })
+      - name: 注册 typed handler
+        snippet: |
+          srv.POST("/login", httpserver.HandleJSON(login))
+    dependencies: []
+
+  - name: middleware
+    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、CORS、安全头等）
+    import: github.com/tsopia/go-kit/httpserver/middleware
+    scenarios:
+      - name: 挂载恢复中间件
+        snippet: |
+          srv.Use(middleware.Recovery())
+      - name: 挂载超时中间件
+        snippet: |
+          srv.Use(middleware.Timeout(2 * time.Second))
+    dependencies: [httpserver]
+
+  - name: httpserver-prometheus
+    description: Prometheus 指标中间件与 /metrics 路由注册
+    import: github.com/tsopia/go-kit/httpserver/observability/prometheus
+    scenarios:
+      - name: 注册 metrics 路由
+        snippet: |
+          prometheusmiddleware.Register(public, prometheusmiddleware.Config{
+              Path: "/metrics",
+          })
+    dependencies: [httpserver, middleware]
+
+  - name: httpserver-otel
+    description: OpenTelemetry HTTP tracing 中间件
+    import: github.com/tsopia/go-kit/httpserver/observability/otel
+    scenarios:
+      - name: 挂载 tracing 中间件
+        snippet: |
+          srv.Use(httpotel.Middleware(httpotel.Config{
+              TracerName: "user-service",
+          }))
+    dependencies: [httpserver, middleware]
+
+  - name: preset
+    description: 官方推荐的 HTTP server 默认装配
+    import: github.com/tsopia/go-kit/httpserver/preset
+    scenarios:
+      - name: 创建生产默认服务器
+        snippet: |
+          srv := preset.NewProductionServer(cfg)
+    dependencies: [httpserver, middleware]
 
   - name: swagger
     description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）
