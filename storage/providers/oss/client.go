@@ -2,6 +2,7 @@ package oss
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -111,21 +112,10 @@ func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, e
 
 	resp, err := c.client.HeadObject(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, normalizeStatError(err)
 	}
 
-	contentType := ""
-	if resp.ContentType != nil {
-		contentType = *resp.ContentType
-	}
-
-	return &providers.ObjectInfo{
-		Key:          key,
-		Size:         resp.ContentLength,
-		LastModified: *resp.LastModified,
-		ETag:         *resp.ETag,
-		ContentType:  contentType,
-	}, nil
+	return buildObjectInfo(key, resp), nil
 }
 
 func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration, opts ...providers.SignOptionFunc) (string, error) {
@@ -351,4 +341,56 @@ func copyOSSChecksum(checksum *providers.DirectUploadChecksum) *providers.Direct
 
 	cloned := *checksum
 	return &cloned
+}
+
+func buildObjectInfo(key string, resp *oss.HeadObjectResult) *providers.ObjectInfo {
+	if resp == nil {
+		return nil
+	}
+
+	contentType := ""
+	if resp.ContentType != nil {
+		contentType = *resp.ContentType
+	}
+
+	info := &providers.ObjectInfo{
+		Key:         key,
+		Size:        resp.ContentLength,
+		ContentType: contentType,
+		Metadata:    copyOSSStringMap(resp.Metadata),
+	}
+	if resp.LastModified != nil {
+		info.LastModified = *resp.LastModified
+	}
+	if resp.ETag != nil {
+		info.ETag = *resp.ETag
+	}
+	if resp.ContentMD5 != nil && *resp.ContentMD5 != "" {
+		info.Checksums = map[string]string{
+			string(providers.DirectUploadChecksumMD5): *resp.ContentMD5,
+		}
+	}
+
+	return info
+}
+
+func normalizeStatError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var serviceErr *oss.ServiceError
+	if errors.As(err, &serviceErr) {
+		switch serviceErr.StatusCode {
+		case 404:
+			if serviceErr.Code == "NoSuchBucket" {
+				return providers.ErrBucketNotFound
+			}
+			return providers.ErrObjectNotFound
+		case 403:
+			return providers.ErrAccessDenied
+		}
+	}
+
+	return err
 }

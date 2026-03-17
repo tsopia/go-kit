@@ -2,10 +2,12 @@ package cos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/tencentyun/cos-go-sdk-v5"
@@ -105,22 +107,10 @@ func (c *client) Exists(ctx context.Context, key string) (bool, error) {
 func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, error) {
 	resp, err := c.client.Object.Head(ctx, key, nil)
 	if err != nil {
-		return nil, err
+		return nil, normalizeStatError(err)
 	}
 
-	// 从 Header 解析 Last-Modified
-	lastModified := time.Time{}
-	if lm := resp.Header.Get("Last-Modified"); lm != "" {
-		lastModified, _ = http.ParseTime(lm)
-	}
-
-	return &providers.ObjectInfo{
-		Key:          key,
-		Size:         resp.ContentLength,
-		LastModified: lastModified,
-		ETag:         resp.Header.Get("ETag"),
-		ContentType:  resp.Header.Get("Content-Type"),
-	}, nil
+	return buildObjectInfo(key, resp), nil
 }
 
 func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration, opts ...providers.SignOptionFunc) (string, error) {
@@ -413,4 +403,83 @@ func copyCOSChecksum(checksum *providers.DirectUploadChecksum) *providers.Direct
 
 	cloned := *checksum
 	return &cloned
+}
+
+func buildObjectInfo(key string, resp *cos.Response) *providers.ObjectInfo {
+	if resp == nil {
+		return nil
+	}
+
+	// 从 Header 解析 Last-Modified
+	lastModified := time.Time{}
+	if lm := resp.Header.Get("Last-Modified"); lm != "" {
+		lastModified, _ = http.ParseTime(lm)
+	}
+
+	info := &providers.ObjectInfo{
+		Key:          key,
+		Size:         resp.ContentLength,
+		LastModified: lastModified,
+		ETag:         resp.Header.Get("ETag"),
+		ContentType:  resp.Header.Get("Content-Type"),
+		Metadata:     extractMetadata(resp.Header, "x-cos-meta-"),
+		Checksums:    extractCOSChecksums(resp.Header),
+	}
+
+	return info
+}
+
+func extractMetadata(header http.Header, prefix string) map[string]string {
+	metadata := map[string]string{}
+	for key, values := range header {
+		if len(values) == 0 {
+			continue
+		}
+
+		lowerKey := strings.ToLower(key)
+		if !strings.HasPrefix(lowerKey, prefix) {
+			continue
+		}
+		metadata[strings.TrimPrefix(lowerKey, prefix)] = values[0]
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	return metadata
+}
+
+func extractCOSChecksums(header http.Header) map[string]string {
+	checksums := map[string]string{}
+	for key, values := range header {
+		if len(values) == 0 {
+			continue
+		}
+		if strings.ToLower(key) == "x-cos-hash-crc64ecma" {
+			checksums["crc64ecma"] = values[0]
+		}
+	}
+	if len(checksums) == 0 {
+		return nil
+	}
+
+	return checksums
+}
+
+func normalizeStatError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var cosErr *cos.ErrorResponse
+	if errors.As(err, &cosErr) && cosErr.Response != nil {
+		switch cosErr.Response.StatusCode {
+		case http.StatusNotFound:
+			return providers.ErrObjectNotFound
+		case http.StatusForbidden:
+			return providers.ErrAccessDenied
+		}
+	}
+
+	return err
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -47,6 +48,17 @@ func TestNormalizeDirectUploadRequest(t *testing.T) {
 			},
 		},
 		{
+			name: "upper mode is normalized",
+			req: DirectUploadRequest{
+				ObjectKey: "uploads/a.png",
+				Mode:      "PUT",
+			},
+			want: DirectUploadRequest{
+				ObjectKey: "uploads/a.png",
+				Mode:      DirectUploadModePut,
+			},
+		},
+		{
 			name: "content type and metadata are trimmed",
 			req: DirectUploadRequest{
 				ObjectKey:   "uploads/a.png",
@@ -72,6 +84,33 @@ func TestNormalizeDirectUploadRequest(t *testing.T) {
 					Exact: 10,
 					Min:   1,
 				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid mode is rejected",
+			req: DirectUploadRequest{
+				ObjectKey: "uploads/a.png",
+				Mode:      "stream",
+			},
+			wantErr: true,
+		},
+		{
+			name: "checksum requires supported algorithm",
+			req: DirectUploadRequest{
+				ObjectKey: "uploads/a.png",
+				Checksum: &DirectUploadChecksum{
+					Algorithm: DirectUploadChecksumAlgorithm("crc32"),
+					Value:     "deadbeef",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "size cannot be empty struct",
+			req: DirectUploadRequest{
+				ObjectKey: "uploads/a.png",
+				Size:      &DirectUploadSize{},
 			},
 			wantErr: true,
 		},
@@ -190,6 +229,54 @@ func TestVerifyDirectUploadObjectMismatch(t *testing.T) {
 	}
 	if len(result.Mismatches) != 2 {
 		t.Fatalf("unexpected mismatch count: %d", len(result.Mismatches))
+	}
+	if result.Mismatches[0].Field != "content_type" {
+		t.Fatalf("unexpected first mismatch field: %s", result.Mismatches[0].Field)
+	}
+	if result.Mismatches[1].Field != "size" {
+		t.Fatalf("unexpected second mismatch field: %s", result.Mismatches[1].Field)
+	}
+}
+
+func TestVerifyDirectUploadObjectNotFound(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeDirectUploadClient{
+		statErr: ErrObjectNotFound,
+	}
+
+	result, err := VerifyDirectUploadObjectWithClient(context.Background(), client, DirectUploadVerificationRequest{
+		ObjectKey: "uploads/missing.png",
+	})
+	if err != nil {
+		t.Fatalf("VerifyDirectUploadObjectWithClient() error = %v", err)
+	}
+	if result.Exists {
+		t.Fatal("expected object to be missing")
+	}
+	if result.Matched {
+		t.Fatal("expected missing object to be unmatched")
+	}
+}
+
+func TestVerifyDirectUploadObjectChecksumUnsupported(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeDirectUploadClient{
+		statResult: &ObjectInfo{
+			Key: "uploads/a.png",
+		},
+	}
+
+	_, err := VerifyDirectUploadObjectWithClient(context.Background(), client, DirectUploadVerificationRequest{
+		ObjectKey: "uploads/a.png",
+		Checksum: &DirectUploadChecksum{
+			Algorithm: DirectUploadChecksumMD5,
+			Value:     "deadbeef",
+		},
+	})
+	if !errors.Is(err, ErrUnsupportedDirectUploadConstraint) {
+		t.Fatalf("expected ErrUnsupportedDirectUploadConstraint, got %v", err)
 	}
 }
 

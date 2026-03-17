@@ -142,6 +142,9 @@ type DirectUploadVerificationResult struct {
 }
 
 var (
+	ErrObjectNotFound                    = errors.New("storage/providers: object not found")
+	ErrBucketNotFound                    = errors.New("storage/providers: bucket not found")
+	ErrAccessDenied                      = errors.New("storage/providers: access denied")
 	ErrUnsupportedDirectUploadMode       = errors.New("storage/providers: unsupported direct upload mode")
 	ErrUnsupportedDirectUploadConstraint = errors.New("storage/providers: unsupported direct upload constraint")
 )

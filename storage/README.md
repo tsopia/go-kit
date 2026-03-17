@@ -14,42 +14,43 @@ go get github.com/tsopia/go-kit/storage
 package main
 
 import (
-    "context"
-    "log"
-    "os"
-    "strings"
+	"context"
+	"log"
+	"os"
+	"strings"
+	"time"
 
-    "github.com/tsopia/go-kit/storage"
+	"github.com/tsopia/go-kit/storage"
 )
 
 func main() {
-    // 初始化
-    cfg := &storage.Config{
-        Type:            storage.TypeOSS,
-        Bucket:          "my-bucket",
-        Region:          "cn-hangzhou",
-        AccessKeyID:     os.Getenv("OSS_ACCESS_KEY_ID"),
-        AccessKeySecret: os.Getenv("OSS_ACCESS_KEY_SECRET"),
-    }
+	// 初始化
+	cfg := &storage.Config{
+		Type:            storage.TypeOSS,
+		Bucket:          "my-bucket",
+		Region:          "cn-hangzhou",
+		AccessKeyID:     os.Getenv("OSS_ACCESS_KEY_ID"),
+		AccessKeySecret: os.Getenv("OSS_ACCESS_KEY_SECRET"),
+	}
 
-    if err := storage.Configure(cfg); err != nil {
-        log.Fatal(err)
-    }
+	if err := storage.Configure(cfg); err != nil {
+		log.Fatal(err)
+	}
 
-    ctx := context.Background()
+	ctx := context.Background()
 
-    // 上传文件
-    data := strings.NewReader("hello world")
-    if err := storage.Upload(ctx, "test/hello.txt", data); err != nil {
-        log.Fatal(err)
-    }
+	// 上传文件
+	data := strings.NewReader("hello world")
+	if err := storage.Upload(ctx, "test/hello.txt", data); err != nil {
+		log.Fatal(err)
+	}
 
-    // 生成临时访问链接
-    url, err := storage.SignedURL(ctx, "test/hello.txt", 30*60)
-    if err != nil {
-        log.Fatal(err)
-    }
-    log.Println("URL:", url)
+	// 生成临时访问链接
+	url, err := storage.SignedURL(ctx, "test/hello.txt", 30*time.Minute)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("URL:", url)
 }
 ```
 
@@ -62,11 +63,7 @@ func main() {
 | Region | string | 是 | 地域，如 cn-hangzhou |
 | Endpoint | string | 否 | 自定义端点 |
 | AccessKeyID | string | 是 | Access Key ID |
-| AccessKeySecret | string | 条件 | OSS/COS 密钥 |
-| SecretAccessKey | string | 条件 | S3 密钥 |
-| SessionToken | string | 否 | 临时凭证 Token |
-| Timeout | duration | 否 | 超时时间，默认 30s |
-| MaxRetries | int | 否 | 重试次数，默认 3 |
+| AccessKeySecret | string | 是 | 访问密钥 |
 | DefaultSignExpire | duration | 否 | 签名 URL 默认过期时间，默认 15m |
 
 ## API 文档
@@ -99,8 +96,56 @@ err := storage.Delete(ctx, "key")
 
 ### 预签名 URL
 
+`SignedURL` 适合基础签名访问或低约束上传场景；如果需要对象存储校验
+`Content-Type`、checksum、metadata 等条件，应该使用下面的“安全直传授权”。
+
 ```go
-url, err := storage.SignedURL(ctx, "key", 30*60)
+url, err := storage.SignedURL(ctx, "key", 30*time.Minute)
+```
+
+### 安全直传授权
+
+```go
+auth, err := storage.AuthorizeDirectUpload(ctx, storage.DirectUploadRequest{
+	ObjectKey:   objectKey,
+	ContentType: "image/png",
+	Metadata: map[string]string{
+		"owner": userID,
+	},
+	Checksum: &storage.DirectUploadChecksum{
+		Algorithm: storage.DirectUploadChecksumMD5,
+		Value:     checksum,
+	},
+})
+if err != nil {
+	return err
+}
+
+// 客户端按 auth.Method / auth.URL / auth.Headers / auth.FormFields 发起上传。
+```
+
+### 上传后校验
+
+`VerifyDirectUploadObject` 会校验对象是否存在、`Content-Type`、metadata 和 size。
+checksum 校验依赖 provider 能否从对象元信息回读对应算法:
+- OSS 可回读 `Content-MD5`
+- S3 仅在对象保存了对应 checksum 时可校验
+- COS 当前只暴露 `CRC64`，不直接回读 `MD5/SHA256`
+
+```go
+result, err := storage.VerifyDirectUploadObject(ctx, storage.DirectUploadVerificationRequest{
+	ObjectKey:   objectKey,
+	ContentType: "image/png",
+	Metadata: map[string]string{
+		"owner": userID,
+	},
+})
+if err != nil {
+	return err
+}
+if !result.Matched {
+	return fmt.Errorf("uploaded object does not match authorization")
+}
 ```
 
 ### 分片上传

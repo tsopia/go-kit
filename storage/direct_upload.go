@@ -45,8 +45,19 @@ func VerifyDirectUploadObjectWithClient(ctx context.Context, c Client, req Direc
 		return nil, ErrMissingClient
 	}
 
-	info, err := c.Stat(ctx, strings.TrimSpace(req.ObjectKey))
+	normalizedReq, err := normalizeDirectUploadVerificationRequest(req)
 	if err != nil {
+		return nil, err
+	}
+
+	info, err := c.Stat(ctx, normalizedReq.ObjectKey)
+	if err != nil {
+		if errors.Is(err, ErrObjectNotFound) {
+			return &DirectUploadVerificationResult{
+				Exists:  false,
+				Matched: false,
+			}, nil
+		}
 		return nil, fmt.Errorf("stat object: %w", err)
 	}
 	if info == nil {
@@ -71,26 +82,26 @@ func VerifyDirectUploadObjectWithClient(ctx context.Context, c Client, req Direc
 		})
 	}
 
-	if req.ObjectKey != "" && info.Key != req.ObjectKey {
-		appendMismatch("object_key", req.ObjectKey, info.Key)
+	if normalizedReq.ObjectKey != "" && info.Key != normalizedReq.ObjectKey {
+		appendMismatch("object_key", normalizedReq.ObjectKey, info.Key)
 	}
 
-	if req.ContentType != "" && info.ContentType != req.ContentType {
-		appendMismatch("content_type", req.ContentType, info.ContentType)
+	if normalizedReq.ContentType != "" && info.ContentType != normalizedReq.ContentType {
+		appendMismatch("content_type", normalizedReq.ContentType, info.ContentType)
 	}
 
-	if req.Size != nil {
+	if normalizedReq.Size != nil {
 		switch {
-		case req.Size.Exact > 0 && info.Size != req.Size.Exact:
-			appendMismatch("size", strconv.FormatInt(req.Size.Exact, 10), strconv.FormatInt(info.Size, 10))
-		case req.Size.Min > 0 && info.Size < req.Size.Min:
-			appendMismatch("size_min", strconv.FormatInt(req.Size.Min, 10), strconv.FormatInt(info.Size, 10))
-		case req.Size.Max > 0 && info.Size > req.Size.Max:
-			appendMismatch("size_max", strconv.FormatInt(req.Size.Max, 10), strconv.FormatInt(info.Size, 10))
+		case normalizedReq.Size.Exact > 0 && info.Size != normalizedReq.Size.Exact:
+			appendMismatch("size", strconv.FormatInt(normalizedReq.Size.Exact, 10), strconv.FormatInt(info.Size, 10))
+		case normalizedReq.Size.Min > 0 && info.Size < normalizedReq.Size.Min:
+			appendMismatch("size_min", strconv.FormatInt(normalizedReq.Size.Min, 10), strconv.FormatInt(info.Size, 10))
+		case normalizedReq.Size.Max > 0 && info.Size > normalizedReq.Size.Max:
+			appendMismatch("size_max", strconv.FormatInt(normalizedReq.Size.Max, 10), strconv.FormatInt(info.Size, 10))
 		}
 	}
 
-	for key, expected := range req.Metadata {
+	for key, expected := range normalizedReq.Metadata {
 		actual := ""
 		if info.Metadata != nil {
 			actual = info.Metadata[key]
@@ -100,7 +111,56 @@ func VerifyDirectUploadObjectWithClient(ctx context.Context, c Client, req Direc
 		}
 	}
 
+	if normalizedReq.Checksum != nil {
+		algorithm := string(normalizedReq.Checksum.Algorithm)
+		actual := ""
+		if info.Checksums != nil {
+			actual = info.Checksums[algorithm]
+		}
+		if actual == "" {
+			return nil, fmt.Errorf("%w: checksum %q is not available from provider metadata", ErrUnsupportedDirectUploadConstraint, algorithm)
+		}
+		if actual != normalizedReq.Checksum.Value {
+			appendMismatch("checksum."+algorithm, normalizedReq.Checksum.Value, actual)
+		}
+	}
+
 	return result, nil
+}
+
+func normalizeDirectUploadVerificationRequest(req DirectUploadVerificationRequest) (DirectUploadVerificationRequest, error) {
+	req.ObjectKey = strings.TrimSpace(req.ObjectKey)
+	if req.ObjectKey == "" {
+		return DirectUploadVerificationRequest{}, fmt.Errorf("%w: object key is required", ErrInvalidDirectUploadRequest)
+	}
+
+	req.ContentType = strings.TrimSpace(req.ContentType)
+
+	if req.Size != nil {
+		normalizedSize, err := normalizeDirectUploadSize(*req.Size)
+		if err != nil {
+			return DirectUploadVerificationRequest{}, err
+		}
+		req.Size = &normalizedSize
+	}
+
+	if req.Metadata != nil {
+		normalizedMetadata, err := normalizeDirectUploadMetadata(req.Metadata)
+		if err != nil {
+			return DirectUploadVerificationRequest{}, err
+		}
+		req.Metadata = normalizedMetadata
+	}
+
+	if req.Checksum != nil {
+		normalizedChecksum, err := normalizeDirectUploadChecksum(*req.Checksum)
+		if err != nil {
+			return DirectUploadVerificationRequest{}, err
+		}
+		req.Checksum = &normalizedChecksum
+	}
+
+	return req, nil
 }
 
 func normalizeDirectUploadRequest(req DirectUploadRequest) (DirectUploadRequest, error) {
@@ -114,7 +174,11 @@ func normalizeDirectUploadRequest(req DirectUploadRequest) (DirectUploadRequest,
 	}
 
 	req.ContentType = strings.TrimSpace(req.ContentType)
-	req.Mode = normalizeDirectUploadMode(req.Mode)
+	normalizedMode, err := normalizeDirectUploadMode(req.Mode)
+	if err != nil {
+		return DirectUploadRequest{}, err
+	}
+	req.Mode = normalizedMode
 
 	if req.Size != nil {
 		normalizedSize, err := normalizeDirectUploadSize(*req.Size)
@@ -143,16 +207,16 @@ func normalizeDirectUploadRequest(req DirectUploadRequest) (DirectUploadRequest,
 	return req, nil
 }
 
-func normalizeDirectUploadMode(mode DirectUploadMode) DirectUploadMode {
+func normalizeDirectUploadMode(mode DirectUploadMode) (DirectUploadMode, error) {
 	switch DirectUploadMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
 	case "", DirectUploadModeAuto:
-		return DirectUploadModeAuto
+		return DirectUploadModeAuto, nil
 	case DirectUploadModePut:
-		return DirectUploadModePut
+		return DirectUploadModePut, nil
 	case DirectUploadModePost:
-		return DirectUploadModePost
+		return DirectUploadModePost, nil
 	default:
-		return mode
+		return "", fmt.Errorf("%w: unsupported direct upload mode %q", ErrInvalidDirectUploadRequest, mode)
 	}
 }
 
@@ -163,6 +227,10 @@ func normalizeDirectUploadSize(size DirectUploadSize) (DirectUploadSize, error) 
 
 	if size.Exact < 0 || size.Min < 0 || size.Max < 0 {
 		return DirectUploadSize{}, fmt.Errorf("%w: size values must not be negative", ErrInvalidDirectUploadRequest)
+	}
+
+	if size.Exact == 0 && size.Min == 0 && size.Max == 0 {
+		return DirectUploadSize{}, fmt.Errorf("%w: size constraint requires exact or min/max", ErrInvalidDirectUploadRequest)
 	}
 
 	if size.Exact == 0 && size.Min > 0 && size.Max > 0 && size.Min > size.Max {

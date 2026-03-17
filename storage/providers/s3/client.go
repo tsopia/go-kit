@@ -2,6 +2,7 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/tsopia/go-kit/storage/providers"
 )
 
@@ -119,22 +121,17 @@ func (c *client) Exists(ctx context.Context, key string) (bool, error) {
 
 func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, error) {
 	input := &awss3.HeadObjectInput{
-		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Bucket:       aws.String(c.bucket),
+		Key:          aws.String(key),
+		ChecksumMode: types.ChecksumModeEnabled,
 	}
 
 	resp, err := c.client.HeadObject(ctx, input)
 	if err != nil {
-		return nil, err
+		return nil, normalizeStatError(err)
 	}
 
-	return &providers.ObjectInfo{
-		Key:          key,
-		Size:         *resp.ContentLength,
-		LastModified: *resp.LastModified,
-		ETag:         *resp.ETag,
-		ContentType:  *resp.ContentType,
-	}, nil
+	return buildObjectInfo(key, resp), nil
 }
 
 func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration, opts ...providers.SignOptionFunc) (string, error) {
@@ -576,4 +573,94 @@ func buildDirectUploadConstraints(req providers.DirectUploadRequest) providers.D
 	}
 
 	return constraints
+}
+
+func buildObjectInfo(key string, resp *awss3.HeadObjectOutput) *providers.ObjectInfo {
+	if resp == nil {
+		return nil
+	}
+
+	info := &providers.ObjectInfo{
+		Key:       key,
+		Metadata:  copyStringMap(resp.Metadata),
+		Checksums: buildObjectChecksums(resp),
+	}
+	if resp.ContentLength != nil {
+		info.Size = *resp.ContentLength
+	}
+	if resp.LastModified != nil {
+		info.LastModified = *resp.LastModified
+	}
+	if resp.ETag != nil {
+		info.ETag = *resp.ETag
+	}
+	if resp.ContentType != nil {
+		info.ContentType = *resp.ContentType
+	}
+
+	return info
+}
+
+func buildObjectChecksums(resp *awss3.HeadObjectOutput) map[string]string {
+	checksums := map[string]string{}
+	if resp.ChecksumSHA256 != nil {
+		checksums[string(providers.DirectUploadChecksumSHA256)] = *resp.ChecksumSHA256
+	}
+	if resp.ChecksumSHA1 != nil {
+		checksums["sha1"] = *resp.ChecksumSHA1
+	}
+	if resp.ChecksumCRC32 != nil {
+		checksums["crc32"] = *resp.ChecksumCRC32
+	}
+	if resp.ChecksumCRC32C != nil {
+		checksums["crc32c"] = *resp.ChecksumCRC32C
+	}
+	if resp.ChecksumCRC64NVME != nil {
+		checksums["crc64nvme"] = *resp.ChecksumCRC64NVME
+	}
+	if len(checksums) == 0 {
+		return nil
+	}
+
+	return checksums
+}
+
+func normalizeStatError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var notFound *types.NotFound
+	if errors.As(err, &notFound) {
+		return providers.ErrObjectNotFound
+	}
+
+	var noSuchKey *types.NoSuchKey
+	if errors.As(err, &noSuchKey) {
+		return providers.ErrObjectNotFound
+	}
+
+	var noSuchBucket *types.NoSuchBucket
+	if errors.As(err, &noSuchBucket) {
+		return providers.ErrBucketNotFound
+	}
+
+	var accessDenied *types.AccessDenied
+	if errors.As(err, &accessDenied) {
+		return providers.ErrAccessDenied
+	}
+
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NotFound", "NoSuchKey":
+			return providers.ErrObjectNotFound
+		case "NoSuchBucket":
+			return providers.ErrBucketNotFound
+		case "AccessDenied":
+			return providers.ErrAccessDenied
+		}
+	}
+
+	return err
 }
