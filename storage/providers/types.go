@@ -51,6 +51,92 @@ type SignOption struct {
 // SignOptionFunc 签名选项函数
 type SignOptionFunc func(*SignOption)
 
+// DirectUploadMode 客户端直传授权模式。
+type DirectUploadMode string
+
+const (
+	DirectUploadModeAuto DirectUploadMode = "auto"
+	DirectUploadModePut  DirectUploadMode = "put"
+	DirectUploadModePost DirectUploadMode = "post"
+)
+
+// DirectUploadChecksumAlgorithm 描述客户端直传校验算法。
+type DirectUploadChecksumAlgorithm string
+
+const (
+	DirectUploadChecksumMD5    DirectUploadChecksumAlgorithm = "md5"
+	DirectUploadChecksumSHA256 DirectUploadChecksumAlgorithm = "sha256"
+)
+
+// DirectUploadSize 描述客户端直传的对象大小约束。
+type DirectUploadSize struct {
+	Exact int64
+	Min   int64
+	Max   int64
+}
+
+// DirectUploadChecksum 描述客户端直传的内容校验约束。
+type DirectUploadChecksum struct {
+	Algorithm DirectUploadChecksumAlgorithm
+	Value     string
+}
+
+// DirectUploadRequest 描述客户端直传授权请求。
+type DirectUploadRequest struct {
+	ObjectKey   string
+	Expire      time.Duration
+	ContentType string
+	Metadata    map[string]string
+	Size        *DirectUploadSize
+	Checksum    *DirectUploadChecksum
+	Mode        DirectUploadMode
+}
+
+// DirectUploadConstraints 描述实际生效的上传约束。
+type DirectUploadConstraints struct {
+	ContentType string
+	Metadata    map[string]string
+	Size        *DirectUploadSize
+	Checksum    *DirectUploadChecksum
+}
+
+// DirectUploadAuthorization 描述客户端直传授权结果。
+type DirectUploadAuthorization struct {
+	Provider    string
+	Mode        DirectUploadMode
+	ObjectKey   string
+	URL         string
+	Method      string
+	Headers     map[string]string
+	FormFields  map[string]string
+	ExpiresAt   time.Time
+	Constraints DirectUploadConstraints
+}
+
+// DirectUploadVerificationRequest 描述上传后对象校验请求。
+type DirectUploadVerificationRequest struct {
+	ObjectKey   string
+	ContentType string
+	Metadata    map[string]string
+	Size        *DirectUploadSize
+	Checksum    *DirectUploadChecksum
+}
+
+// DirectUploadMismatch 描述对象事实与期望约束的不匹配项。
+type DirectUploadMismatch struct {
+	Field    string
+	Expected string
+	Actual   string
+}
+
+// DirectUploadVerificationResult 描述上传后对象校验结果。
+type DirectUploadVerificationResult struct {
+	Exists     bool
+	Matched    bool
+	Mismatches []DirectUploadMismatch
+	Object     *ObjectInfo
+}
+
 // Config 存储配置
 type Config struct {
 	Type              string
