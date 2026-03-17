@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.3
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.4
+	github.com/aws/smithy-go v1.24.2
 	github.com/cloudwego/eino v0.7.32
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20260204064123-1f91f547c77e
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
@@ -29,6 +30,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/spf13/cast v1.7.1
 	github.com/spf13/viper v1.18.2
+	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.72
@@ -63,7 +65,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.16 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.8 // indirect
-	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/baidubce/bce-qianfan-sdk/go/qianfan v0.0.14 // indirect
 	github.com/baidubce/bce-sdk-go v0.9.164 // indirect
@@ -77,6 +78,7 @@ require (
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20251124083837-ce2e7e196f9f // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/eino-contrib/ollama v0.1.0 // indirect
@@ -129,6 +131,7 @@ require (
 	github.com/ollama/ollama v0.6.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.57.0 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
