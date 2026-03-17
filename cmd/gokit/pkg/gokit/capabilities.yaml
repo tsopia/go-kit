@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated_at: "2026-03-11"
+updated_at: "2026-03-17"
 
 capabilities:
   - name: kit
@@ -75,4 +75,36 @@ capabilities:
     scenarios:
       - name: 创建 LLM 客户端
         snippet: client, err := llm.New(cfg)
+    dependencies: [kit]
+
+  - name: storage
+    description: 对象存储统一封装，支持上传、下载、分片和安全直传授权
+    import: github.com/tsopia/go-kit/storage
+    scenarios:
+      - name: 初始化存储客户端
+        snippet: |
+          storage.Configure(&storage.Config{
+              Type: storage.TypeOSS,
+              Bucket: "my-bucket",
+              Region: "cn-hangzhou",
+              AccessKeyID: "...",
+              AccessKeySecret: "...",
+          })
+      - name: 上传文件
+        snippet: storage.Upload(ctx, "file.txt", reader)
+      - name: 申请客户端直传授权
+        snippet: |
+          auth, err := storage.AuthorizeDirectUpload(ctx, storage.DirectUploadRequest{
+              ObjectKey:   objectKey,
+              ContentType: "image/png",
+              Checksum: &storage.DirectUploadChecksum{
+                  Algorithm: storage.DirectUploadChecksumMD5,
+                  Value:     checksum,
+              },
+          })
+      - name: 分片上传大文件
+        snippet: |
+          upload, _ := storage.InitMultipart(ctx, "large.zip")
+          part, _ := storage.UploadPart(ctx, upload.UploadID, 1, reader)
+          storage.CompleteMultipart(ctx, upload.UploadID, []*storage.PartInfo{part})
     dependencies: [kit]

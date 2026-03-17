@@ -36,3 +36,26 @@ func TestGetCapabilitySwagger(t *testing.T) {
 		t.Fatal("expected swagger scenarios")
 	}
 }
+
+func TestGetCapabilityStorage(t *testing.T) {
+	t.Parallel()
+
+	capability, err := GetCapability("storage")
+	if err != nil {
+		t.Fatalf("GetCapability(storage) failed: %v", err)
+	}
+
+	if capability.Import != "github.com/tsopia/go-kit/storage" {
+		t.Fatalf("unexpected import: %s", capability.Import)
+	}
+
+	found := false
+	for _, scenario := range capability.Scenarios {
+		if scenario.Name == "申请客户端直传授权" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected direct upload scenario")
+	}
+}
