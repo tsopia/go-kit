@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing `SignedURL` path as a simple compatibility API and add a new `AuthorizeDirectUpload` entry point with explicit request/response types. Put validation and verification logic in the top-level `storage` package, extend provider interfaces only where necessary for authorization generation, and enrich `ObjectInfo` so verification can compare the stored object against the declared constraints.
 
-**Tech Stack:** Go 1.24, existing `storage` package structure, AWS SDK v2 S3 presign client, Tencent COS SDK v5, Alibaba OSS Go SDK v2, table-driven tests, `go test`, `go run ./cmd/gokit list`
+**Tech Stack:** Go 1.24, existing `storage` package structure, AWS SDK v2 S3 presign client, Tencent COS SDK v5, Alibaba OSS Go SDK v2, table-driven tests, `go test`, `cd cmd/gokit && go run . list`
 
 ---
 
@@ -86,11 +86,11 @@ Update the `storage` row in [AGENTS.md](/Users/kj/projects/go-kit/AGENTS.md) to 
 
 **Step 5: Verify metadata changes**
 
-Run: `GOCACHE=/tmp/go-build go test ./cmd/gokit/pkg/gokit -run 'Test(GetCapabilityStorage|GetCapabilitySwagger|LoadCapabilities)' -v`
+Run: `cd cmd/gokit && GOCACHE=/tmp/go-build go test ./pkg/gokit -run 'Test(GetCapabilityStorage|GetCapabilitySwagger|LoadCapabilities)' -v`
 
 Expected: PASS
 
-Run: `GOCACHE=/tmp/go-build go run ./cmd/gokit list`
+Run: `cd cmd/gokit && GOCACHE=/tmp/go-build go run . list`
 
 Expected: output contains a `storage` row and shows the new direct-upload scenario.
 
@@ -642,8 +642,8 @@ Expected: PASS
 
 Run:
 - `GOCACHE=/tmp/go-build go test ./storage/...`
-- `GOCACHE=/tmp/go-build go test ./cmd/gokit/pkg/gokit -v`
-- `GOCACHE=/tmp/go-build go run ./cmd/gokit list`
+- `cd cmd/gokit && GOCACHE=/tmp/go-build go test ./pkg/gokit -v`
+- `cd cmd/gokit && GOCACHE=/tmp/go-build go run . list`
 
 Expected:
 - all `storage` package tests PASS
