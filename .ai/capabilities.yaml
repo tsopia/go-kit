@@ -120,6 +120,40 @@ capabilities:
           srv.Use(middleware.SecurityHeaders())
     dependencies: [httpserver]
 
+  - name: httpserver-prometheus
+    description: Prometheus 指标中间件与 /metrics 路由注册
+    import: github.com/tsopia/go-kit/httpserver/observability/prometheus
+    scenarios:
+      - name: 挂载指标中间件
+        snippet: |
+          srv.Use(prometheusmiddleware.Middleware())
+      - name: 显式注册 metrics 路由
+        snippet: |
+          prometheusmiddleware.Register(public, prometheusmiddleware.Config{
+              Path: "/metrics",
+          })
+    dependencies: [httpserver, middleware]
+
+  - name: httpserver-otel
+    description: OpenTelemetry HTTP tracing 中间件
+    import: github.com/tsopia/go-kit/httpserver/observability/otel
+    scenarios:
+      - name: 挂载 tracing 中间件
+        snippet: |
+          srv.Use(httpotel.Middleware(httpotel.Config{
+              TracerName: "my-service",
+          }))
+    dependencies: [httpserver, middleware]
+
+  - name: preset
+    description: 官方推荐的 HTTP server 默认装配
+    import: github.com/tsopia/go-kit/httpserver/preset
+    scenarios:
+      - name: 创建生产默认服务器
+        snippet: |
+          srv := preset.NewProductionServer(cfg)
+    dependencies: [httpserver, middleware]
+
   - name: swagger
     description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）
     import: github.com/tsopia/go-kit/httpserver/swagger

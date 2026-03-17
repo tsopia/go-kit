@@ -26,6 +26,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `Handle` / `HandleJSON` 支持 typed handler
 - `DecodeJSON` / `DecodeQuery` / `DecodeURI` / `ComposeDecoder` 支持请求解码组合
 - `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、CORS 等中间件
+- `httpserver/observability/prometheus` 与 `httpserver/observability/otel` 子包支持指标和 tracing 集成
 - `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
 ## 快速开始
@@ -175,6 +176,21 @@ srv := httpserver.NewServer(cfg)
 srv.Use(middleware.Recovery())
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
+```
+
+## 可观测性扩展
+
+如果你需要指标和 tracing，请使用独立的 observability 子包，而不是把这些能力塞进 `httpserver` core。
+
+```go
+public := srv.Group("")
+srv.Use(prometheus.Middleware())
+srv.Use(otel.Middleware(otel.Config{
+	TracerName: "user-service",
+}))
+prometheus.Register(public, prometheus.Config{
+	Path: "/metrics",
+})
 ```
 
 ## 健康检查
