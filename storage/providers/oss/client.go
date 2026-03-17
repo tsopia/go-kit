@@ -10,13 +10,15 @@ import (
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 	"github.com/tsopia/go-kit/storage/providers"
+	providerinternal "github.com/tsopia/go-kit/storage/providers/internal"
 )
 
 // client OSS 客户端实现
 type client struct {
-	client *oss.Client
-	bucket string
-	config *providers.Config
+	client         *oss.Client
+	bucket         string
+	config         *providers.Config
+	multipartState *providerinternal.MultipartState
 }
 
 // NewClient 创建 OSS 客户端
@@ -35,9 +37,10 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	c := oss.NewClient(ossCfg)
 
 	return &client{
-		client: c,
-		bucket: cfg.Bucket,
-		config: cfg,
+		client:         c,
+		bucket:         cfg.Bucket,
+		config:         cfg,
+		multipartState: providerinternal.NewMultipartState(),
 	}, nil
 }
 
@@ -92,15 +95,11 @@ func (c *client) Delete(ctx context.Context, key string) error {
 }
 
 func (c *client) Exists(ctx context.Context, key string) (bool, error) {
-	req := &oss.GetObjectMetaRequest{
-		Bucket: oss.Ptr(c.bucket),
-		Key:    oss.Ptr(key),
+	_, err := c.Stat(ctx, key)
+	if err != nil {
+		return providerinternal.ExistsFromError(err)
 	}
 
-	_, err := c.client.GetObjectMeta(ctx, req)
-	if err != nil {
-		return false, nil
-	}
 	return true, nil
 }
 
@@ -204,6 +203,7 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 	if err != nil {
 		return nil, err
 	}
+	c.multipartState.Store(*resp.UploadId, key)
 
 	return &providers.MultipartUpload{
 		UploadID: *resp.UploadId,
@@ -213,12 +213,9 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 }
 
 func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...providers.UploadOptionFunc) (*providers.PartInfo, error) {
-	req := &oss.UploadPartRequest{
-		Bucket:     oss.Ptr(c.bucket),
-		Key:        oss.Ptr(uploadID),
-		UploadId:   oss.Ptr(uploadID),
-		PartNumber: int32(partNum),
-		Body:       reader,
+	req, err := c.buildUploadPartRequest(uploadID, partNum, reader)
+	if err != nil {
+		return nil, err
 	}
 
 	resp, err := c.client.UploadPart(ctx, req)
@@ -233,6 +230,56 @@ func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, r
 }
 
 func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts []*providers.PartInfo, opts ...providers.UploadOptionFunc) error {
+	req, err := c.buildCompleteMultipartRequest(uploadID, parts)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.client.CompleteMultipartUpload(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	c.multipartState.Delete(uploadID)
+	return nil
+}
+
+func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
+	req, err := c.buildAbortMultipartRequest(uploadID)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.client.AbortMultipartUpload(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	c.multipartState.Delete(uploadID)
+	return nil
+}
+
+func (c *client) buildUploadPartRequest(uploadID string, partNum int, reader io.Reader) (*oss.UploadPartRequest, error) {
+	key, err := c.resolveMultipartKey(uploadID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &oss.UploadPartRequest{
+		Bucket:     oss.Ptr(c.bucket),
+		Key:        oss.Ptr(key),
+		UploadId:   oss.Ptr(uploadID),
+		PartNumber: int32(partNum),
+		Body:       reader,
+	}, nil
+}
+
+func (c *client) buildCompleteMultipartRequest(uploadID string, parts []*providers.PartInfo) (*oss.CompleteMultipartUploadRequest, error) {
+	key, err := c.resolveMultipartKey(uploadID)
+	if err != nil {
+		return nil, err
+	}
+
 	ossParts := make([]oss.UploadPart, len(parts))
 	for i, p := range parts {
 		ossParts[i] = oss.UploadPart{
@@ -241,21 +288,35 @@ func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts [
 		}
 	}
 
-	req := &oss.CompleteMultipartUploadRequest{
+	return &oss.CompleteMultipartUploadRequest{
 		Bucket:   oss.Ptr(c.bucket),
-		Key:      oss.Ptr(uploadID),
+		Key:      oss.Ptr(key),
 		UploadId: oss.Ptr(uploadID),
 		CompleteMultipartUpload: &oss.CompleteMultipartUpload{
 			Parts: ossParts,
 		},
-	}
-
-	_, err := c.client.CompleteMultipartUpload(ctx, req)
-	return err
+	}, nil
 }
 
-func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
-	return fmt.Errorf("abort multipart not implemented")
+func (c *client) buildAbortMultipartRequest(uploadID string) (*oss.AbortMultipartUploadRequest, error) {
+	key, err := c.resolveMultipartKey(uploadID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &oss.AbortMultipartUploadRequest{
+		Bucket:   oss.Ptr(c.bucket),
+		Key:      oss.Ptr(key),
+		UploadId: oss.Ptr(uploadID),
+	}, nil
+}
+
+func (c *client) resolveMultipartKey(uploadID string) (string, error) {
+	key, ok := c.multipartState.Load(uploadID)
+	if !ok {
+		return "", fmt.Errorf("upload not found: %s", uploadID)
+	}
+	return key, nil
 }
 
 func (c *client) DeleteBatch(ctx context.Context, keys []string) error {

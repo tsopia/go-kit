@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,17 +15,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithy "github.com/aws/smithy-go"
 	"github.com/tsopia/go-kit/storage/providers"
+	providerinternal "github.com/tsopia/go-kit/storage/providers/internal"
 )
 
 const maxS3PostContentLength int64 = 9223372036854775807
 
 // client S3 客户端实现
 type client struct {
-	client     *awss3.Client
-	bucket     string
-	config     *providers.Config
-	uploadKeys map[string]string // uploadID -> key
-	mu         sync.RWMutex
+	client         *awss3.Client
+	bucket         string
+	config         *providers.Config
+	multipartState *providerinternal.MultipartState
 }
 
 // NewClient 创建 S3 客户端
@@ -49,10 +48,10 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	})
 
 	return &client{
-		client:     c,
-		bucket:     cfg.Bucket,
-		config:     cfg,
-		uploadKeys: make(map[string]string),
+		client:         c,
+		bucket:         cfg.Bucket,
+		config:         cfg,
+		multipartState: providerinternal.NewMultipartState(),
 	}, nil
 }
 
@@ -107,15 +106,11 @@ func (c *client) Delete(ctx context.Context, key string) error {
 }
 
 func (c *client) Exists(ctx context.Context, key string) (bool, error) {
-	input := &awss3.HeadObjectInput{
-		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+	_, err := c.Stat(ctx, key)
+	if err != nil {
+		return providerinternal.ExistsFromError(err)
 	}
 
-	_, err := c.client.HeadObject(ctx, input)
-	if err != nil {
-		return false, nil
-	}
 	return true, nil
 }
 
@@ -213,9 +208,7 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 	uploadID := *resp.UploadId
 
 	// 存储 uploadID -> key 的映射
-	c.mu.Lock()
-	c.uploadKeys[uploadID] = key
-	c.mu.Unlock()
+	c.multipartState.Store(uploadID, key)
 
 	return &providers.MultipartUpload{
 		UploadID: uploadID,
@@ -226,9 +219,7 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 
 func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...providers.UploadOptionFunc) (*providers.PartInfo, error) {
 	// 从 map 获取 key
-	c.mu.RLock()
-	key, ok := c.uploadKeys[uploadID]
-	c.mu.RUnlock()
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return nil, fmt.Errorf("upload not found: %s", uploadID)
 	}
@@ -254,9 +245,7 @@ func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, r
 
 func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts []*providers.PartInfo, opts ...providers.UploadOptionFunc) error {
 	// 从 map 获取 key
-	c.mu.RLock()
-	key, ok := c.uploadKeys[uploadID]
-	c.mu.RUnlock()
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return fmt.Errorf("upload not found: %s", uploadID)
 	}
@@ -285,18 +274,14 @@ func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts [
 	}
 
 	// 完成后删除映射
-	c.mu.Lock()
-	delete(c.uploadKeys, uploadID)
-	c.mu.Unlock()
+	c.multipartState.Delete(uploadID)
 
 	return nil
 }
 
 func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
 	// 从 map 获取 key
-	c.mu.RLock()
-	key, ok := c.uploadKeys[uploadID]
-	c.mu.RUnlock()
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return fmt.Errorf("upload not found: %s", uploadID)
 	}
@@ -313,9 +298,7 @@ func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
 	}
 
 	// 中止后删除映射
-	c.mu.Lock()
-	delete(c.uploadKeys, uploadID)
-	c.mu.Unlock()
+	c.multipartState.Delete(uploadID)
 
 	return nil
 }

@@ -12,13 +12,14 @@ import (
 
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/tsopia/go-kit/storage/providers"
+	providerinternal "github.com/tsopia/go-kit/storage/providers/internal"
 )
 
 // client COS 客户端实现
 type client struct {
-	client     *cos.Client
-	config     *providers.Config
-	uploadKeys map[string]string // uploadID -> key 映射，用于分片上传
+	client         *cos.Client
+	config         *providers.Config
+	multipartState *providerinternal.MultipartState
 }
 
 // NewClient 创建 COS 客户端
@@ -55,9 +56,9 @@ func NewClient(cfg *providers.Config) (providers.Client, error) {
 	c := cos.NewClient(baseURL, httpClient)
 
 	return &client{
-		client:     c,
-		config:     cfg,
-		uploadKeys: make(map[string]string),
+		client:         c,
+		config:         cfg,
+		multipartState: providerinternal.NewMultipartState(),
 	}, nil
 }
 
@@ -100,8 +101,12 @@ func (c *client) Delete(ctx context.Context, key string) error {
 }
 
 func (c *client) Exists(ctx context.Context, key string) (bool, error) {
-	ok, err := c.client.Object.IsExist(ctx, key)
-	return ok, err
+	_, err := c.Stat(ctx, key)
+	if err != nil {
+		return providerinternal.ExistsFromError(err)
+	}
+
+	return true, nil
 }
 
 func (c *client) Stat(ctx context.Context, key string) (*providers.ObjectInfo, error) {
@@ -214,7 +219,7 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 	}
 
 	// 保存 uploadID 到 key 的映射，用于后续操作
-	c.uploadKeys[resp.UploadID] = key
+	c.multipartState.Store(resp.UploadID, key)
 
 	return &providers.MultipartUpload{
 		UploadID: resp.UploadID,
@@ -225,7 +230,7 @@ func (c *client) InitMultipart(ctx context.Context, key string, opts ...provider
 
 func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, reader io.Reader, opts ...providers.UploadOptionFunc) (*providers.PartInfo, error) {
 	// 从映射中获取对应的 key
-	key, ok := c.uploadKeys[uploadID]
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return nil, fmt.Errorf("upload ID not found: %s", uploadID)
 	}
@@ -255,7 +260,7 @@ func (c *client) UploadPart(ctx context.Context, uploadID string, partNum int, r
 
 func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts []*providers.PartInfo, opts ...providers.UploadOptionFunc) error {
 	// 从映射中获取对应的 key
-	key, ok := c.uploadKeys[uploadID]
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return fmt.Errorf("upload ID not found: %s", uploadID)
 	}
@@ -281,14 +286,14 @@ func (c *client) CompleteMultipart(ctx context.Context, uploadID string, parts [
 	}
 
 	// 清理映射
-	delete(c.uploadKeys, uploadID)
+	c.multipartState.Delete(uploadID)
 
 	return nil
 }
 
 func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
 	// 从映射中获取对应的 key
-	key, ok := c.uploadKeys[uploadID]
+	key, ok := c.multipartState.Load(uploadID)
 	if !ok {
 		return fmt.Errorf("upload ID not found: %s", uploadID)
 	}
@@ -300,7 +305,7 @@ func (c *client) AbortMultipart(ctx context.Context, uploadID string) error {
 	}
 
 	// 清理映射
-	delete(c.uploadKeys, uploadID)
+	c.multipartState.Delete(uploadID)
 
 	return nil
 }
@@ -475,6 +480,9 @@ func normalizeStatError(err error) error {
 	if errors.As(err, &cosErr) && cosErr.Response != nil {
 		switch cosErr.Response.StatusCode {
 		case http.StatusNotFound:
+			if cosErr.Code == "NoSuchBucket" {
+				return providers.ErrBucketNotFound
+			}
 			return providers.ErrObjectNotFound
 		case http.StatusForbidden:
 			return providers.ErrAccessDenied
