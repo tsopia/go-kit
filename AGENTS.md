@@ -26,6 +26,12 @@ go test -v ./...     # 测试
 golangci-lint run    # 代码检查
 ```
 
+## 已知基线问题
+
+- 当前部分环境执行 `go test ./...` 可能因 `github.com/bytedance/sonic@v1.14.1` 编译失败而中断，典型报错为 `undefined: GoMapIterator`
+- 若本次改动与 `sonic` 无关，可先使用受影响包的局部测试作为增量验证，并在交付时明确说明全仓测试基线不干净
+- 若改动涉及 `config`、JSON 编解码或可能触发 `sonic` 依赖链，必须优先说明该基线问题，不得把失败误报为本次改动引入
+
 ### 包封装架构（SDK 风格）
 - 包内维护未导出的全局 `_client *Client`
 - 通过 `Configure(...)` 初始化，通过 `GetClient()` 获取
