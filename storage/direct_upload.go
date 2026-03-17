@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-)
 
-type directUploadAuthorizer interface {
-	AuthorizeDirectUpload(ctx context.Context, req DirectUploadRequest) (*DirectUploadAuthorization, error)
-}
+	"github.com/tsopia/go-kit/storage/providers"
+)
 
 // AuthorizeDirectUpload 生成客户端直传授权结果。
 func AuthorizeDirectUpload(ctx context.Context, req DirectUploadRequest) (*DirectUploadAuthorization, error) {
@@ -28,7 +26,7 @@ func AuthorizeDirectUploadWithClient(ctx context.Context, c Client, req DirectUp
 		return nil, err
 	}
 
-	authorizer, ok := c.(directUploadAuthorizer)
+	authorizer, ok := c.(providers.DirectUploadAuthorizer)
 	if !ok {
 		return nil, ErrDirectUploadAuthorizationUnsupported
 	}

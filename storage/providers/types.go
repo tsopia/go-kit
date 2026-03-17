@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -138,6 +139,16 @@ type DirectUploadVerificationResult struct {
 	Matched    bool
 	Mismatches []DirectUploadMismatch
 	Object     *ObjectInfo
+}
+
+var (
+	ErrUnsupportedDirectUploadMode       = errors.New("storage/providers: unsupported direct upload mode")
+	ErrUnsupportedDirectUploadConstraint = errors.New("storage/providers: unsupported direct upload constraint")
+)
+
+// DirectUploadAuthorizer 描述 provider 级直传授权能力。
+type DirectUploadAuthorizer interface {
+	AuthorizeDirectUpload(ctx context.Context, req DirectUploadRequest) (*DirectUploadAuthorization, error)
 }
 
 // Config 存储配置

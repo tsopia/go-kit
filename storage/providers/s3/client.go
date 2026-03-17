@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/tsopia/go-kit/storage/providers"
 )
+
+const maxS3PostContentLength int64 = 9223372036854775807
 
 // client S3 客户端实现
 type client struct {
@@ -183,6 +186,22 @@ func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration
 	return req.URL, nil
 }
 
+func (c *client) AuthorizeDirectUpload(ctx context.Context, req providers.DirectUploadRequest) (*providers.DirectUploadAuthorization, error) {
+	mode, err := selectS3DirectUploadMode(req)
+	if err != nil {
+		return nil, err
+	}
+
+	switch mode {
+	case providers.DirectUploadModePut:
+		return c.authorizePutDirectUpload(ctx, req)
+	case providers.DirectUploadModePost:
+		return c.authorizePostDirectUpload(ctx, req)
+	default:
+		return nil, fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, mode)
+	}
+}
+
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
 	input := &awss3.CreateMultipartUploadInput{
 		Bucket: aws.String(c.bucket),
@@ -319,4 +338,242 @@ func (c *client) DeleteBatch(ctx context.Context, keys []string) error {
 
 	_, err := c.client.DeleteObjects(ctx, input)
 	return err
+}
+
+func selectS3DirectUploadMode(req providers.DirectUploadRequest) (providers.DirectUploadMode, error) {
+	switch req.Mode {
+	case "", providers.DirectUploadModeAuto:
+		if requiresS3PostDirectUpload(req) {
+			return providers.DirectUploadModePost, nil
+		}
+		return providers.DirectUploadModePut, nil
+	case providers.DirectUploadModePut:
+		if requiresS3PostDirectUpload(req) {
+			return "", fmt.Errorf("%w: size range requires post mode", providers.ErrUnsupportedDirectUploadConstraint)
+		}
+		return providers.DirectUploadModePut, nil
+	case providers.DirectUploadModePost:
+		return providers.DirectUploadModePost, nil
+	default:
+		return "", fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, req.Mode)
+	}
+}
+
+func requiresS3PostDirectUpload(req providers.DirectUploadRequest) bool {
+	if req.Size == nil {
+		return false
+	}
+
+	return req.Size.Exact == 0 && (req.Size.Min > 0 || req.Size.Max > 0)
+}
+
+func (c *client) authorizePutDirectUpload(ctx context.Context, req providers.DirectUploadRequest) (*providers.DirectUploadAuthorization, error) {
+	if requiresS3PostDirectUpload(req) {
+		return nil, fmt.Errorf("%w: size range requires post mode", providers.ErrUnsupportedDirectUploadConstraint)
+	}
+
+	expire := c.resolveDirectUploadExpire(req.Expire)
+	basePresigned, err := awss3.NewPresignClient(c.client).PresignPutObject(ctx, &awss3.PutObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(req.ObjectKey),
+	}, func(o *awss3.PresignOptions) {
+		o.Expires = expire
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve put object url: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPut, basePresigned.URL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build put object request: %w", err)
+	}
+	httpReq.URL.RawQuery = ""
+	httpReq.URL.Opaque = "//" + httpReq.URL.Host + httpReq.URL.EscapedPath()
+	if req.ContentType != "" {
+		httpReq.Header.Set("Content-Type", req.ContentType)
+	}
+	for key, value := range req.Metadata {
+		httpReq.Header.Set("X-Amz-Meta-"+key, value)
+	}
+	if req.Size != nil && req.Size.Exact > 0 {
+		httpReq.ContentLength = req.Size.Exact
+	}
+	if err := applyS3PutHeaders(httpReq, req.Checksum); err != nil {
+		return nil, err
+	}
+
+	creds := aws.Credentials{
+		AccessKeyID:     c.config.AccessKeyID,
+		SecretAccessKey: c.config.AccessKeySecret,
+		Source:          "go-kit-storage",
+	}
+	presignedURL, signedHeaders, err := v4.NewSigner().PresignHTTP(
+		ctx,
+		creds,
+		httpReq,
+		"UNSIGNED-PAYLOAD",
+		"s3",
+		c.config.Region,
+		time.Now(),
+		func(o *v4.SignerOptions) {
+			o.DisableHeaderHoisting = true
+			o.DisableURIPathEscaping = true
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+
+	return &providers.DirectUploadAuthorization{
+		Provider:    providers.TypeS3,
+		Mode:        providers.DirectUploadModePut,
+		ObjectKey:   req.ObjectKey,
+		URL:         presignedURL,
+		Method:      http.MethodPut,
+		Headers:     flattenHeaders(signedHeaders),
+		ExpiresAt:   time.Now().Add(expire),
+		Constraints: buildDirectUploadConstraints(req),
+	}, nil
+}
+
+func (c *client) authorizePostDirectUpload(ctx context.Context, req providers.DirectUploadRequest) (*providers.DirectUploadAuthorization, error) {
+	if req.Checksum != nil {
+		return nil, fmt.Errorf("%w: checksum requires put mode", providers.ErrUnsupportedDirectUploadConstraint)
+	}
+
+	expire := c.resolveDirectUploadExpire(req.Expire)
+	conditions := make([]any, 0, 1+len(req.Metadata))
+	formFields := make(map[string]string)
+
+	if req.ContentType != "" {
+		conditions = append(conditions, map[string]string{"Content-Type": req.ContentType})
+		formFields["Content-Type"] = req.ContentType
+	}
+	for key, value := range req.Metadata {
+		headerKey := "x-amz-meta-" + key
+		conditions = append(conditions, map[string]string{headerKey: value})
+		formFields[headerKey] = value
+	}
+	if req.Size != nil {
+		minSize, maxSize, ok := s3PostContentLengthRange(*req.Size)
+		if !ok {
+			return nil, fmt.Errorf("%w: invalid size constraint for post mode", providers.ErrUnsupportedDirectUploadConstraint)
+		}
+		conditions = append(conditions, []any{"content-length-range", minSize, maxSize})
+	}
+
+	presigned, err := awss3.NewPresignClient(c.client).PresignPostObject(ctx, &awss3.PutObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(req.ObjectKey),
+	}, func(o *awss3.PresignPostOptions) {
+		o.Expires = expire
+		o.Conditions = conditions
+	})
+	if err != nil {
+		return nil, fmt.Errorf("presign post object: %w", err)
+	}
+
+	for key, value := range presigned.Values {
+		formFields[key] = value
+	}
+
+	return &providers.DirectUploadAuthorization{
+		Provider:    providers.TypeS3,
+		Mode:        providers.DirectUploadModePost,
+		ObjectKey:   req.ObjectKey,
+		URL:         presigned.URL,
+		Method:      http.MethodPost,
+		FormFields:  formFields,
+		ExpiresAt:   time.Now().Add(expire),
+		Constraints: buildDirectUploadConstraints(req),
+	}, nil
+}
+
+func (c *client) resolveDirectUploadExpire(expire time.Duration) time.Duration {
+	if expire == 0 {
+		expire = c.config.DefaultSignExpire
+		if expire == 0 {
+			expire = 15 * time.Minute
+		}
+	}
+
+	return expire
+}
+
+func applyS3PutHeaders(req *http.Request, checksum *providers.DirectUploadChecksum) error {
+	if checksum == nil {
+		return nil
+	}
+
+	switch checksum.Algorithm {
+	case providers.DirectUploadChecksumMD5:
+		req.Header.Set("Content-MD5", checksum.Value)
+		return nil
+	case providers.DirectUploadChecksumSHA256:
+		req.Header.Set("X-Amz-Checksum-Sha256", checksum.Value)
+		return nil
+	default:
+		return fmt.Errorf("%w: checksum algorithm %q", providers.ErrUnsupportedDirectUploadConstraint, checksum.Algorithm)
+	}
+}
+
+func s3PostContentLengthRange(size providers.DirectUploadSize) (int64, int64, bool) {
+	switch {
+	case size.Exact > 0:
+		return size.Exact, size.Exact, true
+	case size.Min > 0 && size.Max > 0:
+		return size.Min, size.Max, true
+	case size.Min > 0:
+		return size.Min, maxS3PostContentLength, true
+	case size.Max > 0:
+		return 0, size.Max, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func flattenHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	flattened := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		flattened[key] = values[0]
+	}
+
+	return flattened
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func buildDirectUploadConstraints(req providers.DirectUploadRequest) providers.DirectUploadConstraints {
+	constraints := providers.DirectUploadConstraints{
+		ContentType: req.ContentType,
+		Metadata:    copyStringMap(req.Metadata),
+	}
+	if req.Size != nil {
+		size := *req.Size
+		constraints.Size = &size
+	}
+	if req.Checksum != nil {
+		checksum := *req.Checksum
+		constraints.Checksum = &checksum
+	}
+
+	return constraints
 }
