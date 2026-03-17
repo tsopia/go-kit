@@ -65,9 +65,18 @@ func (c *client) Upload(ctx context.Context, key string, reader io.Reader, opts 
 		opt(options)
 	}
 
-	opt := &cos.ObjectPutOptions{}
+	opt := &cos.ObjectPutOptions{
+		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{},
+	}
 	if options.ContentType != "" {
 		opt.ContentType = options.ContentType
+	}
+	if len(options.Metadata) > 0 {
+		header := http.Header{}
+		for key, value := range options.Metadata {
+			header.Set("x-cos-meta-"+key, value)
+		}
+		opt.XCosMetaXXX = &header
 	}
 
 	_, err := c.client.Object.Put(ctx, key, reader, opt)

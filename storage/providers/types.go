@@ -34,6 +34,7 @@ type PartInfo struct {
 // UploadOption 上传选项
 type UploadOption struct {
 	ContentType string
+	Metadata    map[string]string
 }
 
 // UploadOptionFunc 上传选项函数

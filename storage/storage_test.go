@@ -66,6 +66,17 @@ func TestDownloadWithClient(t *testing.T) {
 	}
 }
 
+func TestWithMetadata(t *testing.T) {
+	t.Parallel()
+
+	opt := UploadOption{}
+	WithMetadata("author", "alice")(&opt)
+
+	if got := opt.Metadata["author"]; got != "alice" {
+		t.Fatalf("unexpected metadata value: %q", got)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

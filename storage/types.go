@@ -49,6 +49,16 @@ func WithContentType(ct string) UploadOptionFunc {
 	}
 }
 
+// WithMetadata 设置对象 metadata。
+func WithMetadata(key, value string) UploadOptionFunc {
+	return func(o *UploadOption) {
+		if o.Metadata == nil {
+			o.Metadata = make(map[string]string)
+		}
+		o.Metadata[key] = value
+	}
+}
+
 // WithSignMethod 设置签名方法
 func WithSignMethod(method string) SignOptionFunc {
 	return func(o *SignOption) {

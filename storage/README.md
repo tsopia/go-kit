@@ -77,6 +77,7 @@ func main() {
 err := storage.Upload(ctx, "key", reader,
     storage.WithContentType("application/json"),
     storage.WithMetadata("author", "alice"),
+    storage.WithMetadata("source", "web"),
 )
 ```
 

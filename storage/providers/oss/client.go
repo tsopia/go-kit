@@ -55,6 +55,12 @@ func (c *client) Upload(ctx context.Context, key string, reader io.Reader, opts 
 	if options.ContentType != "" {
 		req.ContentType = oss.Ptr(options.ContentType)
 	}
+	if len(options.Metadata) > 0 {
+		req.Metadata = make(map[string]string, len(options.Metadata))
+		for key, value := range options.Metadata {
+			req.Metadata[key] = value
+		}
+	}
 
 	_, err := c.client.PutObject(ctx, req)
 	return err

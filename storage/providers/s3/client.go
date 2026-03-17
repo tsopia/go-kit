@@ -66,6 +66,12 @@ func (c *client) Upload(ctx context.Context, key string, reader io.Reader, opts 
 	if options.ContentType != "" {
 		input.ContentType = aws.String(options.ContentType)
 	}
+	if len(options.Metadata) > 0 {
+		input.Metadata = make(map[string]string, len(options.Metadata))
+		for key, value := range options.Metadata {
+			input.Metadata[key] = value
+		}
+	}
 
 	_, err := c.client.PutObject(ctx, input)
 	return err

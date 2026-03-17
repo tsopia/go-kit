@@ -108,6 +108,28 @@ func TestNormalizeDirectUploadRequest(t *testing.T) {
 	}
 }
 
+func TestAuthorizeDirectUploadWithClientNormalizesMetadataForAuthorizer(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeDirectUploadClient{
+		authorizeResult: &DirectUploadAuthorization{},
+	}
+
+	_, err := AuthorizeDirectUploadWithClient(context.Background(), client, DirectUploadRequest{
+		ObjectKey: "uploads/a.png",
+		Metadata: map[string]string{
+			" owner ": " alice ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("AuthorizeDirectUploadWithClient() error = %v", err)
+	}
+
+	if got := client.lastAuthorizeRequest.Metadata["owner"]; got != "alice" {
+		t.Fatalf("unexpected normalized metadata value: %q", got)
+	}
+}
+
 func TestVerifyDirectUploadObject(t *testing.T) {
 	t.Parallel()
 
@@ -172,8 +194,11 @@ func TestVerifyDirectUploadObjectMismatch(t *testing.T) {
 }
 
 type fakeDirectUploadClient struct {
-	statResult *ObjectInfo
-	statErr    error
+	statResult           *ObjectInfo
+	statErr              error
+	authorizeResult      *DirectUploadAuthorization
+	authorizeErr         error
+	lastAuthorizeRequest DirectUploadRequest
 }
 
 func (f *fakeDirectUploadClient) Upload(context.Context, string, io.Reader, ...UploadOptionFunc) error {
@@ -198,6 +223,11 @@ func (f *fakeDirectUploadClient) Stat(context.Context, string) (*ObjectInfo, err
 
 func (f *fakeDirectUploadClient) SignedURL(context.Context, string, time.Duration, ...SignOptionFunc) (string, error) {
 	return "", nil
+}
+
+func (f *fakeDirectUploadClient) AuthorizeDirectUpload(_ context.Context, req DirectUploadRequest) (*DirectUploadAuthorization, error) {
+	f.lastAuthorizeRequest = req
+	return f.authorizeResult, f.authorizeErr
 }
 
 func (f *fakeDirectUploadClient) InitMultipart(context.Context, string, ...UploadOptionFunc) (*MultipartUpload, error) {
