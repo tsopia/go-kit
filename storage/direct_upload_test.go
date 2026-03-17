@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"io"
 	"testing"
+	"time"
 )
 
 func TestAuthorizeDirectUploadWithClientRequiresClient(t *testing.T) {
@@ -104,4 +106,116 @@ func TestNormalizeDirectUploadRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyDirectUploadObject(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeDirectUploadClient{
+		statResult: &ObjectInfo{
+			Key:         "uploads/a.png",
+			Size:        12,
+			ContentType: "image/png",
+			Metadata: map[string]string{
+				"owner": "u1",
+			},
+		},
+	}
+
+	result, err := VerifyDirectUploadObjectWithClient(context.Background(), client, DirectUploadVerificationRequest{
+		ObjectKey:   "uploads/a.png",
+		ContentType: "image/png",
+		Metadata: map[string]string{
+			"owner": "u1",
+		},
+		Size: &DirectUploadSize{Exact: 12},
+	})
+	if err != nil {
+		t.Fatalf("VerifyDirectUploadObjectWithClient() error = %v", err)
+	}
+	if !result.Exists || !result.Matched {
+		t.Fatalf("expected matched result, got %+v", result)
+	}
+	if len(result.Mismatches) != 0 {
+		t.Fatalf("expected no mismatches, got %+v", result.Mismatches)
+	}
+}
+
+func TestVerifyDirectUploadObjectMismatch(t *testing.T) {
+	t.Parallel()
+
+	client := &fakeDirectUploadClient{
+		statResult: &ObjectInfo{
+			Key:         "uploads/a.png",
+			Size:        10,
+			ContentType: "image/jpeg",
+		},
+	}
+
+	result, err := VerifyDirectUploadObjectWithClient(context.Background(), client, DirectUploadVerificationRequest{
+		ObjectKey:   "uploads/a.png",
+		ContentType: "image/png",
+		Size:        &DirectUploadSize{Exact: 12},
+	})
+	if err != nil {
+		t.Fatalf("VerifyDirectUploadObjectWithClient() error = %v", err)
+	}
+	if !result.Exists {
+		t.Fatal("expected object to exist")
+	}
+	if result.Matched {
+		t.Fatal("expected mismatches")
+	}
+	if len(result.Mismatches) != 2 {
+		t.Fatalf("unexpected mismatch count: %d", len(result.Mismatches))
+	}
+}
+
+type fakeDirectUploadClient struct {
+	statResult *ObjectInfo
+	statErr    error
+}
+
+func (f *fakeDirectUploadClient) Upload(context.Context, string, io.Reader, ...UploadOptionFunc) error {
+	return nil
+}
+
+func (f *fakeDirectUploadClient) Download(context.Context, string, ...DownloadOptionFunc) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (f *fakeDirectUploadClient) Delete(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeDirectUploadClient) Exists(context.Context, string) (bool, error) {
+	return f.statResult != nil, nil
+}
+
+func (f *fakeDirectUploadClient) Stat(context.Context, string) (*ObjectInfo, error) {
+	return f.statResult, f.statErr
+}
+
+func (f *fakeDirectUploadClient) SignedURL(context.Context, string, time.Duration, ...SignOptionFunc) (string, error) {
+	return "", nil
+}
+
+func (f *fakeDirectUploadClient) InitMultipart(context.Context, string, ...UploadOptionFunc) (*MultipartUpload, error) {
+	return nil, nil
+}
+
+func (f *fakeDirectUploadClient) UploadPart(context.Context, string, int, io.Reader, ...UploadOptionFunc) (*PartInfo, error) {
+	return nil, nil
+}
+
+func (f *fakeDirectUploadClient) CompleteMultipart(context.Context, string, []*PartInfo, ...UploadOptionFunc) error {
+	return nil
+}
+
+func (f *fakeDirectUploadClient) AbortMultipart(context.Context, string) error {
+	return nil
+}
+
+func (f *fakeDirectUploadClient) DeleteBatch(context.Context, []string) error {
+	return nil
 }

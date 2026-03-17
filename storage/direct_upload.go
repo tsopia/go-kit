@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -46,7 +47,62 @@ func VerifyDirectUploadObjectWithClient(ctx context.Context, c Client, req Direc
 		return nil, ErrMissingClient
 	}
 
-	return &DirectUploadVerificationResult{}, nil
+	info, err := c.Stat(ctx, strings.TrimSpace(req.ObjectKey))
+	if err != nil {
+		return nil, fmt.Errorf("stat object: %w", err)
+	}
+	if info == nil {
+		return &DirectUploadVerificationResult{
+			Exists:  false,
+			Matched: false,
+		}, nil
+	}
+
+	result := &DirectUploadVerificationResult{
+		Exists:  true,
+		Matched: true,
+		Object:  info,
+	}
+
+	appendMismatch := func(field, expected, actual string) {
+		result.Matched = false
+		result.Mismatches = append(result.Mismatches, DirectUploadMismatch{
+			Field:    field,
+			Expected: expected,
+			Actual:   actual,
+		})
+	}
+
+	if req.ObjectKey != "" && info.Key != req.ObjectKey {
+		appendMismatch("object_key", req.ObjectKey, info.Key)
+	}
+
+	if req.ContentType != "" && info.ContentType != req.ContentType {
+		appendMismatch("content_type", req.ContentType, info.ContentType)
+	}
+
+	if req.Size != nil {
+		switch {
+		case req.Size.Exact > 0 && info.Size != req.Size.Exact:
+			appendMismatch("size", strconv.FormatInt(req.Size.Exact, 10), strconv.FormatInt(info.Size, 10))
+		case req.Size.Min > 0 && info.Size < req.Size.Min:
+			appendMismatch("size_min", strconv.FormatInt(req.Size.Min, 10), strconv.FormatInt(info.Size, 10))
+		case req.Size.Max > 0 && info.Size > req.Size.Max:
+			appendMismatch("size_max", strconv.FormatInt(req.Size.Max, 10), strconv.FormatInt(info.Size, 10))
+		}
+	}
+
+	for key, expected := range req.Metadata {
+		actual := ""
+		if info.Metadata != nil {
+			actual = info.Metadata[key]
+		}
+		if actual != expected {
+			appendMismatch("metadata."+key, expected, actual)
+		}
+	}
+
+	return result, nil
 }
 
 func normalizeDirectUploadRequest(req DirectUploadRequest) (DirectUploadRequest, error) {

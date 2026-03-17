@@ -14,6 +14,8 @@ type ObjectInfo struct {
 	LastModified time.Time
 	ETag         string
 	ContentType  string
+	Metadata     map[string]string
+	Checksums    map[string]string
 }
 
 // MultipartUpload 分片上传信息
