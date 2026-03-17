@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	httpmiddleware "github.com/tsopia/go-kit/httpserver/middleware"
 	"github.com/tsopia/go-kit/utils"
 
 	"github.com/gin-gonic/gin"
@@ -550,6 +551,43 @@ func TestTraceIDMiddleware(t *testing.T) {
 	// 验证响应头和响应体中的 trace_id 是否一致
 	if response["trace_id"] != traceIDHeader {
 		t.Errorf("Expected trace_id in response (%s) to match header (%s)", response["trace_id"], traceIDHeader)
+	}
+}
+
+func TestLegacyTraceIDMiddlewareDelegatesToMiddlewarePackage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		middleware gin.HandlerFunc
+	}{
+		{
+			name:       "legacy wrapper",
+			middleware: TraceIDMiddleware(),
+		},
+		{
+			name:       "middleware package",
+			middleware: httpmiddleware.TraceID(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(nil)
+			srv.Use(tt.middleware)
+			srv.GET("/trace", func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/trace", nil)
+			req.Header.Set(utils.TraceIDHeader, "trace-compat")
+			srv.Engine().ServeHTTP(w, req)
+
+			if got := w.Header().Get(utils.TraceIDHeader); got != "trace-compat" {
+				t.Fatalf("trace header = %q, want %q", got, "trace-compat")
+			}
+		})
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	httpmiddleware "github.com/tsopia/go-kit/httpserver/middleware"
 	"github.com/tsopia/go-kit/utils"
 
 	"github.com/gin-gonic/gin"
@@ -362,62 +363,17 @@ func (s *Server) IsRunning() bool {
 
 // TraceIDMiddleware 添加 Trace ID 的中间件
 func TraceIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 检查请求头中是否已有 trace id
-		traceID := c.GetHeader(utils.TraceIDHeader)
-		if traceID == "" {
-			// 生成新的 trace id
-			traceID = utils.GenerateID()
-		}
-
-		// 设置到响应头
-		c.Header(utils.TraceIDHeader, traceID)
-
-		// 设置到 gin context 和 request context 中
-		c.Set(utils.TraceIDKey, traceID)
-
-		// 为了与 logger 包联动，也要设置到 request context 中
-		ctx := utils.WithTraceID(c.Request.Context(), traceID)
-		c.Request = c.Request.WithContext(ctx)
-
-		c.Next()
-	}
+	return httpmiddleware.TraceID()
 }
 
 // RequestIDMiddleware 添加 Request ID 的中间件（每个请求唯一）
 func RequestIDMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		requestID := utils.GenerateID()
-
-		// 设置到响应头
-		c.Header(utils.RequestIDHeader, requestID)
-
-		// 设置到 gin context 和 request context 中
-		c.Set(utils.RequestIDKey, requestID)
-
-		// 为了与 logger 包联动，也要设置到 request context 中
-		ctx := utils.WithRequestID(c.Request.Context(), requestID)
-		c.Request = c.Request.WithContext(ctx)
-
-		c.Next()
-	}
+	return httpmiddleware.RequestID()
 }
 
 // CORSMiddleware CORS 中间件
 func CORSMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", fmt.Sprintf("Content-Type, Authorization, %s, %s", utils.TraceIDHeader, utils.RequestIDHeader))
-		c.Header("Access-Control-Expose-Headers", fmt.Sprintf("%s, %s", utils.TraceIDHeader, utils.RequestIDHeader))
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	}
+	return httpmiddleware.CORS(httpmiddleware.CORSConfig{})
 }
 
 // GetTraceID 从 context 中获取 trace id

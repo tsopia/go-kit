@@ -142,6 +142,7 @@ database/
 | 消息队列 | `pgmq` | `pgmq.New(cfg)` |
 | 配置管理 | `cfg` | `cfg.Load(path, &config)` |
 | HTTP 服务 | `httpserver` | `httpserver.NewServer(cfg)` |
+| HTTP 中间件 | `httpserver/middleware` | `srv.Use(middleware.Recovery())` |
 | Swagger 文档 | `httpserver/swagger` | `httpswagger.Register(public, httpswagger.Config{})` |
 | HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
 | 对象存储 | `storage` | `storage.Upload(ctx, "file", reader)`, `storage.AuthorizeDirectUpload(ctx, req)` |

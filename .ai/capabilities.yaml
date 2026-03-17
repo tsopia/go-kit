@@ -105,6 +105,21 @@ capabilities:
           }
     dependencies: []
 
+  - name: middleware
+    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、CORS、安全头等）
+    import: github.com/tsopia/go-kit/httpserver/middleware
+    scenarios:
+      - name: 挂载恢复中间件
+        snippet: |
+          srv.Use(middleware.Recovery())
+      - name: 挂载超时中间件
+        snippet: |
+          srv.Use(middleware.Timeout(2 * time.Second))
+      - name: 挂载安全响应头
+        snippet: |
+          srv.Use(middleware.SecurityHeaders())
+    dependencies: [httpserver]
+
   - name: swagger
     description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）
     import: github.com/tsopia/go-kit/httpserver/swagger

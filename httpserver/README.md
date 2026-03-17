@@ -25,6 +25,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `RouteModule` 支持按模块注册路由
 - `Handle` / `HandleJSON` 支持 typed handler
 - `DecodeJSON` / `DecodeQuery` / `DecodeURI` / `ComposeDecoder` 支持请求解码组合
+- `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、CORS 等中间件
 - `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
 ## 快速开始
@@ -164,6 +165,17 @@ srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
 ```
 
 `httpserver` 不依赖 `kit` 或任何具体日志包，日志方案由使用方决定。
+
+## 通用中间件
+
+如果你需要可复用的 Recovery、Timeout、TraceID、RequestID、CORS 或安全响应头，优先使用 `httpserver/middleware` 子包，而不是继续向 `Server` 主类型增加能力。
+
+```go
+srv := httpserver.NewServer(cfg)
+srv.Use(middleware.Recovery())
+srv.Use(middleware.Timeout(2 * time.Second))
+srv.Use(middleware.TraceID())
+```
 
 ## 健康检查
 
