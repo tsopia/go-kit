@@ -98,6 +98,10 @@ capabilities:
       - name: 注册 typed handler
         snippet: |
           srv.POST("/login", httpserver.HandleJSON(login))
+      - name: 注册 Query/URI typed handler
+        snippet: |
+          srv.GET("/users", httpserver.HandleQuery(listUsers))
+          srv.GET("/users/:id", httpserver.HandleURI(getUser))
       - name: 启动服务器
         snippet: |
           if err := srv.Start(); err != nil {
@@ -153,6 +157,21 @@ capabilities:
         snippet: |
           srv := preset.NewProductionServer(cfg)
     dependencies: [httpserver, middleware]
+
+  - name: errorsx
+    description: 将 errors 包的业务错误映射为 httpserver 的统一 HTTP 响应
+    import: github.com/tsopia/go-kit/httpserver/integration/errorsx
+    scenarios:
+      - name: 挂载 errors 到 typed handler 的映射
+        snippet: |
+          srv.POST("/users", httpserver.HandleJSON(
+              createUser,
+              httpserver.WithErrorMapper(errorsx.Mapper()),
+          ))
+      - name: 单独获取 HTTP 状态和响应体
+        snippet: |
+          status, body := errorsx.Response(err)
+    dependencies: [httpserver, errors]
 
   - name: swagger
     description: Swagger UI 路由挂载与文档接入（配合 httpserver 使用）

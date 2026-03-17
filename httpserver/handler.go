@@ -29,11 +29,27 @@ func (e *handlerRequestError) Unwrap() error {
 	return e.err
 }
 
+// ErrorResponse 描述 typed handler 的默认错误响应结构。
+type ErrorResponse struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
 // HandlerFunc 描述强类型请求的业务处理函数。
 type HandlerFunc[Req any, Resp any] func(ctx context.Context, req Req) (Resp, error)
 
 // ErrorMapper 负责把业务错误映射成 HTTP 响应。
 type ErrorMapper func(err error) (status int, body any)
+
+// HTTPError 描述带有 HTTP 语义的业务错误。
+type HTTPError interface {
+	error
+	StatusCode() int
+	ErrorCode() string
+	ErrorMessage() string
+	ErrorDetails() map[string]any
+}
 
 // HandlerOption 描述 handler 的可选配置。
 type HandlerOption func(*handlerConfig)
@@ -41,9 +57,40 @@ type HandlerOption func(*handlerConfig)
 type handlerConfig struct {
 	successStatus int
 	decoder       func(*gin.Context, any) error
+	validators    []func(context.Context, any) error
 	encoder       func(*gin.Context, int, any)
 	errorMapper   ErrorMapper
 }
+
+// ValidationField 描述字段级校验错误。
+type ValidationField struct {
+	Field   string `json:"field"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
+}
+
+// ValidationError 描述结构化请求校验错误。
+type ValidationError struct {
+	Message string            `json:"message"`
+	Fields  []ValidationField `json:"fields,omitempty"`
+}
+
+func (e *ValidationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if len(e.Fields) > 0 {
+		return e.Fields[0].Message
+	}
+
+	return "validation failed"
+}
+
+// RequestValidator 描述 typed handler 的显式请求校验器。
+type RequestValidator[Req any] func(context.Context, Req) error
 
 // WithSuccessStatus 覆盖成功响应状态码。
 func WithSuccessStatus(status int) HandlerOption {
@@ -76,6 +123,26 @@ func WithDecoder[Req any](decoder func(*gin.Context, *Req) error) HandlerOption 
 			}
 
 			return decoder(c, req)
+		}
+	}
+}
+
+// WithValidators 为 typed handler 追加显式请求校验器。
+func WithValidators[Req any](validators ...RequestValidator[Req]) HandlerOption {
+	return func(cfg *handlerConfig) {
+		for _, validator := range validators {
+			if validator == nil {
+				continue
+			}
+
+			cfg.validators = append(cfg.validators, func(ctx context.Context, req any) error {
+				typedReq, ok := req.(Req)
+				if !ok {
+					return fmt.Errorf("validator request type mismatch")
+				}
+
+				return validator(ctx, typedReq)
+			})
 		}
 	}
 }
@@ -120,6 +187,13 @@ func Handle[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption)
 			})
 			return
 		}
+		if err := applyValidators(ctx, req, cfg.validators); err != nil {
+			renderHandlerError(c, cfg, &handlerRequestError{
+				kind: handlerErrorKindValidate,
+				err:  fmt.Errorf("validate request: %w", err),
+			})
+			return
+		}
 
 		resp, err := fn(ctx, req)
 		if err != nil {
@@ -135,6 +209,36 @@ func Handle[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption)
 func HandleJSON[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
 	combined := make([]HandlerOption, 0, len(opts)+1)
 	combined = append(combined, WithDecoder(DecodeJSON[Req]()))
+	combined = append(combined, opts...)
+
+	return Handle(fn, combined...)
+}
+
+// HandleQuery 将强类型业务函数适配成 query string handler。
+func HandleQuery[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	combined := make([]HandlerOption, 0, len(opts)+1)
+	combined = append(combined, WithDecoder(DecodeQuery[Req]()))
+	combined = append(combined, opts...)
+
+	return Handle(fn, combined...)
+}
+
+// HandleURI 将强类型业务函数适配成 URI 参数 handler。
+func HandleURI[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	combined := make([]HandlerOption, 0, len(opts)+1)
+	combined = append(combined, WithDecoder(DecodeURI[Req]()))
+	combined = append(combined, opts...)
+
+	return Handle(fn, combined...)
+}
+
+// HandleQueryURI 将强类型业务函数适配成 URI + query 组合解码 handler。
+func HandleQueryURI[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	combined := make([]HandlerOption, 0, len(opts)+1)
+	combined = append(combined, WithDecoder(ComposeDecoder(
+		DecodeURI[Req](),
+		DecodeQuery[Req](),
+	)))
 	combined = append(combined, opts...)
 
 	return Handle(fn, combined...)
@@ -196,17 +300,72 @@ func validateRequest[Req any](ctx context.Context, req Req) error {
 	return nil
 }
 
+func applyValidators[Req any](ctx context.Context, req Req, validators []func(context.Context, any) error) error {
+	for _, validator := range validators {
+		if validator == nil {
+			continue
+		}
+		if err := validator(ctx, req); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func renderHandlerError(c *gin.Context, cfg handlerConfig, err error) {
 	var requestErr *handlerRequestError
 	if errors.As(err, &requestErr) {
 		switch requestErr.kind {
 		case handlerErrorKindDecode:
-			c.JSON(http.StatusBadRequest, gin.H{"error": requestErr.Error()})
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Code:    "invalid_request",
+				Message: requestErr.Error(),
+			})
 			return
 		case handlerErrorKindValidate:
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": requestErr.Error()})
+			var validationErr *ValidationError
+			if errors.As(requestErr, &validationErr) {
+				resp := ErrorResponse{
+					Code:    "validation_failed",
+					Message: validationErr.Error(),
+				}
+				if len(validationErr.Fields) > 0 {
+					resp.Details = map[string]any{
+						"fields": validationErr.Fields,
+					}
+				}
+				c.JSON(http.StatusUnprocessableEntity, resp)
+				return
+			}
+
+			root := error(requestErr)
+			for {
+				unwrapped := errors.Unwrap(root)
+				if unwrapped == nil {
+					break
+				}
+				root = unwrapped
+			}
+			c.JSON(http.StatusUnprocessableEntity, ErrorResponse{
+				Code:    "validation_failed",
+				Message: root.Error(),
+			})
 			return
 		}
+	}
+
+	var httpErr HTTPError
+	if errors.As(err, &httpErr) {
+		resp := ErrorResponse{
+			Code:    httpErr.ErrorCode(),
+			Message: httpErr.ErrorMessage(),
+		}
+		if details := httpErr.ErrorDetails(); len(details) > 0 {
+			resp.Details = details
+		}
+		c.JSON(httpErr.StatusCode(), resp)
+		return
 	}
 
 	if cfg.errorMapper != nil {
@@ -215,5 +374,8 @@ func renderHandlerError(c *gin.Context, cfg handlerConfig, err error) {
 		return
 	}
 
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	c.JSON(http.StatusInternalServerError, ErrorResponse{
+		Code:    "internal_error",
+		Message: err.Error(),
+	})
 }

@@ -146,6 +146,7 @@ database/
 | HTTP 指标 | `httpserver/observability/prometheus` | `prometheusmiddleware.Register(public, prometheusmiddleware.Config{})` |
 | HTTP Trace | `httpserver/observability/otel` | `srv.Use(httpotel.Middleware(httpotel.Config{}))` |
 | HTTP 默认装配 | `httpserver/preset` | `preset.NewProductionServer(cfg)` |
+| HTTP 错误桥接 | `httpserver/integration/errorsx` | `httpserver.WithErrorMapper(errorsx.Mapper())` |
 | Swagger 文档 | `httpserver/swagger` | `httpswagger.Register(public, httpswagger.Config{})` |
 | HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
 | 对象存储 | `storage` | `storage.Upload(ctx, "file", reader)`, `storage.AuthorizeDirectUpload(ctx, req)` |

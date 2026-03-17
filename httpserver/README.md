@@ -28,6 +28,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、CORS 等中间件
 - `httpserver/observability/prometheus` 与 `httpserver/observability/otel` 子包支持指标和 tracing 集成
 - `httpserver/preset` 子包支持官方推荐的默认装配
+- `httpserver/integration/errorsx` 子包支持 `errors` 包到 typed handler 的统一错误映射
 - `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
 ## 快速开始
@@ -257,35 +258,92 @@ srv := httpserver.NewServer(cfg, httpserver.WithModules(userModule))
 
 ## Typed handler
 
-JSON body：
+常用快捷入口：
 
 ```go
 r.POST("/login", httpserver.HandleJSON(login))
+r.GET("/users", httpserver.HandleQuery(listUsers))
+r.GET("/users/:id", httpserver.HandleURI(getUser))
+r.GET("/users/:id", httpserver.HandleQueryURI(getUserDetail))
 ```
 
-Query / URI / 自定义 decoder：
+如果你需要更细粒度的解码控制，仍然可以保留底层 decoder 组合：
 
 ```go
 r.GET("/users", httpserver.Handle(
 	listUsers,
 	httpserver.WithDecoder(httpserver.DecodeQuery[ListUsersRequest]()),
 ))
-```
 
-解码器可以组合：
-
-```go
 httpserver.ComposeDecoder(
 	httpserver.DecodeURI[Req](),
 	httpserver.DecodeQuery[Req](),
 )
 ```
 
-如果请求结构实现了以下任一方法，会自动执行校验：
+请求对象如果实现了以下任一方法，会自动执行校验：
 
 ```go
 Validate() error
 Validate(context.Context) error
+```
+
+如果还需要补充装配层校验，可以追加显式 validator：
+
+```go
+r.POST("/register", httpserver.HandleJSON(
+	register,
+	httpserver.WithValidators(func(ctx context.Context, req RegisterRequest) error {
+		if strings.HasSuffix(req.Email, "@company.com") {
+			return nil
+		}
+
+		return &httpserver.ValidationError{
+			Message: "request validation failed",
+			Fields: []httpserver.ValidationField{
+				{
+					Field:   "email",
+					Message: "must use company email",
+				},
+			},
+		}
+	}),
+))
+```
+
+默认错误响应统一为：
+
+```json
+{
+  "code": "validation_failed",
+  "message": "email is required"
+}
+```
+
+字段级校验会额外返回 `details.fields`。如果业务错误需要自己控制 HTTP 状态码和错误体语义，可以返回实现了 `HTTPError` 接口的错误，或者继续通过 `WithErrorMapper(...)` 做项目级映射。
+
+如果团队统一使用 `github.com/tsopia/go-kit/errors` 作为业务错误出口，推荐直接使用 `httpserver/integration/errorsx`：
+
+```go
+import (
+	"github.com/tsopia/go-kit/httpserver"
+	"github.com/tsopia/go-kit/httpserver/integration/errorsx"
+)
+
+r.POST("/users", httpserver.HandleJSON(
+	createUser,
+	httpserver.WithErrorMapper(errorsx.Mapper()),
+))
+```
+
+默认会把 `errors` 包中的业务错误映射成：
+
+```json
+{
+  "code": 2002,
+  "name": "INVALID_PARAM",
+  "message": "email is required"
+}
 ```
 
 ## Swagger 集成
@@ -352,9 +410,9 @@ type LoginResponse struct {
 // @Produce json
 // @Param request body LoginRequest true "登录请求"
 // @Success 200 {object} LoginResponse
-// @Failure 400 {object} map[string]string
-// @Failure 422 {object} map[string]string
-// @Failure 500 {object} map[string]string
+// @Failure 400 {object} httpserver.ErrorResponse
+// @Failure 422 {object} httpserver.ErrorResponse
+// @Failure 500 {object} httpserver.ErrorResponse
 // @Router /auth/login [post]
 func (m *UserModule) login(ctx context.Context, req LoginRequest) (LoginResponse, error) {
 	return m.auth.Login(ctx, req)
@@ -372,9 +430,9 @@ r.POST("/auth/login", httpserver.HandleJSON(m.login))
 // @Produce json
 // @Security BearerAuth
 // @Success 200 {object} ProfileResponse
-// @Failure 401 {object} map[string]string
-// @Failure 403 {object} map[string]string
-// @Failure 500 {object} map[string]string
+// @Failure 401 {object} httpserver.ErrorResponse
+// @Failure 403 {object} httpserver.ErrorResponse
+// @Failure 500 {object} httpserver.ErrorResponse
 // @Router /users/me [get]
 func (m *UserModule) profile(ctx context.Context, req ProfileRequest) (ProfileResponse, error) {
 	return m.user.Profile(ctx, req)
@@ -397,8 +455,8 @@ type ListUsersRequest struct {
 // @Param size query int false "每页数量"
 // @Security BearerAuth
 // @Success 200 {object} ListUsersResponse
-// @Failure 400 {object} map[string]string
-// @Failure 500 {object} map[string]string
+// @Failure 400 {object} httpserver.ErrorResponse
+// @Failure 500 {object} httpserver.ErrorResponse
 // @Router /users [get]
 func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListUsersResponse, error) {
 	return m.user.List(ctx, req)
@@ -408,7 +466,7 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 ## 推荐实践
 
 - 需要灵活性时，直接使用 Gin 原生 handler
-- 需要统一接口契约时，优先使用 `Handle` / `HandleJSON`
+- 需要统一接口契约时，优先使用 `HandleJSON`、`HandleQuery`、`HandleURI`、`HandleQueryURI`
 - 模块依赖在业务装配层注入，不在 `httpserver` 内做容器
 - 日志、指标、审计统一通过 `Hooks` 接入
 - Swagger 建议通过 `httpserver/swagger` 注册在公共路由组
