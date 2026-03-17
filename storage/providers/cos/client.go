@@ -151,6 +151,55 @@ func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration
 	return presignedURL.String(), nil
 }
 
+func (c *client) AuthorizeDirectUpload(ctx context.Context, req providers.DirectUploadRequest) (*providers.DirectUploadAuthorization, error) {
+	mode, err := selectCOSDirectUploadMode(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if mode != providers.DirectUploadModePut {
+		return nil, fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, mode)
+	}
+
+	expire := c.resolveDirectUploadExpire(req.Expire)
+	headers := http.Header{}
+	if req.ContentType != "" {
+		headers.Set("Content-Type", req.ContentType)
+	}
+	for key, value := range req.Metadata {
+		headers.Set("x-cos-meta-"+key, value)
+	}
+	if req.Size != nil && req.Size.Exact > 0 {
+		headers.Set("Content-Length", fmt.Sprintf("%d", req.Size.Exact))
+	}
+	if err := applyCOSChecksum(&headers, req.Checksum); err != nil {
+		return nil, err
+	}
+
+	presignedURL, err := c.client.Object.GetPresignedURL2(ctx, http.MethodPut, req.ObjectKey, expire, &cos.PresignedURLOptions{
+		Header: &headers,
+	}, true)
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+
+	return &providers.DirectUploadAuthorization{
+		Provider:  providers.TypeCOS,
+		Mode:      providers.DirectUploadModePut,
+		ObjectKey: req.ObjectKey,
+		URL:       presignedURL.String(),
+		Method:    http.MethodPut,
+		Headers:   flattenCOSHeaders(headers),
+		ExpiresAt: time.Now().Add(expire),
+		Constraints: providers.DirectUploadConstraints{
+			ContentType: req.ContentType,
+			Metadata:    copyCOSStringMap(req.Metadata),
+			Size:        copyCOSSize(req.Size),
+			Checksum:    copyCOSChecksum(req.Checksum),
+		},
+	}, nil
+}
+
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
 	// 处理上传选项
 	options := &providers.UploadOption{}
@@ -278,4 +327,90 @@ func (c *client) DeleteBatch(ctx context.Context, keys []string) error {
 
 	_, _, err := c.client.Object.DeleteMulti(ctx, opt)
 	return err
+}
+
+func selectCOSDirectUploadMode(req providers.DirectUploadRequest) (providers.DirectUploadMode, error) {
+	switch req.Mode {
+	case "", providers.DirectUploadModeAuto, providers.DirectUploadModePut:
+		if req.Size != nil && req.Size.Exact == 0 && (req.Size.Min > 0 || req.Size.Max > 0) {
+			return "", fmt.Errorf("%w: size range is not supported by cos put presign", providers.ErrUnsupportedDirectUploadConstraint)
+		}
+		return providers.DirectUploadModePut, nil
+	case providers.DirectUploadModePost:
+		return "", fmt.Errorf("%w: post mode is not supported by cos provider", providers.ErrUnsupportedDirectUploadMode)
+	default:
+		return "", fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, req.Mode)
+	}
+}
+
+func (c *client) resolveDirectUploadExpire(expire time.Duration) time.Duration {
+	if expire == 0 {
+		expire = c.config.DefaultSignExpire
+		if expire == 0 {
+			expire = 15 * time.Minute
+		}
+	}
+
+	return expire
+}
+
+func applyCOSChecksum(headers *http.Header, checksum *providers.DirectUploadChecksum) error {
+	if checksum == nil {
+		return nil
+	}
+
+	switch checksum.Algorithm {
+	case providers.DirectUploadChecksumMD5:
+		headers.Set("Content-MD5", checksum.Value)
+		return nil
+	default:
+		return fmt.Errorf("%w: checksum algorithm %q", providers.ErrUnsupportedDirectUploadConstraint, checksum.Algorithm)
+	}
+}
+
+func flattenCOSHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+
+	flattened := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		flattened[key] = values[0]
+	}
+
+	return flattened
+}
+
+func copyCOSStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func copyCOSSize(size *providers.DirectUploadSize) *providers.DirectUploadSize {
+	if size == nil {
+		return nil
+	}
+
+	cloned := *size
+	return &cloned
+}
+
+func copyCOSChecksum(checksum *providers.DirectUploadChecksum) *providers.DirectUploadChecksum {
+	if checksum == nil {
+		return nil
+	}
+
+	cloned := *checksum
+	return &cloned
 }

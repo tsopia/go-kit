@@ -154,6 +154,56 @@ func (c *client) SignedURL(ctx context.Context, key string, expire time.Duration
 	return result.URL, nil
 }
 
+func (c *client) AuthorizeDirectUpload(ctx context.Context, req providers.DirectUploadRequest) (*providers.DirectUploadAuthorization, error) {
+	mode, err := selectOSSDirectUploadMode(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if mode != providers.DirectUploadModePut {
+		return nil, fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, mode)
+	}
+
+	expire := c.resolveDirectUploadExpire(req.Expire)
+	putReq := &oss.PutObjectRequest{
+		Bucket: oss.Ptr(c.bucket),
+		Key:    oss.Ptr(req.ObjectKey),
+	}
+	if req.ContentType != "" {
+		putReq.ContentType = oss.Ptr(req.ContentType)
+	}
+	if len(req.Metadata) > 0 {
+		putReq.Metadata = copyOSSStringMap(req.Metadata)
+	}
+	if req.Size != nil && req.Size.Exact > 0 {
+		putReq.ContentLength = oss.Ptr(req.Size.Exact)
+	}
+	if err := applyOSSChecksum(putReq, req.Checksum); err != nil {
+		return nil, err
+	}
+
+	result, err := c.client.Presign(ctx, putReq, oss.PresignExpires(expire))
+	if err != nil {
+		return nil, fmt.Errorf("presign put object: %w", err)
+	}
+
+	return &providers.DirectUploadAuthorization{
+		Provider:  providers.TypeOSS,
+		Mode:      providers.DirectUploadModePut,
+		ObjectKey: req.ObjectKey,
+		URL:       result.URL,
+		Method:    result.Method,
+		Headers:   copyOSSStringMap(result.SignedHeaders),
+		ExpiresAt: result.Expiration,
+		Constraints: providers.DirectUploadConstraints{
+			ContentType: req.ContentType,
+			Metadata:    copyOSSStringMap(req.Metadata),
+			Size:        copyOSSSize(req.Size),
+			Checksum:    copyOSSChecksum(req.Checksum),
+		},
+	}, nil
+}
+
 func (c *client) InitMultipart(ctx context.Context, key string, opts ...providers.UploadOptionFunc) (*providers.MultipartUpload, error) {
 	req := &oss.InitiateMultipartUploadRequest{
 		Bucket: oss.Ptr(c.bucket),
@@ -231,4 +281,74 @@ func (c *client) DeleteBatch(ctx context.Context, keys []string) error {
 
 	_, err := c.client.DeleteMultipleObjects(ctx, req)
 	return err
+}
+
+func selectOSSDirectUploadMode(req providers.DirectUploadRequest) (providers.DirectUploadMode, error) {
+	switch req.Mode {
+	case "", providers.DirectUploadModeAuto, providers.DirectUploadModePut:
+		if req.Size != nil && req.Size.Exact == 0 && (req.Size.Min > 0 || req.Size.Max > 0) {
+			return "", fmt.Errorf("%w: size range is not supported by oss put presign", providers.ErrUnsupportedDirectUploadConstraint)
+		}
+		return providers.DirectUploadModePut, nil
+	case providers.DirectUploadModePost:
+		return "", fmt.Errorf("%w: post mode is not supported by oss provider", providers.ErrUnsupportedDirectUploadMode)
+	default:
+		return "", fmt.Errorf("%w: %s", providers.ErrUnsupportedDirectUploadMode, req.Mode)
+	}
+}
+
+func (c *client) resolveDirectUploadExpire(expire time.Duration) time.Duration {
+	if expire == 0 {
+		expire = c.config.DefaultSignExpire
+		if expire == 0 {
+			expire = 15 * time.Minute
+		}
+	}
+
+	return expire
+}
+
+func applyOSSChecksum(req *oss.PutObjectRequest, checksum *providers.DirectUploadChecksum) error {
+	if checksum == nil {
+		return nil
+	}
+
+	switch checksum.Algorithm {
+	case providers.DirectUploadChecksumMD5:
+		req.ContentMD5 = oss.Ptr(checksum.Value)
+		return nil
+	default:
+		return fmt.Errorf("%w: checksum algorithm %q", providers.ErrUnsupportedDirectUploadConstraint, checksum.Algorithm)
+	}
+}
+
+func copyOSSStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func copyOSSSize(size *providers.DirectUploadSize) *providers.DirectUploadSize {
+	if size == nil {
+		return nil
+	}
+
+	cloned := *size
+	return &cloned
+}
+
+func copyOSSChecksum(checksum *providers.DirectUploadChecksum) *providers.DirectUploadChecksum {
+	if checksum == nil {
+		return nil
+	}
+
+	cloned := *checksum
+	return &cloned
 }
