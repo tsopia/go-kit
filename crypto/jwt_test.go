@@ -110,7 +110,7 @@ func TestSignJWTWithAlg(t *testing.T) {
 	}{
 		{
 			name: "HS256 algorithm",
-			alg:  "HS256",
+			alg:  JWTAlgHS256,
 			claims: JWTClaims{
 				RegisteredClaims: jwt.RegisteredClaims{
 					Subject: "user123",
@@ -120,7 +120,7 @@ func TestSignJWTWithAlg(t *testing.T) {
 		},
 		{
 			name: "HS384 algorithm",
-			alg:  "HS384",
+			alg:  JWTAlgHS384,
 			claims: JWTClaims{
 				RegisteredClaims: jwt.RegisteredClaims{
 					Subject: "user456",
@@ -130,7 +130,7 @@ func TestSignJWTWithAlg(t *testing.T) {
 		},
 		{
 			name: "HS512 algorithm",
-			alg:  "HS512",
+			alg:  JWTAlgHS512,
 			claims: JWTClaims{
 				RegisteredClaims: jwt.RegisteredClaims{
 					Subject: "user789",

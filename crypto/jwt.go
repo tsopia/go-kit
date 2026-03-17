@@ -8,6 +8,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWT 算法常量
+const (
+	JWTAlgHS256 = "HS256"
+	JWTAlgHS384 = "HS384"
+	JWTAlgHS512 = "HS512"
+)
+
 // JWTClaims JWT 声明
 type JWTClaims struct {
 	jwt.RegisteredClaims
@@ -67,11 +74,11 @@ func (c *Client) SignJWTWithAlg(claims JWTClaims, alg string) (string, error) {
 
 	var method jwt.SigningMethod
 	switch alg {
-	case "HS256":
+	case JWTAlgHS256:
 		method = jwt.SigningMethodHS256
-	case "HS384":
+	case JWTAlgHS384:
 		method = jwt.SigningMethodHS384
-	case "HS512":
+	case JWTAlgHS512:
 		method = jwt.SigningMethodHS512
 	default:
 		return "", ErrUnsupportedAlg

@@ -139,6 +139,7 @@ database/
 | Swagger 文档 | `httpserver/swagger` | `httpswagger.Register(public, httpswagger.Config{})` |
 | HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
 | 对象存储 | `storage` | `storage.Upload(ctx, "file", reader)`, `storage.AuthorizeDirectUpload(ctx, req)` |
+| 加解密/JWT | `crypto` | `crypto.EncryptAES(data)`, `crypto.SignJWT(claims)` |
 
 ## 项目迁移指南
 

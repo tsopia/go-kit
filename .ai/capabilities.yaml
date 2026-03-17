@@ -1,4 +1,4 @@
-version: "1.0.0"
+version: "1.1.0"
 updated_at: "2026-03-17"
 
 capabilities:
@@ -212,6 +212,64 @@ capabilities:
         snippet: |
           client, err := pgmq.Configure(db)
           msgID, err := pgmq.SendMsg[MyMessage](ctx, "my_queue", payload)
+    dependencies: []
+
+  - name: utils
+    description: 通用工具函数（字符串/数字/时间/文件/加密/验证/JSON/反射/切片/Map）
+    import: github.com/tsopia/go-kit/utils
+    scenarios:
+      - name: 字符串工具
+        snippet: |
+          utils.IsEmpty(str)
+          utils.CamelToSnake(str)
+          utils.MaskString(str, 0, 3, '*')
+      - name: 加密工具
+        snippet: |
+          utils.MD5Hash(data)
+          utils.SHA256Hash(data)
+          utils.GenerateSecureToken(32)
+      - name: 验证工具
+        snippet: |
+          utils.IsValidEmail(email)
+          utils.IsStrongPassword(pwd)
+      - name: 切片工具
+        snippet: |
+          utils.ContainsString(slice, item)
+          utils.UniqueStrings(slice)
+    dependencies: []
+
+  - name: crypto
+    description: 加解密与 JWT（AES-256-GCM、RSA-OAEP/PSS、JWT HS256/RS256）
+    import: github.com/tsopia/go-kit/crypto
+    scenarios:
+      - name: 配置全局客户端
+        snippet: |
+          crypto.Configure(&crypto.Config{
+              AESKey: "32-byte-key-for-aes-256-gcm!",
+              JWTSecret: "my-secret",
+          })
+      - name: AES 加密解密
+        snippet: |
+          encrypted, err := crypto.EncryptAES([]byte("secret"))
+          decrypted, err := crypto.DecryptAES(encrypted)
+      - name: AES 字符串加密
+        snippet: |
+          encrypted, err := crypto.EncryptAESString("plaintext")
+          decrypted, err := crypto.DecryptAESString(encrypted)
+      - name: RSA 加密解密
+        snippet: |
+          encrypted, err := crypto.EncryptRSA([]byte("data"))
+          decrypted, err := crypto.DecryptRSA(encrypted)
+      - name: RSA 签名验证
+        snippet: |
+          signature, err := crypto.SignRSA(data)
+          err := crypto.VerifyRSA(data, signature)
+      - name: JWT 签名验证
+        snippet: |
+          token, err := crypto.SignJWT(crypto.JWTClaims{
+              RegisteredClaims: jwt.RegisteredClaims{Subject: "user123"},
+          })
+          claims, err := crypto.ParseJWT(token)
     dependencies: []
 
   - name: storage

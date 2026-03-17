@@ -157,3 +157,10 @@ func (c *Client) VerifyRSA(data, signature []byte) error {
 	}
 	return nil
 }
+
+// GetClient 获取全局默认客户端
+func GetClient() *Client {
+	clientMu.RLock()
+	defer clientMu.RUnlock()
+	return defaultClient
+}
