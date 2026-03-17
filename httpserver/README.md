@@ -27,6 +27,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `DecodeJSON` / `DecodeQuery` / `DecodeURI` / `ComposeDecoder` 支持请求解码组合
 - `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、CORS 等中间件
 - `httpserver/observability/prometheus` 与 `httpserver/observability/otel` 子包支持指标和 tracing 集成
+- `httpserver/preset` 子包支持官方推荐的默认装配
 - `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
 ## 快速开始
@@ -191,6 +192,14 @@ srv.Use(otel.Middleware(otel.Config{
 prometheus.Register(public, prometheus.Config{
 	Path: "/metrics",
 })
+```
+
+## 官方默认装配
+
+如果你希望快速获得一套一致的 HTTP 默认链路，可以直接使用 `httpserver/preset`：
+
+```go
+srv := preset.NewProductionServer(cfg)
 ```
 
 ## 健康检查
