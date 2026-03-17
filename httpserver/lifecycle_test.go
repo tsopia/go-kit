@@ -33,7 +33,11 @@ func TestServerStartReturnsListenError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			t.Fatalf("close listener: %v", err)
+		}
+	}()
 
 	port := ln.Addr().(*net.TCPAddr).Port
 	srv := NewServer(&Config{

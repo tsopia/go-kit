@@ -40,13 +40,19 @@ func TestRegistry(t *testing.T) {
 				t.Fatal("Register should panic on duplicate name")
 			}
 		}()
-		r.Register(5002, "A")
+		def := r.Register(5002, "A")
+		if def == nil {
+			t.Fatal("Register should return definition before panic check")
+		}
 	}()
 }
 
 func TestRegistryDuplicateCode(t *testing.T) {
 	r := NewRegistry()
-	r.Register(6001, "X")
+	def := r.Register(6001, "X")
+	if def == nil {
+		t.Fatal("Register should return definition")
+	}
 
 	defer func() {
 		if recover() == nil {
@@ -54,7 +60,10 @@ func TestRegistryDuplicateCode(t *testing.T) {
 		}
 	}()
 
-	r.Register(6001, "Y")
+	def = r.Register(6001, "Y")
+	if def == nil {
+		t.Fatal("Register should return definition before panic")
+	}
 }
 
 func TestRegister(t *testing.T) {

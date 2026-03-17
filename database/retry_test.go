@@ -219,7 +219,7 @@ func TestSuccessfulConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("期望成功连接，但收到错误: %v", err)
 	}
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	// 验证连接是否正常
 	if err := db.Ping(); err != nil {

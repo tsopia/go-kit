@@ -21,6 +21,14 @@ func newSQLiteDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func closeSQLiteDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite db: %v", err)
+	}
+}
+
 func resetDefaultClientForTest() {
 	clientMu.Lock()
 	_client = nil
@@ -36,7 +44,7 @@ func TestNewQueueMissingDB(t *testing.T) {
 
 func TestNewQueueInvalidName(t *testing.T) {
 	db := newSQLiteDB(t)
-	defer db.Close()
+	defer closeSQLiteDB(t, db)
 
 	adapter, err := NewSQLDBAdapter(db)
 	if err != nil {
@@ -51,7 +59,7 @@ func TestNewQueueInvalidName(t *testing.T) {
 
 func TestNewQueueExtensionMissing(t *testing.T) {
 	db := newSQLiteDB(t)
-	defer db.Close()
+	defer closeSQLiteDB(t, db)
 
 	_, err := db.Exec("CREATE TABLE pg_extension (extname TEXT)")
 	if err != nil {
@@ -87,7 +95,7 @@ func TestReadOptionsDefaults(t *testing.T) {
 
 func TestSendNegativeDelay(t *testing.T) {
 	db := newSQLiteDB(t)
-	defer db.Close()
+	defer closeSQLiteDB(t, db)
 
 	adapter, err := NewSQLDBAdapter(db)
 	if err != nil {

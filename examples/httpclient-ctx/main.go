@@ -9,6 +9,11 @@ import (
 	"github.com/tsopia/go-kit/httpclient"
 )
 
+func withLegacyContextValue(ctx context.Context, key, value string) context.Context {
+	//nolint:staticcheck // 示例代码演示基于字符串 key 的 context 透传
+	return context.WithValue(ctx, key, value)
+}
+
 func main() {
 	// 创建HTTP客户端
 	client := httpclient.NewClient()
@@ -51,8 +56,8 @@ func main() {
 
 	// 演示3: 使用WithCtx传递trace信息
 	fmt.Println("\n=== 演示3: 使用WithCtx传递trace信息 ===")
-	ctx3 := context.WithValue(context.Background(), "trace_id", "abc123")
-	ctx3 = context.WithValue(ctx3, "user_id", "user456")
+	ctx3 := withLegacyContextValue(context.Background(), "trace_id", "abc123")
+	ctx3 = withLegacyContextValue(ctx3, "user_id", "user456")
 
 	resp3, err3 := client.NewRequest("GET", "https://httpbin.org/get").
 		WithCtx(ctx3).

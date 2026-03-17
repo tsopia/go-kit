@@ -25,6 +25,67 @@ type TestConfig struct {
 	} `mapstructure:"database"`
 }
 
+func changeWorkingDir(tb testing.TB, dir string) {
+	tb.Helper()
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		tb.Fatalf("获取当前工作目录失败: %v", err)
+	}
+
+	if err := os.Chdir(dir); err != nil {
+		tb.Fatalf("切换工作目录失败: %v", err)
+	}
+
+	tb.Cleanup(func() {
+		if err := os.Chdir(oldDir); err != nil {
+			tb.Fatalf("恢复工作目录失败: %v", err)
+		}
+	})
+}
+
+func setEnv(t *testing.T, key, value string) {
+	t.Helper()
+
+	previousValue, hadPrevious := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("设置环境变量 %s 失败: %v", key, err)
+	}
+
+	t.Cleanup(func() {
+		var err error
+		if hadPrevious {
+			err = os.Setenv(key, previousValue)
+		} else {
+			err = os.Unsetenv(key)
+		}
+		if err != nil {
+			t.Fatalf("恢复环境变量 %s 失败: %v", key, err)
+		}
+	})
+}
+
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+
+	previousValue, hadPrevious := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("清理环境变量 %s 失败: %v", key, err)
+	}
+
+	t.Cleanup(func() {
+		var err error
+		if hadPrevious {
+			err = os.Setenv(key, previousValue)
+		} else {
+			err = os.Unsetenv(key)
+		}
+		if err != nil {
+			t.Fatalf("恢复环境变量 %s 失败: %v", key, err)
+		}
+	})
+}
+
 func TestLoadConfig_DefaultPath(t *testing.T) {
 	// 重置全局状态确保测试隔离
 	ResetGlobalState()
@@ -52,10 +113,7 @@ database:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	var cfg TestConfig
 	err = LoadConfig(&cfg)
@@ -97,11 +155,7 @@ database.password=env-pass
 		t.Fatalf("创建 .env 文件失败: %v", err)
 	}
 
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("切换工作目录失败: %v", err)
-	}
+	changeWorkingDir(t, tempDir)
 
 	var cfg TestConfig
 	if err := LoadConfig(&cfg); err != nil {
@@ -152,11 +206,7 @@ database:
 		t.Fatalf("创建配置文件失败: %v", err)
 	}
 
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	if err := os.Chdir(serviceDir); err != nil {
-		t.Fatalf("切换工作目录失败: %v", err)
-	}
+	changeWorkingDir(t, serviceDir)
 
 	var cfg TestConfig
 	if err := LoadConfig(&cfg); err != nil {
@@ -247,26 +297,16 @@ database:
 	}
 
 	// 确保 APP_NAME 未设置，测试无前缀模式的环境变量覆盖
-	os.Unsetenv("APP_NAME")
+	unsetEnv(t, "APP_NAME")
 
 	// 设置环境变量（无前缀模式，不包括APP_NAME以避免前缀冲突）
-	os.Setenv("APP_PORT", "9999")
-	os.Setenv("APP_DEBUG", "true")
-	os.Setenv("DATABASE_HOST", "env-host")
-	os.Setenv("DATABASE_PORT", "3307")
-
-	defer func() {
-		// 清理环境变量
-		os.Unsetenv("APP_PORT")
-		os.Unsetenv("APP_DEBUG")
-		os.Unsetenv("DATABASE_HOST")
-		os.Unsetenv("DATABASE_PORT")
-	}()
+	setEnv(t, "APP_PORT", "9999")
+	setEnv(t, "APP_DEBUG", "true")
+	setEnv(t, "DATABASE_HOST", "env-host")
+	setEnv(t, "DATABASE_PORT", "3307")
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	var cfg TestConfig
 	err = LoadConfig(&cfg)
@@ -320,25 +360,15 @@ database:
 	}
 
 	// 设置 APP_NAME 环境变量来启用前缀模式
-	os.Setenv("APP_NAME", "myapp")
+	setEnv(t, "APP_NAME", "myapp")
 
 	// 设置带前缀的环境变量
-	os.Setenv("MYAPP_APP_NAME", "Prefix Override App")
-	os.Setenv("MYAPP_APP_PORT", "7777")
-	os.Setenv("MYAPP_DATABASE_HOST", "prefix-host")
-
-	defer func() {
-		// 清理环境变量
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("MYAPP_APP_NAME")
-		os.Unsetenv("MYAPP_APP_PORT")
-		os.Unsetenv("MYAPP_DATABASE_HOST")
-	}()
+	setEnv(t, "MYAPP_APP_NAME", "Prefix Override App")
+	setEnv(t, "MYAPP_APP_PORT", "7777")
+	setEnv(t, "MYAPP_DATABASE_HOST", "prefix-host")
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	var cfg TestConfig
 	err = LoadConfig(&cfg)
@@ -378,20 +408,13 @@ app:
 	}
 
 	// 设置 APP_NAME 环境变量
-	os.Setenv("APP_NAME", "testapp")
+	setEnv(t, "APP_NAME", "testapp")
 
 	// 设置环境变量覆盖 app.name
-	os.Setenv("TESTAPP_APP_NAME", "Env Priority App")
-
-	defer func() {
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("TESTAPP_APP_NAME")
-	}()
+	setEnv(t, "TESTAPP_APP_NAME", "Env Priority App")
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	var cfg TestConfig
 	err = LoadConfig(&cfg)
@@ -430,9 +453,7 @@ database:
 	}
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 获取客户端
 	client, err := GetClient()
@@ -479,9 +500,7 @@ app:
 	}
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	appName, err := GetStringWithDefault("app.name", "默认应用名")
@@ -521,9 +540,7 @@ app:
 	}
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	appPort, err := GetIntWithDefault("app.port", 3000)
@@ -563,9 +580,7 @@ app:
 	}
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	appDebug, err := GetBoolWithDefault("app.debug", false)
@@ -607,9 +622,7 @@ server:
 	}
 
 	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试有效范围内的配置
 	port, valid, err := GetIntWithValidation("app.port", 3000, 1, 65535)
@@ -668,10 +681,7 @@ cors:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	origins, err := GetStringSliceWithDefault("cors.allowed_origins", []string{"*"})
@@ -718,10 +728,7 @@ app:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	exists, err := IsSet("app.name")
@@ -773,10 +780,7 @@ database:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	keys, err := AllKeys()
 	if err != nil {
@@ -908,10 +912,7 @@ app:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试正常情况
 	client := MustGetClient()
@@ -943,10 +944,7 @@ app:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 测试存在的配置项
 	appName := MustGetStringWithDefault("app.name", "默认值")
@@ -979,10 +977,7 @@ app:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 初始化配置
 	var cfg TestConfig
@@ -1052,10 +1047,7 @@ database:
 		t.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(t, tempDir)
 
 	// 预先加载配置
 	var cfg TestConfig
@@ -1142,10 +1134,7 @@ database:
 		b.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(b, tempDir)
 
 	// 预先加载配置
 	var cfg TestConfig
@@ -1190,10 +1179,7 @@ database:
 		b.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(b, tempDir)
 
 	// 预先加载配置
 	var cfg TestConfig
@@ -1249,10 +1235,7 @@ cache:
 		b.Fatalf("创建临时配置文件失败: %v", err)
 	}
 
-	// 切换到临时目录
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(tempDir)
+	changeWorkingDir(b, tempDir)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

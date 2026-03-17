@@ -51,7 +51,7 @@ func TestGenerateID(t *testing.T) {
 
 	// 验证是否为有效的十六进制字符串
 	for _, char := range id1 {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			t.Errorf("ID should only contain hex characters, found '%c' in '%s'", char, id1)
 		}
 	}
@@ -65,7 +65,7 @@ func TestWithTraceID(t *testing.T) {
 	newCtx := WithTraceID(ctx, traceID)
 
 	// 验证 trace ID 被正确设置
-	if value := newCtx.Value(TraceIDKey); value != traceID {
+	if value := newCtx.Value(traceIDContextKey); value != traceID {
 		t.Errorf("Expected trace ID '%s', got '%v'", traceID, value)
 	}
 }
@@ -78,7 +78,7 @@ func TestWithRequestID(t *testing.T) {
 	newCtx := WithRequestID(ctx, requestID)
 
 	// 验证 request ID 被正确设置
-	if value := newCtx.Value(RequestIDKey); value != requestID {
+	if value := newCtx.Value(requestIDContextKey); value != requestID {
 		t.Errorf("Expected request ID '%s', got '%v'", requestID, value)
 	}
 }
@@ -92,11 +92,11 @@ func TestWithTraceAndRequestID(t *testing.T) {
 	newCtx := WithTraceAndRequestID(ctx, traceID, requestID)
 
 	// 验证两个ID都被正确设置
-	if value := newCtx.Value(TraceIDKey); value != traceID {
+	if value := newCtx.Value(traceIDContextKey); value != traceID {
 		t.Errorf("Expected trace ID '%s', got '%v'", traceID, value)
 	}
 
-	if value := newCtx.Value(RequestIDKey); value != requestID {
+	if value := newCtx.Value(requestIDContextKey); value != requestID {
 		t.Errorf("Expected request ID '%s', got '%v'", requestID, value)
 	}
 }
@@ -118,7 +118,7 @@ func TestTraceIDFromContext(t *testing.T) {
 	}
 
 	// 测试错误类型的值
-	ctxWithWrongType := context.WithValue(ctx, TraceIDKey, 123)
+	ctxWithWrongType := context.WithValue(ctx, traceIDContextKey, 123)
 	if traceID := TraceIDFromContext(ctxWithWrongType); traceID != "" {
 		t.Errorf("Expected empty trace ID for wrong type, got '%s'", traceID)
 	}
@@ -141,7 +141,7 @@ func TestRequestIDFromContext(t *testing.T) {
 	}
 
 	// 测试错误类型的值
-	ctxWithWrongType := context.WithValue(ctx, RequestIDKey, 456)
+	ctxWithWrongType := context.WithValue(ctx, requestIDContextKey, 456)
 	if requestID := RequestIDFromContext(ctxWithWrongType); requestID != "" {
 		t.Errorf("Expected empty request ID for wrong type, got '%s'", requestID)
 	}
@@ -164,7 +164,7 @@ func TestIDFormat(t *testing.T) {
 
 		// 验证是有效的十六进制
 		for _, char := range id {
-			if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 				t.Errorf("ID %d: invalid hex character '%c' in '%s'", i, char, id)
 				break
 			}

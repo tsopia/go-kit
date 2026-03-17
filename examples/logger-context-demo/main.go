@@ -42,8 +42,8 @@ func main() {
 	// 6. 带上下文的日志
 	fmt.Println("\n6. 带上下文的日志")
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, utils.TraceIDKey, "trace-12345")
-	ctx = context.WithValue(ctx, utils.RequestIDKey, "req-67890")
+	ctx = utils.WithTraceID(ctx, "trace-12345")
+	ctx = utils.WithRequestID(ctx, "req-67890")
 
 	traceID := utils.TraceIDFromContext(ctx)
 	requestID := utils.RequestIDFromContext(ctx)

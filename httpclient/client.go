@@ -16,8 +16,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"io/ioutil"
 )
 
 // RetryConfig 重试配置
@@ -899,11 +897,11 @@ func (r *Request) prepareBody() (io.Reader, func() (io.ReadCloser, error), error
 			if _, err := r.bodySrc.Seek(0, io.SeekStart); err != nil {
 				return nil, err
 			}
-			return ioutil.NopCloser(r.bodySrc), nil
+			return io.NopCloser(r.bodySrc), nil
 		}, nil
 	case r.bodyRaw != nil:
 		return bytes.NewReader(r.bodyRaw), func() (io.ReadCloser, error) {
-			return ioutil.NopCloser(bytes.NewReader(r.bodyRaw)), nil
+			return io.NopCloser(bytes.NewReader(r.bodyRaw)), nil
 		}, nil
 	case r.body != nil:
 		return r.body, nil, nil
@@ -1001,12 +999,17 @@ func (c *Client) do(req *Request) (*Response, error) {
 	}
 
 	// 读取响应体
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		resp.Body.Close()
-		return nil, fmt.Errorf("读取响应体失败: %w", err)
+	body, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		if closeErr != nil {
+			return nil, fmt.Errorf("读取响应体失败: %w; 关闭响应体失败: %v", readErr, closeErr)
+		}
+		return nil, fmt.Errorf("读取响应体失败: %w", readErr)
 	}
-	resp.Body.Close()
+	if closeErr != nil {
+		return nil, fmt.Errorf("关闭响应体失败: %w", closeErr)
+	}
 
 	response := &Response{
 		StatusCode: resp.StatusCode,
@@ -1178,7 +1181,7 @@ func isNetworkError(err error) bool {
 	// 检查常见的网络错误类型
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
+		return netErr.Timeout()
 	}
 
 	// 检查URL错误
@@ -1273,7 +1276,7 @@ func (r *Request) Body(body io.Reader) *Request {
 		return r
 	}
 
-	data, err := ioutil.ReadAll(body)
+	data, err := io.ReadAll(body)
 	if err != nil {
 		r.bodyErr = fmt.Errorf("读取请求体失败: %w", err)
 		return r
@@ -1893,8 +1896,12 @@ func (c *Client) readBodySafely(body io.Reader) ([]byte, error) {
 	// 如果是字符串读取器，直接读取
 	if reader, ok := body.(*strings.Reader); ok {
 		content := make([]byte, reader.Len())
-		reader.Read(content)
-		reader.Seek(0, 0) // 重置位置
+		if _, err := io.ReadFull(reader, content); err != nil {
+			return nil, fmt.Errorf("读取字符串请求体失败: %w", err)
+		}
+		if _, err := reader.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("重置字符串请求体失败: %w", err)
+		}
 		return content, nil
 	}
 
@@ -1904,7 +1911,9 @@ func (c *Client) readBodySafely(body io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		seeker.Seek(0, 0) // 重置位置
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("重置请求体失败: %w", err)
+		}
 		return content, nil
 	}
 

@@ -49,6 +49,14 @@ func testDatabase(t *testing.T) *Database {
 	return db
 }
 
+func closeTestDatabase(t *testing.T, db *Database) {
+	t.Helper()
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭测试数据库失败: %v", err)
+	}
+}
+
 // TestConfig_Validate 测试配置验证
 func TestConfig_Validate(t *testing.T) {
 	t.Run("有效配置", func(t *testing.T) {
@@ -130,7 +138,7 @@ func TestNew(t *testing.T) {
 		if err != nil {
 			t.Fatalf("创建数据库失败: %v", err)
 		}
-		defer db.Close()
+		defer closeTestDatabase(t, db)
 
 		// 测试连接
 		err = db.Ping()
@@ -154,7 +162,7 @@ func TestNew(t *testing.T) {
 // TestDatabase_GetDB 测试获取GORM实例
 func TestDatabase_GetDB(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	gormDB := db.GetDB()
 	if gormDB == nil {
@@ -165,7 +173,7 @@ func TestDatabase_GetDB(t *testing.T) {
 // TestDatabase_Ping 测试数据库连接
 func TestDatabase_Ping(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	err := db.Ping()
 	if err != nil {
@@ -176,7 +184,7 @@ func TestDatabase_Ping(t *testing.T) {
 // TestDatabase_Stats 测试连接池统计
 func TestDatabase_Stats(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	stats := db.Stats()
 	if stats.OpenConnections < 0 {
@@ -187,7 +195,7 @@ func TestDatabase_Stats(t *testing.T) {
 // TestDatabase_AutoMigrate 测试自动迁移
 func TestDatabase_AutoMigrate(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	err := db.AutoMigrate(&TestUser{})
 	if err != nil {
@@ -198,7 +206,7 @@ func TestDatabase_AutoMigrate(t *testing.T) {
 // TestDatabase_CRUD 测试CRUD操作
 func TestDatabase_CRUD(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	// 自动迁移
 	err := db.AutoMigrate(&TestUser{})
@@ -260,7 +268,7 @@ func TestDatabase_CRUD(t *testing.T) {
 // TestDatabase_Transaction 测试事务操作
 func TestDatabase_Transaction(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	// 自动迁移
 	err := db.AutoMigrate(&TestUser{})
@@ -352,7 +360,7 @@ func TestDatabase_Transaction(t *testing.T) {
 // TestDatabase_ErrorHandling 测试错误处理
 func TestDatabase_ErrorHandling(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	// 自动迁移
 	err := db.AutoMigrate(&TestUser{})
@@ -401,7 +409,7 @@ func TestDatabase_ErrorHandling(t *testing.T) {
 // TestDatabase_ConcurrentAccess 测试并发访问
 func TestDatabase_ConcurrentAccess(t *testing.T) {
 	db := testDatabase(t)
-	defer db.Close()
+	defer closeTestDatabase(t, db)
 
 	// 自动迁移
 	err := db.AutoMigrate(&TestUser{})

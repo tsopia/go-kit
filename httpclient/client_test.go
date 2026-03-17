@@ -14,6 +14,38 @@ import (
 	"time"
 )
 
+type testContextKey string
+
+const (
+	requestTestKey       testContextKey = "test_key"
+	requestComparisonKey testContextKey = "comparison_key"
+	requestChainKey      testContextKey = "chain_key"
+)
+
+func mustWriteBody(t *testing.T, w http.ResponseWriter, body string) {
+	t.Helper()
+
+	if _, err := w.Write([]byte(body)); err != nil {
+		t.Fatalf("write response body: %v", err)
+	}
+}
+
+func mustEncodeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
+	t.Helper()
+
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("encode response json: %v", err)
+	}
+}
+
+func mustGet(t *testing.T, client *Client, path string) {
+	t.Helper()
+
+	if _, err := client.Get(path); err != nil {
+		t.Fatalf("client.Get(%q) failed: %v", path, err)
+	}
+}
+
 func TestNewClient(t *testing.T) {
 	client := NewClient()
 	if client == nil {
@@ -174,7 +206,7 @@ func TestGet(t *testing.T) {
 			t.Errorf("Expected GET method, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "success"}`))
+		mustWriteBody(t, w, `{"message": "success"}`)
 	}))
 	defer server.Close()
 
@@ -222,7 +254,7 @@ func TestPostJSON(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"id": 123, "name": "test"}`))
+		mustWriteBody(t, w, `{"id": 123, "name": "test"}`)
 	}))
 	defer server.Close()
 
@@ -251,7 +283,7 @@ func TestPutJSON(t *testing.T) {
 			t.Errorf("Expected PUT method, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"updated": true}`))
+		mustWriteBody(t, w, `{"updated": true}`)
 	}))
 	defer server.Close()
 
@@ -287,7 +319,7 @@ func TestRetryReplaysRequestBody(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		mustWriteBody(t, w, "ok")
 	}))
 	defer server.Close()
 
@@ -385,7 +417,7 @@ func TestResponseJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name": "test", "age": 25}`))
+		mustWriteBody(t, w, `{"name": "test", "age": 25}`)
 	}))
 	defer server.Close()
 
@@ -413,7 +445,7 @@ func TestResponseString(t *testing.T) {
 	// 创建测试服务器
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello, World!"))
+		mustWriteBody(t, w, "Hello, World!")
 	}))
 	defer server.Close()
 
@@ -433,7 +465,7 @@ func TestResponseBytes(t *testing.T) {
 	// 创建测试服务器
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test data"))
+		mustWriteBody(t, w, "test data")
 	}))
 	defer server.Close()
 
@@ -617,7 +649,7 @@ func TestResponseError(t *testing.T) {
 	// 创建测试服务器
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Not Found"))
+		mustWriteBody(t, w, "Not Found")
 	}))
 	defer server.Close()
 
@@ -641,7 +673,7 @@ func TestRetryMiddleware(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		mustWriteBody(t, w, "success")
 	}))
 	defer server.Close()
 
@@ -699,7 +731,7 @@ func TestDebugConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "success"}`))
+		mustWriteBody(t, w, `{"message": "success"}`)
 	}))
 	defer server.Close()
 
@@ -745,7 +777,7 @@ func TestDebugConfig(t *testing.T) {
 func TestDebugSensitiveHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		mustWriteBody(t, w, "OK")
 	}))
 	defer server.Close()
 
@@ -797,7 +829,7 @@ func TestDebugBodyTruncation(t *testing.T) {
 		// 返回长响应
 		longResponse := strings.Repeat("a", 2000)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(longResponse))
+		mustWriteBody(t, w, longResponse)
 	}))
 	defer server.Close()
 
@@ -860,7 +892,7 @@ func TestDebugError(t *testing.T) {
 func TestEnableDisableDebug(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		mustWriteBody(t, w, "OK")
 	}))
 	defer server.Close()
 
@@ -872,17 +904,17 @@ func TestEnableDisableDebug(t *testing.T) {
 	})
 
 	// 初始状态应该没有debug日志
-	client.Get("/test1")
+	mustGet(t, client, "/test1")
 	initialDebugCount := len(mockLogger.debugLogs)
 
 	// 启用debug
 	client.EnableDebug()
-	client.Get("/test2")
+	mustGet(t, client, "/test2")
 	afterEnableCount := len(mockLogger.debugLogs)
 
 	// 禁用debug
 	client.DisableDebug()
-	client.Get("/test3")
+	mustGet(t, client, "/test3")
 	afterDisableCount := len(mockLogger.debugLogs)
 
 	if afterEnableCount <= initialDebugCount {
@@ -899,7 +931,7 @@ func TestDebugJSONFormatting(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name":"test","value":123,"nested":{"key":"value"}}`))
+		mustWriteBody(t, w, `{"name":"test","value":123,"nested":{"key":"value"}}`)
 	}))
 	defer server.Close()
 
@@ -935,7 +967,7 @@ func TestDebugJSONFormatting(t *testing.T) {
 func TestDebugIndependentFromLogLevel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "success"}`))
+		mustWriteBody(t, w, `{"message": "success"}`)
 	}))
 	defer server.Close()
 
@@ -1020,7 +1052,7 @@ func TestDebugGranularControl(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "success"}`))
+		mustWriteBody(t, w, `{"message": "success"}`)
 	}))
 	defer server.Close()
 
@@ -1110,7 +1142,7 @@ func TestDebugGranularControl(t *testing.T) {
 func TestDebugRuntimeControl(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		mustWriteBody(t, w, "OK")
 	}))
 	defer server.Close()
 
@@ -1130,7 +1162,7 @@ func TestDebugRuntimeControl(t *testing.T) {
 	// 场景: 在高流量期间临时关闭HTTP debug以减少日志量
 	t.Run("高流量期间临时关闭debug", func(t *testing.T) {
 		// 模拟正常流量期间
-		client.Get("/normal-traffic")
+		mustGet(t, client, "/normal-traffic")
 		normalDebugCount := len(mockLogger.debugLogs)
 
 		// 模拟高流量期间，临时关闭debug
@@ -1138,14 +1170,14 @@ func TestDebugRuntimeControl(t *testing.T) {
 
 		// 发送多个请求（模拟高流量）
 		for i := 0; i < 5; i++ {
-			client.Get(fmt.Sprintf("/high-traffic-%d", i))
+			mustGet(t, client, fmt.Sprintf("/high-traffic-%d", i))
 		}
 
 		highTrafficDebugCount := len(mockLogger.debugLogs)
 
 		// 流量恢复后重新启用debug
 		client.EnableDebug()
-		client.Get("/normal-traffic-resumed")
+		mustGet(t, client, "/normal-traffic-resumed")
 
 		resumedDebugCount := len(mockLogger.debugLogs)
 
@@ -1170,7 +1202,7 @@ func TestDebugPerformanceImpact(t *testing.T) {
 		// 返回大响应体
 		largeResponse := strings.Repeat("a", 10000)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(largeResponse))
+		mustWriteBody(t, w, largeResponse)
 	}))
 	defer server.Close()
 
@@ -1188,7 +1220,7 @@ func TestDebugPerformanceImpact(t *testing.T) {
 
 		start := time.Now()
 		for i := 0; i < 10; i++ {
-			client.Get("/test")
+			mustGet(t, client, "/test")
 		}
 		disabledDuration := time.Since(start)
 
@@ -1218,7 +1250,7 @@ func TestDebugPerformanceImpact(t *testing.T) {
 
 		start := time.Now()
 		for i := 0; i < 10; i++ {
-			client.Get("/test")
+			mustGet(t, client, "/test")
 		}
 		enabledDuration := time.Since(start)
 
@@ -1273,7 +1305,7 @@ func TestDebugUnifiedOutput(t *testing.T) {
 			"message": "success",
 			"data":    []string{"item1", "item2"},
 		}
-		json.NewEncoder(w).Encode(response)
+		mustEncodeJSON(t, w, response)
 	}))
 	defer server.Close()
 
@@ -1410,7 +1442,7 @@ func TestDebugUnifiedOutputWithoutLogger(t *testing.T) {
 	// 创建测试服务器
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		mustWriteBody(t, w, "success")
 	}))
 	defer server.Close()
 
@@ -1438,7 +1470,7 @@ func TestDebugUnifiedOutputWithoutLogger(t *testing.T) {
 // TestRequestWithCtx 测试WithCtx方法
 func TestRequestWithCtx(t *testing.T) {
 	// 创建一个带有值的context
-	ctx := context.WithValue(context.Background(), "test_key", "test_value")
+	ctx := context.WithValue(context.Background(), requestTestKey, "test_value")
 
 	// 创建请求并设置context
 	req := &Request{
@@ -1459,7 +1491,7 @@ func TestRequestWithCtx(t *testing.T) {
 	}
 
 	// 验证可以从context中获取值
-	if value := req.ctx.Value("test_key"); value != "test_value" {
+	if value := req.ctx.Value(requestTestKey); value != "test_value" {
 		t.Errorf("Expected context value 'test_value', got '%v'", value)
 	}
 }
@@ -1496,7 +1528,7 @@ func TestRequestWithCtxTimeout(t *testing.T) {
 
 // TestRequestWithCtxVsContext 测试WithCtx和Context方法的等价性
 func TestRequestWithCtxVsContext(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "comparison_key", "comparison_value")
+	ctx := context.WithValue(context.Background(), requestComparisonKey, "comparison_value")
 
 	// 使用Context方法
 	req1 := &Request{ctx: context.Background()}
@@ -1512,8 +1544,8 @@ func TestRequestWithCtxVsContext(t *testing.T) {
 	}
 
 	// 验证两个context都能正确获取值
-	value1 := req1.ctx.Value("comparison_key")
-	value2 := req2.ctx.Value("comparison_key")
+	value1 := req1.ctx.Value(requestComparisonKey)
+	value2 := req2.ctx.Value(requestComparisonKey)
 
 	if value1 != value2 || value1 != "comparison_value" {
 		t.Errorf("Both contexts should have the same value, got %v and %v", value1, value2)
@@ -1523,7 +1555,7 @@ func TestRequestWithCtxVsContext(t *testing.T) {
 // TestRequestWithCtxChaining 测试WithCtx的链式调用
 func TestRequestWithCtxChaining(t *testing.T) {
 	client := NewClient()
-	ctx := context.WithValue(context.Background(), "chain_key", "chain_value")
+	ctx := context.WithValue(context.Background(), requestChainKey, "chain_value")
 
 	// 测试链式调用
 	req := client.NewRequest("GET", "/test").

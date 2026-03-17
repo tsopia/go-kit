@@ -271,7 +271,3 @@ func normalizeDirectUploadChecksum(checksum DirectUploadChecksum) (DirectUploadC
 		return DirectUploadChecksum{}, fmt.Errorf("%w: unsupported checksum algorithm %q", ErrInvalidDirectUploadRequest, checksum.Algorithm)
 	}
 }
-
-func isDirectUploadRequestError(err error) bool {
-	return errors.Is(err, ErrInvalidDirectUploadRequest)
-}

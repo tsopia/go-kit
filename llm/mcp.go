@@ -110,7 +110,9 @@ func NewMCPTools(ctx context.Context, cfg MCPConfig) ([]tool.BaseTool, func() er
 	_, err = cli.Initialize(initCtx, initRequest)
 	if err != nil {
 		// 初始化失败，清理资源
-		cleanup()
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			return nil, nil, fmt.Errorf("initialize MCP client: %w (cleanup: %v)", err, cleanupErr)
+		}
 		return nil, nil, fmt.Errorf("initialize MCP client: %w", err)
 	}
 
@@ -123,7 +125,9 @@ func NewMCPTools(ctx context.Context, cfg MCPConfig) ([]tool.BaseTool, func() er
 	// 使用传入的 ctx 进行工具发现 (单次操作)
 	tools, err := einomcp.GetTools(ctx, mcpCfg)
 	if err != nil {
-		cleanup()
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			return nil, nil, fmt.Errorf("get tools from MCP client: %w (cleanup: %v)", err, cleanupErr)
+		}
 		return nil, nil, fmt.Errorf("get tools from MCP client: %w", err)
 	}
 

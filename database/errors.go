@@ -46,7 +46,7 @@ type DatabaseError struct {
 
 // Error 实现error接口
 func (e *DatabaseError) Error() string {
-	if e.Context != nil && len(e.Context) > 0 {
+	if len(e.Context) > 0 {
 		return fmt.Sprintf("数据库错误 [%s]: %v (上下文: %v)", e.Operation, e.Err, e.Context)
 	}
 	return fmt.Sprintf("数据库错误 [%s]: %v", e.Operation, e.Err)

@@ -83,7 +83,12 @@ func SnakeToCamel(str string) string {
 		if i == 0 {
 			result.WriteString(strings.ToLower(word))
 		} else {
-			result.WriteString(strings.Title(word))
+			runes := []rune(word)
+			if len(runes) == 0 {
+				continue
+			}
+			runes[0] = unicode.ToUpper(runes[0])
+			result.WriteString(string(runes))
 		}
 	}
 	return result.String()

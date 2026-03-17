@@ -578,7 +578,7 @@ func NewHTTPHealthChecker(name, url string, timeout time.Duration) *HTTPHealthCh
 }
 
 // CheckHealth 检查HTTP服务健康状态
-func (hhc *HTTPHealthChecker) CheckHealth(ctx context.Context) error {
+func (hhc *HTTPHealthChecker) CheckHealth(ctx context.Context) (err error) {
 	client := &http.Client{
 		Timeout: hhc.timeout,
 	}
@@ -592,7 +592,11 @@ func (hhc *HTTPHealthChecker) CheckHealth(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close response body: %w", closeErr)
+		}
+	}()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil

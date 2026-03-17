@@ -2,7 +2,6 @@ package cfg
 
 import (
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -367,12 +366,8 @@ func TestGlobalFunctions(t *testing.T) {
 
 // TestEnvOverride 测试环境变量覆盖配置值
 func TestEnvOverride(t *testing.T) {
-	os.Setenv("CFG_TEST_DB_HOST", "env-host")
-	os.Setenv("CFG_TEST_DB_PORT", "3306")
-	defer func() {
-		os.Unsetenv("CFG_TEST_DB_HOST")
-		os.Unsetenv("CFG_TEST_DB_PORT")
-	}()
+	t.Setenv("CFG_TEST_DB_HOST", "env-host")
+	t.Setenv("CFG_TEST_DB_PORT", "3306")
 
 	provider, err := NewWithPrefix("CFG_TEST", "testdata/config.yml")
 	if err != nil {

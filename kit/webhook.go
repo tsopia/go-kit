@@ -86,7 +86,9 @@ func (wm *webhookManager) sendWebhook(ctx context.Context, wh *webhook, record L
 	body, err := json.Marshal(payload)
 	if err != nil {
 		// webhook 发送失败不应影响主流程，仅打印到 stderr
-		fmt.Fprintf(placeholderWriter{}, "webhook marshal error: %v\n", err)
+		if _, writeErr := fmt.Fprintf(placeholderWriter{}, "webhook marshal error: %v\n", err); writeErr != nil {
+			return
+		}
 		return
 	}
 
@@ -110,17 +112,23 @@ func (wm *webhookManager) sendWebhook(ctx context.Context, wh *webhook, record L
 		// 静默失败，不阻塞日志记录
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			if _, writeErr := fmt.Fprintf(placeholderWriter{}, "webhook close body error: %v\n", closeErr); writeErr != nil {
+				return
+			}
+		}
+	}()
 }
 
 // buildDefaultPayload 构建默认 payload
 func (wm *webhookManager) buildDefaultPayload(record LogRecord) map[string]interface{} {
 	payload := map[string]interface{}{
-		"level":     record.Level.String(),
-		"message":   record.Message,
-		"time":      record.Time.Format(time.RFC3339),
-		"caller":    record.Caller,
-		"trace_id":  record.TraceID,
+		"level":      record.Level.String(),
+		"message":    record.Message,
+		"time":       record.Time.Format(time.RFC3339),
+		"caller":     record.Caller,
+		"trace_id":   record.TraceID,
 		"request_id": record.RequestID,
 	}
 

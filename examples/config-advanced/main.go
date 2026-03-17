@@ -44,7 +44,11 @@ func main() {
 
 	// 创建配置文件用于演示
 	createDemoConfig()
-	defer os.Remove("config.yml")
+	defer func() {
+		if err := os.Remove("config.yml"); err != nil && !os.IsNotExist(err) {
+			log.Printf("删除演示配置文件失败: %v", err)
+		}
+	}()
 
 	// 演示1: 基础配置加载 (推荐用于 80% 的场景)
 	fmt.Println("\n📦 1. 基础配置加载 - 类型安全，编译时检查")

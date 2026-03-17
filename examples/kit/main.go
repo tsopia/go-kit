@@ -8,6 +8,13 @@ import (
 	"github.com/tsopia/go-kit/kit"
 )
 
+var _ = webhookDemo
+
+func withLegacyContextValue(ctx context.Context, key, value string) context.Context {
+	//nolint:staticcheck // 示例代码需要演示基于字符串 key 的上下文提取
+	return context.WithValue(ctx, key, value)
+}
+
 func main() {
 	// 示例1: 基本使用
 	fmt.Println("=== 示例1: 基本使用 ===")
@@ -71,9 +78,9 @@ func contextExtraction() {
 
 	// 创建带追踪信息的上下文
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "trace_id", "trace-abc-123")
-	ctx = context.WithValue(ctx, "request_id", "req-xyz-456")
-	ctx = context.WithValue(ctx, "user_id", "user-789")
+	ctx = withLegacyContextValue(ctx, "trace_id", "trace-abc-123")
+	ctx = withLegacyContextValue(ctx, "request_id", "req-xyz-456")
+	ctx = withLegacyContextValue(ctx, "user_id", "user-789")
 
 	kit.Info(ctx, "处理用户请求", "action", "login")
 	// 输出会自动包含 trace_id, request_id, user_id
@@ -111,7 +118,7 @@ func chainedLogging() {
 
 	// 创建带追踪信息的上下文
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "trace_id", "chained-trace-001")
+	ctx = withLegacyContextValue(ctx, "trace_id", "chained-trace-001")
 
 	// 使用 WithCtx 创建链式 logger
 	logger := kit.WithCtx(ctx)
@@ -168,10 +175,10 @@ func customContextKeys() {
 
 	// 创建上下文（使用自定义的 key）
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "uber-trace-id", "uber-trace-001")
-	ctx = context.WithValue(ctx, "x-request-id", "req-002")
-	ctx = context.WithValue(ctx, "x-session-id", "sess-003")
-	ctx = context.WithValue(ctx, "tenant_id", "tenant-004")
+	ctx = withLegacyContextValue(ctx, "uber-trace-id", "uber-trace-001")
+	ctx = withLegacyContextValue(ctx, "x-request-id", "req-002")
+	ctx = withLegacyContextValue(ctx, "x-session-id", "sess-003")
+	ctx = withLegacyContextValue(ctx, "tenant_id", "tenant-004")
 
 	kit.Info(ctx, "多租户请求", "action", "query")
 	// 输出包含: uber-trace-id, x-request-id, session_id, tenant_id

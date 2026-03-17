@@ -805,17 +805,3 @@ func resolveConfigPath(filePath ...string) (string, error) {
 
 	return "", fmt.Errorf("配置文件未找到: %s 或 .env。请确保配置文件存在于正确的路径", DefaultConfigFileName)
 }
-
-// createViperInstance 创建并配置viper实例（内部函数，保持向后兼容）
-func createViperInstance(filePath ...string) *viper.Viper {
-	v, err := createViperInstanceWithError(filePath...)
-	if err != nil {
-		// 对于向后兼容，输出警告并返回空配置的viper实例
-		fmt.Printf("警告: 配置初始化失败: %v\n", err)
-		// 返回一个基本的viper实例，至少能处理环境变量
-		v = viper.New()
-		v.AutomaticEnv()
-		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	}
-	return v
-}

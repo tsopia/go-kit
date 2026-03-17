@@ -25,6 +25,20 @@ type Config struct {
 	Debug bool `yaml:"debug" mapstructure:"debug"`
 }
 
+func setEnv(key, value string) {
+	if err := os.Setenv(key, value); err != nil {
+		log.Printf("  ❌ 设置环境变量 %s 失败: %v", key, err)
+	}
+}
+
+func unsetEnv(keys ...string) {
+	for _, key := range keys {
+		if err := os.Unsetenv(key); err != nil {
+			log.Printf("  ❌ 清理环境变量 %s 失败: %v", key, err)
+		}
+	}
+}
+
 func main() {
 	fmt.Println("=== Go-Kit 配置系统演示 ===")
 	fmt.Println("🚀 基于 Viper 的现代配置加载方案")
@@ -88,22 +102,19 @@ func demonstrateDefaultConfig() {
 
 func demonstrateEnvOverride() {
 	// 确保没有设置APP_NAME，使用无前缀模式
-	os.Unsetenv("APP_NAME")
+	unsetEnv("APP_NAME")
 
 	// 设置一些环境变量来覆盖配置文件中的值
 	fmt.Println("  💡 设置环境变量来覆盖配置文件中的值...")
 
-	os.Setenv("SERVER_HOST", "env-override-host")
-	os.Setenv("SERVER_PORT", "9999")
-	os.Setenv("DEBUG", "true")
-	os.Setenv("DATABASE_NAME", "env_override_db")
+	setEnv("SERVER_HOST", "env-override-host")
+	setEnv("SERVER_PORT", "9999")
+	setEnv("DEBUG", "true")
+	setEnv("DATABASE_NAME", "env_override_db")
 
 	defer func() {
 		// 清理环境变量
-		os.Unsetenv("SERVER_HOST")
-		os.Unsetenv("SERVER_PORT")
-		os.Unsetenv("DEBUG")
-		os.Unsetenv("DATABASE_NAME")
+		unsetEnv("SERVER_HOST", "SERVER_PORT", "DEBUG", "DATABASE_NAME")
 	}()
 
 	provider, err := cfg.New()
@@ -133,19 +144,15 @@ func demonstrateAutoPrefix() {
 	// 设置APP_NAME环境变量启用自动前缀模式
 	fmt.Println("  💡 使用 APP_NAME 环境变量启用自动前缀...")
 
-	os.Setenv("APP_NAME", "myapp")
-	os.Setenv("MYAPP_SERVER_HOST", "prefix-host")
-	os.Setenv("MYAPP_SERVER_PORT", "7777")
-	os.Setenv("MYAPP_DATABASE_HOST", "prefix-db-host")
-	os.Setenv("MYAPP_DEBUG", "true")
+	setEnv("APP_NAME", "myapp")
+	setEnv("MYAPP_SERVER_HOST", "prefix-host")
+	setEnv("MYAPP_SERVER_PORT", "7777")
+	setEnv("MYAPP_DATABASE_HOST", "prefix-db-host")
+	setEnv("MYAPP_DEBUG", "true")
 
 	defer func() {
 		// 清理环境变量
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("MYAPP_SERVER_HOST")
-		os.Unsetenv("MYAPP_SERVER_PORT")
-		os.Unsetenv("MYAPP_DATABASE_HOST")
-		os.Unsetenv("MYAPP_DEBUG")
+		unsetEnv("APP_NAME", "MYAPP_SERVER_HOST", "MYAPP_SERVER_PORT", "MYAPP_DATABASE_HOST", "MYAPP_DEBUG")
 	}()
 
 	provider, err := cfg.NewWithPrefix("MYAPP")

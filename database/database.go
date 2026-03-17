@@ -221,12 +221,6 @@ func (d *Database) TransactionWithContext(ctx context.Context, fn func(*gorm.DB)
 	return d.db.WithContext(ctx).Transaction(fn)
 }
 
-func (d *Database) logError(msg string, fields ...interface{}) {
-	if d.logger != nil {
-		d.logger.Error(msg, fields...)
-	}
-}
-
 // Option helpers for custom components
 func WithConnector(connector Connector) Option {
 	return func(d *Database) {

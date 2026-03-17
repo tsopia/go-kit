@@ -52,8 +52,7 @@ func TestLogHandler_Integration(t *testing.T) {
 	}
 	// 检查是否包含组件信息
 	if !strings.Contains(logs, "\"component\":\"ChatModel\"") { // Eino JSON log format
-		// 注意：JSON Handler 输出具体的字段格式可能略有不同
-		// 这里只检查基本的存在性
+		t.Log("JSON Handler 字段格式可能不同，跳过 component 字段断言")
 	}
 }
 

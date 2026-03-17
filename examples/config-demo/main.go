@@ -42,6 +42,20 @@ type AppConfig struct {
 	} `mapstructure:"logging"`
 }
 
+func setEnv(key, value string) {
+	if err := os.Setenv(key, value); err != nil {
+		log.Printf("设置环境变量 %s 失败: %v", key, err)
+	}
+}
+
+func unsetEnv(keys ...string) {
+	for _, key := range keys {
+		if err := os.Unsetenv(key); err != nil {
+			log.Printf("清理环境变量 %s 失败: %v", key, err)
+		}
+	}
+}
+
 func main() {
 	fmt.Println("=== Go-Kit 配置加载演示 ===")
 	fmt.Println()
@@ -117,20 +131,17 @@ func demonstrateCustomConfigPath() {
 
 func demonstrateEnvOverride() {
 	// 确保没有设置 APP_NAME，使用无前缀模式
-	os.Unsetenv("APP_NAME")
+	unsetEnv("APP_NAME")
 
 	// 设置环境变量来覆盖配置文件中的值
-	os.Setenv("APP_PORT", "9090")
-	os.Setenv("APP_DEBUG", "true")
-	os.Setenv("DATABASE_HOST", "env-db-host")
-	os.Setenv("LOGGING_LEVEL", "debug")
+	setEnv("APP_PORT", "9090")
+	setEnv("APP_DEBUG", "true")
+	setEnv("DATABASE_HOST", "env-db-host")
+	setEnv("LOGGING_LEVEL", "debug")
 
 	defer func() {
 		// 清理环境变量
-		os.Unsetenv("APP_PORT")
-		os.Unsetenv("APP_DEBUG")
-		os.Unsetenv("DATABASE_HOST")
-		os.Unsetenv("LOGGING_LEVEL")
+		unsetEnv("APP_PORT", "APP_DEBUG", "DATABASE_HOST", "LOGGING_LEVEL")
 	}()
 
 	provider, err := cfg.New()
@@ -157,19 +168,16 @@ func demonstrateEnvOverride() {
 
 func demonstrateAutoPrefix() {
 	// 设置 APP_NAME 环境变量启用自动前缀
-	os.Setenv("APP_NAME", "myapp")
+	setEnv("APP_NAME", "myapp")
 
 	// 设置带前缀的环境变量
-	os.Setenv("MYAPP_APP_NAME", "带前缀的应用名称")
-	os.Setenv("MYAPP_APP_PORT", "7777")
-	os.Setenv("MYAPP_DATABASE_HOST", "prefix-db-host")
+	setEnv("MYAPP_APP_NAME", "带前缀的应用名称")
+	setEnv("MYAPP_APP_PORT", "7777")
+	setEnv("MYAPP_DATABASE_HOST", "prefix-db-host")
 
 	defer func() {
 		// 清理环境变量
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("MYAPP_APP_NAME")
-		os.Unsetenv("MYAPP_APP_PORT")
-		os.Unsetenv("MYAPP_DATABASE_HOST")
+		unsetEnv("APP_NAME", "MYAPP_APP_NAME", "MYAPP_APP_PORT", "MYAPP_DATABASE_HOST")
 	}()
 
 	provider, err := cfg.NewWithPrefix("MYAPP")
@@ -198,16 +206,14 @@ func demonstrateAppNamePriority() {
 	// 演示当配置文件和环境变量都有 app_name 时，环境变量优先级最高
 
 	// 设置 APP_NAME 启用前缀
-	os.Setenv("APP_NAME", "priority")
+	setEnv("APP_NAME", "priority")
 
 	// 设置环境变量覆盖 app.name
-	os.Setenv("PRIORITY_APP_NAME", "环境变量优先的应用名")
-	os.Setenv("PRIORITY_APP_PORT", "8888")
+	setEnv("PRIORITY_APP_NAME", "环境变量优先的应用名")
+	setEnv("PRIORITY_APP_PORT", "8888")
 
 	defer func() {
-		os.Unsetenv("APP_NAME")
-		os.Unsetenv("PRIORITY_APP_NAME")
-		os.Unsetenv("PRIORITY_APP_PORT")
+		unsetEnv("APP_NAME", "PRIORITY_APP_NAME", "PRIORITY_APP_PORT")
 	}()
 
 	provider, err := cfg.NewWithPrefix("PRIORITY")

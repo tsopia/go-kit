@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+func withLegacyStringContextValue(ctx context.Context, key, value string) context.Context {
+	//nolint:staticcheck // 这些测试明确验证字符串 key 的兼容提取逻辑
+	return context.WithValue(ctx, key, value)
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name string
@@ -144,7 +149,7 @@ func TestLogger_ContextExtraction(t *testing.T) {
 	}{
 		{
 			name: "提取 trace_id",
-			ctx:  context.WithValue(context.Background(), "trace_id", "trace-123"),
+			ctx:  withLegacyStringContextValue(context.Background(), "trace_id", "trace-123"),
 			contains: []string{
 				`"trace_id":"trace-123"`,
 			},
@@ -153,9 +158,9 @@ func TestLogger_ContextExtraction(t *testing.T) {
 			name: "提取多个字段",
 			ctx: func() context.Context {
 				ctx := context.Background()
-				ctx = context.WithValue(ctx, "trace_id", "trace-456")
-				ctx = context.WithValue(ctx, "request_id", "req-789")
-				ctx = context.WithValue(ctx, "user_id", "user-001")
+				ctx = withLegacyStringContextValue(ctx, "trace_id", "trace-456")
+				ctx = withLegacyStringContextValue(ctx, "request_id", "req-789")
+				ctx = withLegacyStringContextValue(ctx, "user_id", "user-001")
 				return ctx
 			}(),
 			contains: []string{
@@ -173,7 +178,7 @@ func TestLogger_ContextExtraction(t *testing.T) {
 			name: "备用 key",
 			ctx: func() context.Context {
 				ctx := context.Background()
-				ctx = context.WithValue(ctx, "x-trace-id", "x-trace-abc")
+				ctx = withLegacyStringContextValue(ctx, "x-trace-id", "x-trace-abc")
 				return ctx
 			}(),
 			contains: []string{
@@ -287,7 +292,7 @@ func TestLogger_WithCtx(t *testing.T) {
 		Output: &buf,
 	})
 
-	ctx := context.WithValue(context.Background(), "trace_id", "chained-trace")
+	ctx := withLegacyStringContextValue(context.Background(), "trace_id", "chained-trace")
 	ctxLogger := logger.WithCtx(ctx)
 
 	ctxLogger.Info("message 1")
@@ -664,9 +669,9 @@ func TestCustomContextKeys(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "uber-trace-id", "uber-123")
-	ctx = context.WithValue(ctx, "session_id", "sess-456")
-	ctx = context.WithValue(ctx, "x-tenant-id", "tenant-789")
+	ctx = withLegacyStringContextValue(ctx, "uber-trace-id", "uber-123")
+	ctx = withLegacyStringContextValue(ctx, "session_id", "sess-456")
+	ctx = withLegacyStringContextValue(ctx, "x-tenant-id", "tenant-789")
 
 	logger.Info(ctx, "custom keys test")
 	output := buf.String()

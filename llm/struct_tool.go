@@ -129,10 +129,8 @@ func typeToParams(t reflect.Type) (map[string]*schema.ParameterInfo, *schema.Par
 			if field.Anonymous && jsonName == "" {
 				embeddedParams, _ := typeToParams(field.Type)
 				// embeddedParams 是嵌入结构体的 map[string]*ParameterInfo
-				if embeddedParams != nil {
-					for k, v := range embeddedParams {
-						params[k] = v
-					}
+				for k, v := range embeddedParams {
+					params[k] = v
 				}
 				continue
 			}

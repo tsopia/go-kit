@@ -204,7 +204,9 @@ func TestGET(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["message"] != "success" {
 		t.Errorf("Expected message 'success', got '%v'", response["message"])
@@ -217,7 +219,10 @@ func TestPOST(t *testing.T) {
 
 	engine.POST("/test", func(c *gin.Context) {
 		var requestBody map[string]interface{}
-		c.ShouldBindJSON(&requestBody)
+		if err := c.ShouldBindJSON(&requestBody); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "created",
@@ -242,7 +247,9 @@ func TestPOST(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["message"] != "created" {
 		t.Errorf("Expected message 'created', got '%v'", response["message"])
@@ -268,7 +275,9 @@ func TestPUT(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["message"] != "updated" {
 		t.Errorf("Expected message 'updated', got '%v'", response["message"])
@@ -314,7 +323,9 @@ func TestGroup(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	users, ok := response["users"].([]interface{})
 	if !ok {
@@ -353,7 +364,9 @@ func TestNoRoute(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["error"] != "not found" {
 		t.Errorf("Expected error 'not found', got '%v'", response["error"])
@@ -474,7 +487,9 @@ func TestQueryParameters(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["query"] != "test" {
 		t.Errorf("Expected query 'test', got '%v'", response["query"])
@@ -505,7 +520,9 @@ func TestPathParameters(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["id"] != "123" {
 		t.Errorf("Expected id '123', got '%v'", response["id"])
@@ -542,7 +559,9 @@ func TestTraceIDMiddleware(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["trace_id"] == "" {
 		t.Error("Expected trace_id in response")
@@ -623,7 +642,9 @@ func TestTraceIDMiddlewareWithCustomID(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["trace_id"] != customTraceID {
 		t.Errorf("Expected trace_id to be '%s', got '%s'", customTraceID, response["trace_id"])
@@ -660,7 +681,9 @@ func TestRequestIDMiddleware(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	if response["request_id"] == "" {
 		t.Error("Expected request_id in response")
@@ -743,7 +766,9 @@ func TestContextFromGin(t *testing.T) {
 	}
 
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
 
 	// 验证从 context 和 gin 中获取的 ID 是否一致
 	if response["ctx_trace_id"] != response["gin_trace_id"] {

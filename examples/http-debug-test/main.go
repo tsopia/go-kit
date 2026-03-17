@@ -71,7 +71,9 @@ func main() {
 			"timestamp": time.Now().Format(time.RFC3339),
 		}
 
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("编码响应失败: %v", err)
+		}
 	}))
 	defer server.Close()
 

@@ -8,6 +8,12 @@ import (
 	"github.com/tsopia/go-kit/database"
 )
 
+func closeDatabase(name string, db *database.Database) {
+	if err := db.Close(); err != nil {
+		log.Printf("关闭%s失败: %v", name, err)
+	}
+}
+
 // User 用户模型
 type User struct {
 	ID        uint   `gorm:"primarykey"`
@@ -32,7 +38,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建数据库失败: %v", err)
 	}
-	defer db1.Close()
+	defer closeDatabase("db1", db1)
 
 	fmt.Println("数据库连接成功，使用默认配置")
 
@@ -55,7 +61,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建数据库失败: %v", err)
 	}
-	defer db2.Close()
+	defer closeDatabase("db2", db2)
 
 	fmt.Println("数据库连接成功，使用明确设置的配置")
 
@@ -73,7 +79,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建数据库失败: %v", err)
 	}
-	defer db3.Close()
+	defer closeDatabase("db3", db3)
 
 	fmt.Println("数据库连接成功，混合配置")
 

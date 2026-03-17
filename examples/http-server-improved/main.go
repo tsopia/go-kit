@@ -11,6 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var (
+	_ = demonstrateManualShutdown
+	_ = demonstrateAPIComparison
+)
+
 func main() {
 	fmt.Println("=== HTTP 服务器改进功能演示 ===")
 

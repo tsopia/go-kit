@@ -169,7 +169,11 @@ func freeTCPPort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("listen for free port: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			t.Fatalf("close free port listener: %v", err)
+		}
+	}()
 
 	return ln.Addr().(*net.TCPAddr).Port
 }
@@ -186,7 +190,9 @@ func waitForHTTPStatus(t *testing.T, url string, wantStatus int) {
 		resp, err := client.Get(url)
 		if err == nil {
 			lastStatus = resp.StatusCode
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				t.Fatalf("close response body: %v", err)
+			}
 			if resp.StatusCode == wantStatus {
 				return
 			}

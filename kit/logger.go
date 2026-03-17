@@ -69,10 +69,10 @@ func (l *Logger) buildLogger() {
 	}
 
 	l.logger = slog.New(&kitHandler{
-		Handler:      handler,
-		logger:       l,
-		addCaller:    l.opts.AddCaller,
-		callerSkip:   3, // kitHandler.Handle -> logger.log -> logger.logWithLevel -> Debug/Info/...
+		Handler:    handler,
+		logger:     l,
+		addCaller:  l.opts.AddCaller,
+		callerSkip: 3, // kitHandler.Handle -> logger.log -> logger.logWithLevel -> Debug/Info/...
 	})
 }
 
@@ -157,7 +157,11 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, attrs ...slog
 	switch level {
 	case FatalLevel:
 		// 确保日志写入
-		l.Sync()
+		if err := l.Sync(); err != nil {
+			if _, writeErr := fmt.Fprintf(os.Stderr, "[kit] logger sync failed: %v\n", err); writeErr != nil {
+				return
+			}
+		}
 		os.Exit(1)
 	case PanicLevel:
 		panic(msg)

@@ -59,8 +59,6 @@ func NewAdapter(ctx context.Context, source any) (DB, error) {
 	switch v := source.(type) {
 	case DB:
 		return v, nil
-	case *sql.DB:
-		return NewSQLDBAdapter(v)
 	case database.DB:
 		return NewDatabaseAdapter(v)
 	case string:

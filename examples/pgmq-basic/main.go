@@ -12,6 +12,12 @@ type OrderMessage struct {
 	OrderID string `json:"order_id"`
 }
 
+func closeDatabase(db *database.Database) {
+	if err := db.Close(); err != nil {
+		log.Printf("close database: %v", err)
+	}
+}
+
 func main() {
 	db, err := database.New(&database.Config{
 		Driver:   "postgres",
@@ -24,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	defer closeDatabase(db)
 
 	adapter, err := pgmq.NewAdapter(context.Background(), db)
 	if err != nil {

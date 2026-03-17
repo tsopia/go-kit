@@ -6,12 +6,19 @@ import (
 	"fmt"
 )
 
+type contextKey string
+
 // Trace and Request ID 相关常量
 const (
 	// TraceIDKey trace ID 在 context 中的 key
 	TraceIDKey = "trace_id"
 	// RequestIDKey request ID 在 context 中的 key
 	RequestIDKey = "request_id"
+)
+
+const (
+	traceIDContextKey   contextKey = TraceIDKey
+	requestIDContextKey contextKey = RequestIDKey
 )
 
 // HTTP headers for trace and request IDs
@@ -31,6 +38,9 @@ func GenerateID() string {
 
 // TraceIDFromContext 从 context 中提取 trace ID
 func TraceIDFromContext(ctx context.Context) string {
+	if traceID, ok := ctx.Value(traceIDContextKey).(string); ok {
+		return traceID
+	}
 	if traceID, ok := ctx.Value(TraceIDKey).(string); ok {
 		return traceID
 	}
@@ -39,6 +49,9 @@ func TraceIDFromContext(ctx context.Context) string {
 
 // RequestIDFromContext 从 context 中提取 request ID
 func RequestIDFromContext(ctx context.Context) string {
+	if requestID, ok := ctx.Value(requestIDContextKey).(string); ok {
+		return requestID
+	}
 	if requestID, ok := ctx.Value(RequestIDKey).(string); ok {
 		return requestID
 	}
@@ -47,12 +60,12 @@ func RequestIDFromContext(ctx context.Context) string {
 
 // WithTraceID 将 trace ID 添加到 context 中
 func WithTraceID(ctx context.Context, traceID string) context.Context {
-	return context.WithValue(ctx, TraceIDKey, traceID)
+	return context.WithValue(ctx, traceIDContextKey, traceID)
 }
 
 // WithRequestID 将 request ID 添加到 context 中
 func WithRequestID(ctx context.Context, requestID string) context.Context {
-	return context.WithValue(ctx, RequestIDKey, requestID)
+	return context.WithValue(ctx, requestIDContextKey, requestID)
 }
 
 // WithTraceAndRequestID 同时将 trace ID 和 request ID 添加到 context 中

@@ -3,6 +3,7 @@ package pgmq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -14,6 +15,13 @@ type Queue[T any] struct {
 	config  QueueConfig
 	logger  SimpleLogger
 	metrics Metrics
+}
+
+func closeRowsError(err error, rows interface{ Close() error }, action string) error {
+	if closeErr := rows.Close(); closeErr != nil {
+		return errors.Join(err, fmt.Errorf("%s close rows: %w", action, closeErr))
+	}
+	return err
 }
 
 // CreateExtension 创建 pgmq 扩展
@@ -132,7 +140,7 @@ func (q *Queue[T]) SendBatch(ctx context.Context, payloads []T) ([]int64, error)
 }
 
 // SendBatchWithDelay 批量发送消息（延迟秒）
-func (q *Queue[T]) SendBatchWithDelay(ctx context.Context, payloads []T, delay time.Duration) ([]int64, error) {
+func (q *Queue[T]) SendBatchWithDelay(ctx context.Context, payloads []T, delay time.Duration) (_ []int64, err error) {
 	if delay < 0 {
 		return nil, ErrInvalidDelay
 	}
@@ -145,7 +153,9 @@ func (q *Queue[T]) SendBatchWithDelay(ctx context.Context, payloads []T, delay t
 	if err != nil {
 		return nil, fmt.Errorf("send_batch 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "send_batch")
+	}()
 
 	messageIDs := make([]int64, 0)
 	for rows.Next() {
@@ -162,7 +172,7 @@ func (q *Queue[T]) SendBatchWithDelay(ctx context.Context, payloads []T, delay t
 }
 
 // SendBatchWithDelayTimestamp 批量发送消息（指定时间）
-func (q *Queue[T]) SendBatchWithDelayTimestamp(ctx context.Context, payloads []T, delay time.Time) ([]int64, error) {
+func (q *Queue[T]) SendBatchWithDelayTimestamp(ctx context.Context, payloads []T, delay time.Time) (_ []int64, err error) {
 	data, err := encodePayloads(payloads)
 	if err != nil {
 		return nil, err
@@ -172,7 +182,9 @@ func (q *Queue[T]) SendBatchWithDelayTimestamp(ctx context.Context, payloads []T
 	if err != nil {
 		return nil, fmt.Errorf("send_batch_at 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "send_batch_at")
+	}()
 
 	messageIDs := make([]int64, 0)
 	for rows.Next() {
@@ -189,7 +201,7 @@ func (q *Queue[T]) SendBatchWithDelayTimestamp(ctx context.Context, payloads []T
 }
 
 // Read 读取消息
-func (q *Queue[T]) Read(ctx context.Context, opts ReadOptions) ([]Message[T], error) {
+func (q *Queue[T]) Read(ctx context.Context, opts ReadOptions) (_ []Message[T], err error) {
 	options, err := normalizeReadOptions(q.config, opts)
 	if err != nil {
 		return nil, err
@@ -200,7 +212,9 @@ func (q *Queue[T]) Read(ctx context.Context, opts ReadOptions) ([]Message[T], er
 	if err != nil {
 		return nil, fmt.Errorf("read 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "read")
+	}()
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -223,13 +237,15 @@ func (q *Queue[T]) Read(ctx context.Context, opts ReadOptions) ([]Message[T], er
 }
 
 // Pop 读取并删除消息
-func (q *Queue[T]) Pop(ctx context.Context) (*Message[T], error) {
+func (q *Queue[T]) Pop(ctx context.Context) (_ *Message[T], err error) {
 	query := fmt.Sprintf("SELECT * FROM %s.pop($1)", q.config.Schema)
 	rows, err := q.db.QueryContext(ctx, query, q.name)
 	if err != nil {
 		return nil, fmt.Errorf("pop 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "pop")
+	}()
 
 	if !rows.Next() {
 		return nil, nil
@@ -258,13 +274,15 @@ func (q *Queue[T]) Archive(ctx context.Context, messageID int64) error {
 }
 
 // ArchiveBatch 批量归档消息
-func (q *Queue[T]) ArchiveBatch(ctx context.Context, messageIDs []int64) ([]int64, error) {
+func (q *Queue[T]) ArchiveBatch(ctx context.Context, messageIDs []int64) (_ []int64, err error) {
 	query := fmt.Sprintf("SELECT %s.archive($1, $2::bigint[])", q.config.Schema)
 	rows, err := q.db.QueryContext(ctx, query, q.name, messageIDs)
 	if err != nil {
 		return nil, fmt.Errorf("archive_batch 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "archive_batch")
+	}()
 
 	archived := make([]int64, 0)
 	for rows.Next() {
@@ -291,13 +309,15 @@ func (q *Queue[T]) Delete(ctx context.Context, messageID int64) error {
 }
 
 // DeleteBatch 批量删除消息
-func (q *Queue[T]) DeleteBatch(ctx context.Context, messageIDs []int64) ([]int64, error) {
+func (q *Queue[T]) DeleteBatch(ctx context.Context, messageIDs []int64) (_ []int64, err error) {
 	query := fmt.Sprintf("SELECT %s.delete($1, $2::bigint[])", q.config.Schema)
 	rows, err := q.db.QueryContext(ctx, query, q.name, messageIDs)
 	if err != nil {
 		return nil, fmt.Errorf("delete_batch 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "delete_batch")
+	}()
 
 	deleted := make([]int64, 0)
 	for rows.Next() {
@@ -314,7 +334,7 @@ func (q *Queue[T]) DeleteBatch(ctx context.Context, messageIDs []int64) ([]int64
 }
 
 // SetVisibilityTimeout 设置消息可见性超时
-func (q *Queue[T]) SetVisibilityTimeout(ctx context.Context, messageID int64, delay time.Duration) (*Message[T], error) {
+func (q *Queue[T]) SetVisibilityTimeout(ctx context.Context, messageID int64, delay time.Duration) (_ *Message[T], err error) {
 	if delay < 0 {
 		return nil, ErrInvalidDelay
 	}
@@ -323,7 +343,9 @@ func (q *Queue[T]) SetVisibilityTimeout(ctx context.Context, messageID int64, de
 	if err != nil {
 		return nil, fmt.Errorf("set_vt 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "set_vt")
+	}()
 
 	if !rows.Next() {
 		return nil, ErrNoRows
@@ -391,7 +413,7 @@ func (q *Queue[T]) SendBatchRaw(ctx context.Context, queue string, payloads []js
 }
 
 // SendBatchRawWithDelay 批量发送 JSON 消息（延迟秒）
-func (q *Queue[T]) SendBatchRawWithDelay(ctx context.Context, queue string, payloads []json.RawMessage, delay time.Duration) ([]int64, error) {
+func (q *Queue[T]) SendBatchRawWithDelay(ctx context.Context, queue string, payloads []json.RawMessage, delay time.Duration) (_ []int64, err error) {
 	if delay < 0 {
 		return nil, ErrInvalidDelay
 	}
@@ -403,7 +425,9 @@ func (q *Queue[T]) SendBatchRawWithDelay(ctx context.Context, queue string, payl
 	if err != nil {
 		return nil, fmt.Errorf("send_batch 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "send_batch")
+	}()
 
 	messageIDs := make([]int64, 0)
 	for rows.Next() {
@@ -420,7 +444,7 @@ func (q *Queue[T]) SendBatchRawWithDelay(ctx context.Context, queue string, payl
 }
 
 // SendBatchRawWithDelayTimestamp 批量发送 JSON 消息（指定时间）
-func (q *Queue[T]) SendBatchRawWithDelayTimestamp(ctx context.Context, queue string, payloads []json.RawMessage, delay time.Time) ([]int64, error) {
+func (q *Queue[T]) SendBatchRawWithDelayTimestamp(ctx context.Context, queue string, payloads []json.RawMessage, delay time.Time) (_ []int64, err error) {
 	if err := validateQueueName(queue); err != nil {
 		return nil, err
 	}
@@ -429,7 +453,9 @@ func (q *Queue[T]) SendBatchRawWithDelayTimestamp(ctx context.Context, queue str
 	if err != nil {
 		return nil, fmt.Errorf("send_batch_at 失败: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		err = closeRowsError(err, rows, "send_batch_at")
+	}()
 
 	messageIDs := make([]int64, 0)
 	for rows.Next() {
