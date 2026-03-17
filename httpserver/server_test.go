@@ -66,6 +66,115 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestConfigNormalizeAndValidate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     Config
+		wantCfg Config
+		wantErr bool
+	}{
+		{
+			name: "normalize zero values",
+			cfg:  Config{},
+			wantCfg: Config{
+				Host:              "0.0.0.0",
+				Port:              8080,
+				ReadTimeout:       10 * time.Second,
+				ReadHeaderTimeout: 5 * time.Second,
+				WriteTimeout:      10 * time.Second,
+				IdleTimeout:       60 * time.Second,
+				MaxHeaderBytes:    1 << 20,
+				ShutdownTimeout:   10 * time.Second,
+				DrainTimeout:      5 * time.Second,
+				HealthCheckPath:   "/health",
+				ReadinessPath:     "/readyz",
+				LivenessPath:      "/livez",
+			},
+		},
+		{
+			name: "reject invalid port",
+			cfg: Config{
+				Host: "127.0.0.1",
+				Port: -1,
+			},
+			wantErr: true,
+		},
+		{
+			name: "reject conflicting health check port",
+			cfg: Config{
+				Host:              "127.0.0.1",
+				Port:              8080,
+				HealthCheckPort:   8080,
+				HealthCheckPath:   "/healthz",
+				ReadinessPath:     "/readyz",
+				LivenessPath:      "/livez",
+				ReadTimeout:       time.Second,
+				ReadHeaderTimeout: time.Second,
+				WriteTimeout:      time.Second,
+				IdleTimeout:       time.Second,
+				ShutdownTimeout:   time.Second,
+				DrainTimeout:      time.Second,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.cfg
+			cfg.Normalize()
+
+			err := cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if cfg.Host != tt.wantCfg.Host {
+				t.Fatalf("Host = %q, want %q", cfg.Host, tt.wantCfg.Host)
+			}
+			if cfg.Port != tt.wantCfg.Port {
+				t.Fatalf("Port = %d, want %d", cfg.Port, tt.wantCfg.Port)
+			}
+			if cfg.ReadTimeout != tt.wantCfg.ReadTimeout {
+				t.Fatalf("ReadTimeout = %v, want %v", cfg.ReadTimeout, tt.wantCfg.ReadTimeout)
+			}
+			if cfg.ReadHeaderTimeout != tt.wantCfg.ReadHeaderTimeout {
+				t.Fatalf("ReadHeaderTimeout = %v, want %v", cfg.ReadHeaderTimeout, tt.wantCfg.ReadHeaderTimeout)
+			}
+			if cfg.WriteTimeout != tt.wantCfg.WriteTimeout {
+				t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, tt.wantCfg.WriteTimeout)
+			}
+			if cfg.IdleTimeout != tt.wantCfg.IdleTimeout {
+				t.Fatalf("IdleTimeout = %v, want %v", cfg.IdleTimeout, tt.wantCfg.IdleTimeout)
+			}
+			if cfg.MaxHeaderBytes != tt.wantCfg.MaxHeaderBytes {
+				t.Fatalf("MaxHeaderBytes = %d, want %d", cfg.MaxHeaderBytes, tt.wantCfg.MaxHeaderBytes)
+			}
+			if cfg.ShutdownTimeout != tt.wantCfg.ShutdownTimeout {
+				t.Fatalf("ShutdownTimeout = %v, want %v", cfg.ShutdownTimeout, tt.wantCfg.ShutdownTimeout)
+			}
+			if cfg.DrainTimeout != tt.wantCfg.DrainTimeout {
+				t.Fatalf("DrainTimeout = %v, want %v", cfg.DrainTimeout, tt.wantCfg.DrainTimeout)
+			}
+			if cfg.HealthCheckPath != tt.wantCfg.HealthCheckPath {
+				t.Fatalf("HealthCheckPath = %q, want %q", cfg.HealthCheckPath, tt.wantCfg.HealthCheckPath)
+			}
+			if cfg.ReadinessPath != tt.wantCfg.ReadinessPath {
+				t.Fatalf("ReadinessPath = %q, want %q", cfg.ReadinessPath, tt.wantCfg.ReadinessPath)
+			}
+			if cfg.LivenessPath != tt.wantCfg.LivenessPath {
+				t.Fatalf("LivenessPath = %q, want %q", cfg.LivenessPath, tt.wantCfg.LivenessPath)
+			}
+		})
+	}
+}
+
 func TestEngine(t *testing.T) {
 	server := NewServer(nil)
 	engine := server.Engine()

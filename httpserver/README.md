@@ -130,18 +130,23 @@ type Config struct {
 	Host            string
 	Port            int
 	ReadTimeout     time.Duration
+	ReadHeaderTimeout time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	MaxHeaderBytes  int
 	ShutdownTimeout time.Duration
+	DrainTimeout    time.Duration
 
 	EnableHealthCheck bool
 	HealthCheckPath   string
+	ReadinessPath     string
+	LivenessPath      string
 	HealthCheckPort   int
 }
 ```
 
 默认值可以通过 `httpserver.DefaultConfig()` 获取。
+如果需要对传入配置补默认值或做启动前校验，可使用 `(*Config).Normalize()` 和 `(*Config).Validate()`。
 
 ## 生命周期与 hooks
 
