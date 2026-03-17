@@ -129,13 +129,13 @@ func main() {
 type Config struct {
 	Host            string
 	Port            int
-	ReadTimeout     time.Duration
+	ReadTimeout       time.Duration
 	ReadHeaderTimeout time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	MaxHeaderBytes  int
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	MaxHeaderBytes    int
 	ShutdownTimeout time.Duration
-	DrainTimeout    time.Duration
+	DrainTimeout      time.Duration
 
 	EnableHealthCheck bool
 	HealthCheckPath   string
@@ -189,6 +189,14 @@ srv := httpserver.NewServer(&httpserver.Config{
 	HealthCheckPort:   18080,
 })
 ```
+
+默认情况下，服务器启动后会自动进入 ready 状态，同时暴露：
+
+- `HealthCheckPath`，默认 `/health`
+- `ReadinessPath`，默认 `/readyz`
+- `LivenessPath`，默认 `/livez`
+
+如果你需要在预热完成后再接流量，可以通过 `httpserver.WithManualReadiness()` 关闭自动 ready，然后在合适时机调用 `srv.MarkReady()`。
 
 ## 模块化路由
 

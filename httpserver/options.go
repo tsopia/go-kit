@@ -35,6 +35,13 @@ func WithModules(modules ...RouteModule) Option {
 	}
 }
 
+// WithManualReadiness 禁用自动 ready 切换。
+func WithManualReadiness() Option {
+	return func(s *Server) {
+		s.manualReady = true
+	}
+}
+
 func (s *Server) applyOptions(opts ...Option) {
 	for _, opt := range opts {
 		if opt != nil {

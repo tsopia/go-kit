@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,7 +26,12 @@ type Server struct {
 	hooks                 Hooks
 	healthHandler         gin.HandlerFunc
 	healthRouteRegistered bool
+	readinessRouteRegistered bool
+	livenessRouteRegistered  bool
 	healthAddr            string
+	manualReady           bool
+	stateMu               sync.RWMutex
+	state                 State
 }
 
 // NewServer 创建新的HTTP服务器
@@ -40,11 +46,13 @@ func NewServer(config *Config, opts ...Option) *Server {
 		engine:        engine,
 		serveErrCh:    make(chan error, 4),
 		healthHandler: DefaultHealthHandler(),
+		state:         StateNew,
 	}
 
 	// 如果启用了健康检查，自动注册健康检查路由
 	if config.EnableHealthCheck {
 		server.EnableHealthCheck()
+		server.registerProbeRoutes()
 	}
 
 	server.applyOptions(opts...)
@@ -128,6 +136,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		s.reportServeError(err)
 		return err
 	}
+	s.setState(StateStarting)
 
 	s.prepareMainServer(ln)
 	healthLn, err := s.prepareHealthServer()
@@ -141,6 +150,9 @@ func (s *Server) Serve(ln net.Listener) error {
 			_ = s.serveHealthListener(healthLn)
 		}()
 	}
+	if !s.manualReady {
+		s.MarkReady()
+	}
 	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 
 	return s.serveMainListener(ln)
@@ -152,6 +164,7 @@ func (s *Server) Start() error {
 		s.reportServeError(err)
 		return err
 	}
+	s.setState(StateStarting)
 
 	ln, err := net.Listen("tcp", s.configuredAddr())
 	if err != nil {
@@ -177,6 +190,9 @@ func (s *Server) Start() error {
 		}()
 	}
 
+	if !s.manualReady {
+		s.MarkReady()
+	}
 	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 	return nil
 }
@@ -187,6 +203,7 @@ func (s *Server) Run() error {
 		s.reportServeError(err)
 		return err
 	}
+	s.setState(StateStarting)
 
 	ln, err := net.Listen("tcp", s.configuredAddr())
 	if err != nil {
@@ -206,6 +223,9 @@ func (s *Server) Run() error {
 		go func() {
 			_ = s.serveHealthListener(healthLn)
 		}()
+	}
+	if !s.manualReady {
+		s.MarkReady()
 	}
 	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 
@@ -218,6 +238,7 @@ func (s *Server) RunTLS(certFile, keyFile string) error {
 		s.reportServeError(err)
 		return err
 	}
+	s.setState(StateStarting)
 
 	ln, err := net.Listen("tcp", s.configuredAddr())
 	if err != nil {
@@ -237,6 +258,9 @@ func (s *Server) RunTLS(certFile, keyFile string) error {
 		go func() {
 			_ = s.serveHealthListener(healthLn)
 		}()
+	}
+	if !s.manualReady {
+		s.MarkReady()
 	}
 	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
 
@@ -269,6 +293,7 @@ func (s *Server) WaitForShutdown() error {
 
 	// 阻塞等待信号
 	<-quit
+	s.MarkDraining()
 	s.emitHook(s.hooks.OnShuttingDown, s.lifecycleEvent(nil))
 
 	// 创建关闭context
@@ -287,6 +312,7 @@ func (s *Server) WaitForShutdown() error {
 // Shutdown 优雅关闭服务器
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.server == nil && s.healthServer == nil {
+		s.setState(StateStopped)
 		return nil
 	}
 
@@ -296,20 +322,26 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		defer cancel()
 	}
 
+	s.setState(StateStopping)
+
 	if s.healthServer != nil {
 		if err := s.healthServer.Shutdown(ctx); err != nil {
+			s.setState(StateFailed)
 			return fmt.Errorf("shutdown health server: %w", err)
 		}
 	}
 
 	if s.server == nil {
+		s.setState(StateStopped)
 		return nil
 	}
 
 	if err := s.server.Shutdown(ctx); err != nil {
+		s.setState(StateFailed)
 		return fmt.Errorf("shutdown server: %w", err)
 	}
 
+	s.setState(StateStopped)
 	return nil
 }
 

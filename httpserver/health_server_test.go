@@ -11,6 +11,66 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestReadinessAndLivenessEndpoints(t *testing.T) {
+	tests := []struct {
+		name            string
+		opts            []Option
+		action          func(*Server)
+		wantReadyStatus int
+		wantLiveStatus  int
+	}{
+		{
+			name:            "auto ready server returns ready",
+			wantReadyStatus: http.StatusOK,
+			wantLiveStatus:  http.StatusOK,
+		},
+		{
+			name: "manual readiness starts unready",
+			opts: []Option{WithManualReadiness()},
+			wantReadyStatus: http.StatusServiceUnavailable,
+			wantLiveStatus:  http.StatusOK,
+		},
+		{
+			name: "draining server becomes unready",
+			action: func(s *Server) {
+				s.MarkDraining()
+			},
+			wantReadyStatus: http.StatusServiceUnavailable,
+			wantLiveStatus:  http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			appPort := freeTCPPort(t)
+			srv := NewServer(&Config{
+				Host:              "127.0.0.1",
+				Port:              appPort,
+				EnableHealthCheck: true,
+				HealthCheckPath:   "/healthz",
+				ReadinessPath:     "/readyz",
+				LivenessPath:      "/livez",
+			}, tt.opts...)
+
+			if err := srv.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			defer func() {
+				if err := srv.Shutdown(context.Background()); err != nil {
+					t.Fatalf("shutdown: %v", err)
+				}
+			}()
+
+			if tt.action != nil {
+				tt.action(srv)
+			}
+
+			waitForHTTPStatus(t, fmt.Sprintf("http://127.0.0.1:%d/readyz", appPort), tt.wantReadyStatus)
+			waitForHTTPStatus(t, fmt.Sprintf("http://127.0.0.1:%d/livez", appPort), tt.wantLiveStatus)
+		})
+	}
+}
+
 func TestHealthCheckServingModes(t *testing.T) {
 	tests := []struct {
 		name                 string

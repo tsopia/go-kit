@@ -117,6 +117,8 @@ func (s *Server) prepareHealthServer() (net.Listener, error) {
 
 	engine := gin.New()
 	engine.GET(s.config.HealthCheckPath, s.healthEndpoint())
+	engine.GET(s.config.ReadinessPath, s.readinessEndpoint())
+	engine.GET(s.config.LivenessPath, s.livenessEndpoint())
 	s.healthServer = s.buildHTTPServer(ln.Addr().String(), engine)
 	s.healthAddr = ln.Addr().String()
 

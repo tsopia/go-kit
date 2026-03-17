@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestServerStateTransitions(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(nil, WithManualReadiness())
+
+	if got := srv.State(); got != StateNew {
+		t.Fatalf("initial state = %q, want %q", got, StateNew)
+	}
+
+	srv.MarkReady()
+	if got := srv.State(); got != StateReady {
+		t.Fatalf("state after MarkReady = %q, want %q", got, StateReady)
+	}
+
+	srv.MarkDraining()
+	if got := srv.State(); got != StateDraining {
+		t.Fatalf("state after MarkDraining = %q, want %q", got, StateDraining)
+	}
+}
+
 func TestServerStartReturnsListenError(t *testing.T) {
 	t.Parallel()
 
