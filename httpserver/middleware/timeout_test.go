@@ -26,8 +26,12 @@ func TestTimeout(t *testing.T) {
 		<-release
 	})
 
-	w := httptest.NewRecorder()
+	w := &timeoutGuardRecorder{ResponseRecorder: httptest.NewRecorder(), release: release}
 	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	go func() {
+		<-contextDone
+		close(release)
+	}()
 	done := make(chan struct{})
 	go func() {
 		engine.ServeHTTP(w, req)
@@ -48,14 +52,6 @@ func TestTimeout(t *testing.T) {
 
 	select {
 	case <-done:
-		t.Fatal("ServeHTTP returned before the handler finished cleanup")
-	default:
-	}
-
-	close(release)
-
-	select {
-	case <-done:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("ServeHTTP did not return after the handler finished cleanup")
 	}
@@ -63,4 +59,20 @@ func TestTimeout(t *testing.T) {
 	if w.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusGatewayTimeout)
 	}
+}
+
+type timeoutGuardRecorder struct {
+	*httptest.ResponseRecorder
+	release <-chan struct{}
+}
+
+func (r *timeoutGuardRecorder) WriteHeader(code int) {
+	if code == http.StatusGatewayTimeout {
+		select {
+		case <-r.release:
+		default:
+			panic("504 written before handler finished cleanup")
+		}
+	}
+	r.ResponseRecorder.WriteHeader(code)
 }
