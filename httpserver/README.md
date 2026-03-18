@@ -25,7 +25,7 @@ go get github.com/tsopia/go-kit/httpserver
 - `RouteModule` 支持按模块注册路由
 - `Handle` / `HandleJSON` 支持 typed handler
 - `DecodeJSON` / `DecodeQuery` / `DecodeURI` / `ComposeDecoder` 支持请求解码组合
-- `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、AccessLog、CORS 等中间件
+- `httpserver/middleware` 子包支持通用 Recovery、Timeout、TraceID、RequestID、AccessLog、Compression、CORS 等中间件
 - `httpserver/observability/prometheus` 与 `httpserver/observability/otel` 子包支持指标和 tracing 集成
 - `httpserver/preset` 子包支持官方推荐的默认装配
 - `httpserver/integration/errorsx` 子包支持 `errors` 包到 typed handler 的统一错误映射
@@ -171,11 +171,12 @@ srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
 
 ## 通用中间件
 
-如果你需要可复用的 Recovery、Timeout、TraceID、RequestID、AccessLog、CORS 或安全响应头，优先使用 `httpserver/middleware` 子包，而不是继续向 `Server` 主类型增加能力。
+如果你需要可复用的 Recovery、Timeout、TraceID、RequestID、AccessLog、Compression、CORS 或安全响应头，优先使用 `httpserver/middleware` 子包，而不是继续向 `Server` 主类型增加能力。
 
 ```go
 srv := httpserver.NewServer(cfg)
 srv.Use(middleware.AccessLog())
+srv.Use(middleware.Compression())
 srv.Use(middleware.Recovery())
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
@@ -191,6 +192,12 @@ srv.Use(middleware.AccessLog(middleware.AccessLogConfig{
 		Mode: middleware.MultipartFormFieldsOnly,
 	},
 }))
+```
+
+如果需要响应压缩，可以显式挂载：
+
+```go
+srv.Use(middleware.Compression())
 ```
 
 ## 可观测性扩展

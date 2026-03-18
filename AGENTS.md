@@ -142,7 +142,7 @@ database/
 | 消息队列 | `pgmq` | `pgmq.New(cfg)` |
 | 配置管理 | `cfg` | `cfg.Load(path, &config)` |
 | HTTP 服务 | `httpserver` | `httpserver.NewServer(cfg)` |
-| HTTP 中间件 | `httpserver/middleware` | `srv.Use(middleware.Recovery())`, `srv.Use(middleware.AccessLog())` |
+| HTTP 中间件 | `httpserver/middleware` | `srv.Use(middleware.Recovery())`, `srv.Use(middleware.AccessLog())`, `srv.Use(middleware.Compression())` |
 | HTTP 指标 | `httpserver/observability/prometheus` | `prometheusmiddleware.Register(public, prometheusmiddleware.Config{})` |
 | HTTP Trace | `httpserver/observability/otel` | `srv.Use(httpotel.Middleware(httpotel.Config{}))` |
 | HTTP 默认装配 | `httpserver/preset` | `preset.NewProductionServer(cfg)` |

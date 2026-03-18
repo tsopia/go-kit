@@ -7,6 +7,7 @@
 - 需要 panic recovery
 - 需要请求超时控制
 - 需要结构化访问日志和可选 payload 调试日志
+- 需要响应压缩
 - 需要 Trace ID / Request ID 注入
 - 需要基础 CORS 与安全响应头
 - 需要限制请求体大小
@@ -16,6 +17,7 @@
 ```go
 srv := httpserver.NewServer(nil)
 srv.Use(middleware.AccessLog())
+srv.Use(middleware.Compression())
 srv.Use(middleware.Recovery())
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
@@ -54,3 +56,14 @@ srv.Use(middleware.AccessLog(middleware.AccessLogConfig{
 - payload log 默认关闭
 - JSON / form 会按字段脱敏
 - multipart 默认按结构化 part 处理，不记录文件内容
+
+## Compression
+
+`Compression` 默认按 `Accept-Encoding` 协商响应压缩。第一版只支持 `gzip`，适合 JSON API、文本响应和较大的列表接口。
+
+默认行为：
+
+- 不会自动挂载到 `httpserver` core
+- 在 `middleware` 层需要显式启用
+- 在 `preset.NewProductionServer` 中后续可作为推荐默认值
+- 小响应、`SSE`、下载和已压缩响应默认跳过
