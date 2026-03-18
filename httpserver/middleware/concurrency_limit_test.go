@@ -448,3 +448,125 @@ func TestConcurrencyLimitReleasesSlotAfterCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestConcurrencyLimitReleasesSlotAfterPanic(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	entered := make(chan struct{}, 1)
+
+	engine := gin.New()
+	engine.Use(Recovery())
+	engine.Use(ConcurrencyLimit(1))
+	engine.GET("/panic", func(c *gin.Context) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+
+		panic("boom")
+	})
+	engine.GET("/probe", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	firstDone := make(chan struct{})
+	firstRecorder := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	go func() {
+		engine.ServeHTTP(firstRecorder, firstReq)
+		close(firstDone)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not enter handler")
+	}
+
+	select {
+	case <-firstDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not finish")
+	}
+
+	if firstRecorder.Code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d, want %d", firstRecorder.Code, http.StatusInternalServerError)
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(secondRecorder, secondReq)
+
+	if secondRecorder.Code != http.StatusNoContent {
+		t.Fatalf("second status = %d, want %d", secondRecorder.Code, http.StatusNoContent)
+	}
+}
+
+func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	finished := make(chan struct{})
+
+	engine := gin.New()
+	engine.Use(Timeout(5 * time.Millisecond))
+	engine.Use(ConcurrencyLimit(1))
+	engine.GET("/slow", func(c *gin.Context) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+
+		<-release
+		c.Status(http.StatusNoContent)
+		close(finished)
+	})
+	engine.GET("/probe", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	firstDone := make(chan struct{})
+	firstRecorder := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	go func() {
+		engine.ServeHTTP(firstRecorder, firstReq)
+		close(firstDone)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not enter handler")
+	}
+
+	select {
+	case <-firstDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not finish")
+	}
+
+	if firstRecorder.Code != http.StatusGatewayTimeout {
+		t.Fatalf("first status = %d, want %d", firstRecorder.Code, http.StatusGatewayTimeout)
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(secondRecorder, secondReq)
+
+	if secondRecorder.Code != http.StatusNoContent {
+		t.Fatalf("second status = %d, want %d", secondRecorder.Code, http.StatusNoContent)
+	}
+
+	close(release)
+
+	select {
+	case <-finished:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first handler did not finish")
+	}
+}
