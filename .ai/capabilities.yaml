@@ -1,5 +1,5 @@
 version: "1.1.0"
-updated_at: "2026-03-17"
+updated_at: "2026-03-18"
 
 capabilities:
   - name: kit
@@ -110,7 +110,7 @@ capabilities:
     dependencies: []
 
   - name: middleware
-    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、AccessLog、Compression、CORS、安全头等）
+    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、AccessLog、Compression、ConcurrencyLimit、CORS、安全头等）
     import: github.com/tsopia/go-kit/httpserver/middleware
     scenarios:
       - name: 挂载恢复中间件
@@ -128,6 +128,9 @@ capabilities:
       - name: 挂载响应压缩
         snippet: |
           srv.Use(middleware.Compression())
+      - name: 挂载并发保护
+        snippet: |
+          srv.Use(middleware.ConcurrencyLimit(100))
     dependencies: [httpserver]
 
   - name: httpserver-prometheus
