@@ -512,9 +512,10 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 
 ### DrainTimeout 配置
 
-当前实现：`DrainTimeout` 只是配置项，未被 `Shutdown()` 流程使用。
-
-预期行为：`WaitForShutdown()` 收到信号后应先 `MarkDraining()`，等待 `DrainTimeout` 后才进入 `Shutdown()`。
+**已实现**：`WaitForShutdown()` 收到信号后：
+1. 先调用 `MarkDraining()`，readiness 立即返回 503
+2. 等待 `DrainTimeout` 时间
+3. 然后进入 `Shutdown()`
 
 ### HealthAddr() 方法
 

@@ -175,10 +175,17 @@ func (s *Server) WaitForShutdown() error {
 
 	// 阻塞等待信号
 	<-quit
+
+	// 先标记为 draining，让 readiness 立即返回 503
 	s.MarkDraining()
 	s.emitHook(s.hooks.OnShuttingDown, s.lifecycleEvent(nil))
 
-	// 创建关闭context
+	// 等待 DrainTimeout，让负载均衡器有时间将流量切走
+	if s.config.DrainTimeout > 0 {
+		time.Sleep(s.config.DrainTimeout)
+	}
+
+	// 创建关闭 context（ShutdownTimeout 用于 http.Server.Shutdown 的超时）
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 	defer cancel()
 
