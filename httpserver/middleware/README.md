@@ -19,8 +19,8 @@
 srv := httpserver.NewServer(nil)
 srv.Use(middleware.AccessLog())
 srv.Use(middleware.Compression())
-srv.Use(middleware.ConcurrencyLimit(100))
 srv.Use(middleware.Recovery())
+srv.Use(middleware.ConcurrencyLimit(100))
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
 ```
