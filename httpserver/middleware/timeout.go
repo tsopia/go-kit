@@ -20,27 +20,9 @@ func Timeout(timeout time.Duration) gin.HandlerFunc {
 		defer cancel()
 
 		c.Request = c.Request.WithContext(ctx)
+		c.Next()
 
-		done := make(chan struct{})
-		panicCh := make(chan any, 1)
-
-		go func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					panicCh <- recovered
-				}
-			}()
-
-			c.Next()
-			close(done)
-		}()
-
-		select {
-		case recovered := <-panicCh:
-			panic(recovered)
-		case <-done:
-			return
-		case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded && !c.Writer.Written() {
 			c.AbortWithStatus(http.StatusGatewayTimeout)
 		}
 	}
