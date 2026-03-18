@@ -111,7 +111,7 @@ func AccessLog(configs ...AccessLogConfig) gin.HandlerFunc {
 			"route":      fullRoute(c),
 			"status":     status,
 			"latency_ms": time.Since(startedAt).Milliseconds(),
-			"client_ip":  c.ClientIP(),
+			"client_ip":  clientIPFromContext(c),
 			"host":       c.Request.Host,
 			"user_agent": c.Request.UserAgent(),
 			"referer":    c.Request.Referer(),

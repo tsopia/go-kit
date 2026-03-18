@@ -305,6 +305,17 @@ func CORSMiddleware() gin.HandlerFunc {
 	return httpmiddleware.CORS(httpmiddleware.CORSConfig{})
 }
 
+// RealIPMiddleware 可信客户端 IP 解析中间件
+// 默认配置：不信任任何代理，直接使用 RemoteAddr
+func RealIPMiddleware() gin.HandlerFunc {
+	return httpmiddleware.RealIP()
+}
+
+// RealIPMiddlewareWithConfig 使用自定义配置的 RealIP 中间件
+func RealIPMiddlewareWithConfig(config httpmiddleware.RealIPConfig) gin.HandlerFunc {
+	return httpmiddleware.RealIPWithConfig(config)
+}
+
 // GetTraceID 从 context 中获取 trace id
 func GetTraceID(c *gin.Context) string {
 	if traceID, exists := c.Get(utils.TraceIDKey); exists {
