@@ -173,11 +173,14 @@ srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
 
 如果你需要可复用的 Recovery、Timeout、TraceID、RequestID、AccessLog、Compression、ConcurrencyLimit、CORS 或安全响应头，优先使用 `httpserver/middleware` 子包，而不是继续向 `Server` 主类型增加能力。
 
+其中 `Timeout` 是协作式执行预算，不是 goroutine 强制终止器；它通过 `context.Context` 向下游传播 deadline。`ConcurrencyLimit` 统计的是仍在执行中的 handler 数量，因此和 `Timeout` 组合时，槽位释放以“请求执行结束”为准，而不是以“客户端已经收到 `504`”为准。
+
 ```go
 srv := httpserver.NewServer(cfg)
+srv.Use(middleware.Recovery())
 srv.Use(middleware.AccessLog())
 srv.Use(middleware.Compression())
-srv.Use(middleware.Recovery())
+srv.Use(middleware.ConcurrencyLimit(100))
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
 ```

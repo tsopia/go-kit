@@ -35,6 +35,22 @@ srv.Use(middleware.TraceID())
 - 保护下游数据库、RPC 或第三方接口
 - 希望用简单的闸门而不是排队来削峰
 
+## Timeout
+
+`Timeout` 用于给单次请求链路注入协作式执行预算。它的职责是向 `context.Context` 传播 deadline，而不是强制终止正在运行的 goroutine。
+
+这意味着：
+
+- handler、service、repository 和下游 client 需要协作感知 `ctx.Done()`
+- `Timeout` 不会主动杀掉 goroutine
+- 当 `Timeout` 与 `ConcurrencyLimit` 组合使用时，槽位释放以“请求真正执行结束”为准，而不是以“客户端已经收到 `504`”为准
+
+适合这些场景：
+
+- 给入口请求设置统一执行预算
+- 让下游数据库、RPC 或 HTTP client 复用同一个 deadline
+- 与 `ConcurrencyLimit` 配合时，明确“执行结束”才释放并发槽位
+
 ## AccessLog
 
 `AccessLog` 默认输出一条摘要访问日志，包含：
