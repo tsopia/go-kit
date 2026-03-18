@@ -17,6 +17,9 @@ func TestServerStateTransitions(t *testing.T) {
 		t.Fatalf("initial state = %q, want %q", got, StateNew)
 	}
 
+	// 必须经过 Starting 才能到 Ready
+	srv.setState(StateStarting)
+
 	srv.MarkReady()
 	if got := srv.State(); got != StateReady {
 		t.Fatalf("state after MarkReady = %q, want %q", got, StateReady)
@@ -85,19 +88,21 @@ func TestIsRunning(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		setupFunc     func(s *Server)
-		wantRunning   bool
+		name              string
+		setupFunc         func(s *Server)
+		wantRunning       bool
 		wantAfterShutdown bool
 	}{
 		{
 			name: "IsRunning_should_return_false_after_Shutdown",
 			// 使用 Setup 方式，避免实际启动服务器
 			setupFunc: func(s *Server) {
-				// 模拟服务器已启动的状态
+				// 模拟服务器已启动的状态：必须经过 Starting -> Ready
+				s.setState(StateStarting)
+				s.setState(StateReady)
 				s.server = &http.Server{Addr: ":8080"}
 			},
-			wantRunning:   true,
+			wantRunning:       true,
 			wantAfterShutdown: false,
 		},
 	}

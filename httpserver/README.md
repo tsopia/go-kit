@@ -506,9 +506,9 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 
 ### IsRunning() 语义
 
-当前实现：`IsRunning()` 只检查 `s.server != nil`，`Shutdown()` 后 server 未被置 nil，导致返回错误状态。
-
-预期行为：`Shutdown()` 后 `IsRunning()` 应返回 `false`。
+**已实现**：`IsRunning()` 基于 `State()` 判断：
+- `StateReady` 或 `StateDraining` 时返回 `true`
+- `Shutdown()` 后状态变为 `StateStopped`，`IsRunning()` 返回 `false`
 
 ### DrainTimeout 配置
 

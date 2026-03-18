@@ -201,7 +201,7 @@ func (s *Server) WaitForShutdown() error {
 // Shutdown 优雅关闭服务器
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.server == nil && s.healthServer == nil {
-		s.setState(StateStopped)
+		s.transitionTo(StateStopped)
 		return nil
 	}
 
@@ -211,26 +211,28 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		defer cancel()
 	}
 
-	s.setState(StateStopping)
+	s.transitionTo(StateStopping)
 
 	if s.healthServer != nil {
 		if err := s.healthServer.Shutdown(ctx); err != nil {
-			s.setState(StateFailed)
+			s.transitionTo(StateFailed)
 			return fmt.Errorf("shutdown health server: %w", err)
 		}
 	}
 
 	if s.server == nil {
-		s.setState(StateStopped)
+		s.transitionTo(StateStopped)
 		return nil
 	}
 
 	if err := s.server.Shutdown(ctx); err != nil {
-		s.setState(StateFailed)
+		s.transitionTo(StateFailed)
 		return fmt.Errorf("shutdown server: %w", err)
 	}
 
-	s.setState(StateStopped)
+	// 关闭成功后清理 server 引用
+	s.server = nil
+	s.transitionTo(StateStopped)
 	return nil
 }
 
@@ -243,8 +245,14 @@ func (s *Server) Addr() string {
 }
 
 // IsRunning 检查服务器是否正在运行
+// 基于 State() 判断：Ready 或 Draining 状态时返回 true
 func (s *Server) IsRunning() bool {
-	return s.server != nil
+	switch s.State() {
+	case StateReady, StateDraining:
+		return true
+	default:
+		return false
+	}
 }
 
 // 中间件函数（可选使用）

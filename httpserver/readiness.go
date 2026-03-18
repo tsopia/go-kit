@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +20,44 @@ const (
 	StateFailed   State = "failed"
 )
 
+// validTransitions 定义允许的状态转换
+var validTransitions = map[State][]State{
+	StateNew:      {StateStarting, StateStopped},
+	StateStarting: {StateReady, StateDraining, StateStopping, StateStopped, StateFailed},
+	StateReady:    {StateDraining, StateStopping, StateStopped, StateFailed},
+	StateDraining: {StateStopping, StateStopped, StateFailed},
+	StateStopping: {StateStopped, StateFailed},
+	StateStopped:  {},
+	StateFailed:   {StateStarting}, // 允许从失败重启
+}
+
+// canTransition 检查状态转换是否合法
+func canTransition(from, to State) bool {
+	validStates, ok := validTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, valid := range validStates {
+		if valid == to {
+			return true
+		}
+	}
+	return false
+}
+
+// transitionTo 尝试状态转换，如果不合法则 panic（内部使用）
+func (s *Server) transitionTo(state State) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	if !canTransition(s.state, state) {
+		// 内部使用 panic，因为非法状态转换是编程错误
+		panic(fmt.Sprintf("invalid state transition: %s -> %s", s.state, state))
+	}
+	s.state = state
+}
+
+// setState 直接设置状态（用于初始化或测试）
 func (s *Server) setState(state State) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
@@ -36,12 +75,12 @@ func (s *Server) State() State {
 
 // MarkReady 将服务器标记为可接流量。
 func (s *Server) MarkReady() {
-	s.setState(StateReady)
+	s.transitionTo(StateReady)
 }
 
 // MarkDraining 将服务器标记为排空中。
 func (s *Server) MarkDraining() {
-	s.setState(StateDraining)
+	s.transitionTo(StateDraining)
 }
 
 func (s *Server) registerProbeRoutes() {
