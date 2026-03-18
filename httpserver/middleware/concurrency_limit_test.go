@@ -126,6 +126,154 @@ func TestConcurrencyLimitRejectsWhenFull(t *testing.T) {
 	}
 }
 
+func TestConcurrencyLimitDefaultRejection(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+
+	engine := gin.New()
+	engine.Use(ConcurrencyLimit(1))
+	engine.GET("/block", func(c *gin.Context) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+
+		<-release
+		c.Status(http.StatusOK)
+	})
+	engine.GET("/probe", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	firstDone := make(chan struct{})
+	go func() {
+		firstRecorder := httptest.NewRecorder()
+		firstReq := httptest.NewRequest(http.MethodGet, "/block", nil)
+		engine.ServeHTTP(firstRecorder, firstReq)
+		close(firstDone)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not enter handler")
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(secondRecorder, secondReq)
+
+	if secondRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", secondRecorder.Code, http.StatusServiceUnavailable)
+	}
+
+	if secondRecorder.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty body", secondRecorder.Body.String())
+	}
+
+	close(release)
+
+	select {
+	case <-firstDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not finish")
+	}
+}
+
+func TestConcurrencyLimitCustomRejection(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+
+	engine := gin.New()
+	engine.Use(ConcurrencyLimitWithConfig(ConcurrencyLimitConfig{
+		Limit: 1,
+		OnRejected: func(c *gin.Context) {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "busy",
+			})
+		},
+	}))
+	engine.GET("/block", func(c *gin.Context) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+
+		<-release
+		c.Status(http.StatusOK)
+	})
+	engine.GET("/probe", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	firstDone := make(chan struct{})
+	go func() {
+		firstRecorder := httptest.NewRecorder()
+		firstReq := httptest.NewRequest(http.MethodGet, "/block", nil)
+		engine.ServeHTTP(firstRecorder, firstReq)
+		close(firstDone)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not enter handler")
+	}
+
+	secondRecorder := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(secondRecorder, secondReq)
+
+	if secondRecorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", secondRecorder.Code, http.StatusTooManyRequests)
+	}
+
+	if got := secondRecorder.Body.String(); got != "{\"error\":\"busy\"}" {
+		t.Fatalf("body = %q, want %q", got, "{\"error\":\"busy\"}")
+	}
+
+	close(release)
+
+	select {
+	case <-firstDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not finish")
+	}
+}
+
+func TestConcurrencyLimitPanicsOnInvalidLimit(t *testing.T) {
+	testCases := []struct {
+		name  string
+		limit int
+	}{
+		{name: "zero", limit: 0},
+		{name: "negative", limit: -1},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+
+			_ = ConcurrencyLimitWithConfig(ConcurrencyLimitConfig{
+				Limit: tc.limit,
+			})
+		})
+	}
+}
+
 func TestConcurrencyLimitReleasesSlotAfterCompletion(t *testing.T) {
 	t.Parallel()
 
