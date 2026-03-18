@@ -110,7 +110,7 @@ capabilities:
     dependencies: []
 
   - name: middleware
-    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、CORS、安全头等）
+    description: HTTP 中间件集合（Recovery、Timeout、TraceID、RequestID、AccessLog、CORS、安全头等）
     import: github.com/tsopia/go-kit/httpserver/middleware
     scenarios:
       - name: 挂载恢复中间件
@@ -122,6 +122,9 @@ capabilities:
       - name: 挂载安全响应头
         snippet: |
           srv.Use(middleware.SecurityHeaders())
+      - name: 挂载访问日志
+        snippet: |
+          srv.Use(middleware.AccessLog())
     dependencies: [httpserver]
 
   - name: httpserver-prometheus
