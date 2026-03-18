@@ -16,6 +16,31 @@
 //
 //	srv.POST("/login", httpserver.HandleJSON(login))
 //
+// 生命周期管理：
+//
+//	srv.Run()                              // 阻塞启动
+//	srv.Start()                            // 非阻塞启动
+//	srv.WaitForShutdown()                  // 等待信号并优雅关闭
+//
+// 服务器状态：
+//
+//	srv.State()      // 获取当前状态: new/starting/ready/draining/stopping/stopped/failed
+//	srv.IsRunning()  // 是否运行中 (ready 或 draining 状态)
+//	srv.HealthAddr() // 获取健康检查地址
+//
+// 优雅关闭配置：
+//
+//	srv := httpserver.NewServer(&httpserver.Config{
+//	    DrainTimeout:    5 * time.Second,  // 收到关闭信号后等待时间，让负载均衡器切走流量
+//	    ShutdownTimeout: 10 * time.Second, // http.Server.Shutdown 的超时时间
+//	})
+//
+// 自定义 http.Server 配置：
+//
+//	srv := httpserver.NewServer(cfg, httpserver.WithHTTPServerMutator(func(s *http.Server) {
+//	    s.MaxHeaderBytes = 1 << 20
+//	}))
+//
 // 通用中间件：
 //
 //	srv.Use(middleware.Recovery())

@@ -213,6 +213,9 @@ func TestReadinessDuringDraining(t *testing.T) {
 		t.Fatalf("initial state = %q, want %q", got, StateNew)
 	}
 
+	// 必须经过 Starting 才能到 Ready
+	srv.setState(StateStarting)
+
 	// 标记为 Ready
 	srv.MarkReady()
 	if got := srv.State(); got != StateReady {
