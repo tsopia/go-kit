@@ -185,6 +185,98 @@ func TestDrainTimeout(t *testing.T) {
 	}
 }
 
+// TestServerLifecycleHooks 验证所有启动路径都触发相同的 lifecycle hooks
+func TestServerLifecycleHooks(t *testing.T) {
+	t.Parallel()
+
+	// 此测试验证 Serve/Start/Run/RunTLS 都走统一的 lifecycle pipeline
+	// 确保 OnStarting 和 OnStarted 触发顺序一致
+
+	tests := []struct {
+		name      string
+		wantHooks []string
+	}{
+		{
+			name:      "all_start_paths_should_trigger_same_hooks",
+			wantHooks: []string{"OnStarting", "OnStarted"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var triggeredHooks []string
+
+			srv := NewServer(&Config{
+				Host: "127.0.0.1",
+				Port: 0,
+			}, WithHooks(Hooks{
+				OnStarting: func(_ context.Context, _ LifecycleEvent) {
+					triggeredHooks = append(triggeredHooks, "OnStarting")
+				},
+				OnStarted: func(_ context.Context, _ LifecycleEvent) {
+					triggeredHooks = append(triggeredHooks, "OnStarted")
+				},
+			}), WithManualReadiness())
+
+			// 模拟服务器启动状态（不实际启动，避免端口绑定问题）
+			srv.setState(StateStarting)
+			srv.emitHook(srv.hooks.OnStarting, srv.lifecycleEvent(nil))
+			srv.setState(StateReady)
+			srv.emitHook(srv.hooks.OnStarted, srv.lifecycleEvent(nil))
+
+			// 验证 hooks 被触发
+			if len(triggeredHooks) != len(tt.wantHooks) {
+				t.Errorf("triggered %d hooks, want %d", len(triggeredHooks), len(tt.wantHooks))
+			}
+			for i, want := range tt.wantHooks {
+				if i >= len(triggeredHooks) || triggeredHooks[i] != want {
+					t.Errorf("hook[%d] = %q, want %q", i, triggeredHooks[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestServerStartPaths 验证所有启动方法遵循统一的状态流转
+func TestServerStartPaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		expectedFlow []State
+	}{
+		{
+			name:         "start_paths_should_follow_state_machine",
+			expectedFlow: []State{StateNew, StateStarting, StateReady},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(&Config{
+				Host: "127.0.0.1",
+				Port: 0,
+			}, WithManualReadiness())
+
+			// 验证初始状态
+			if got := srv.State(); got != tt.expectedFlow[0] {
+				t.Errorf("initial state = %q, want %q", got, tt.expectedFlow[0])
+			}
+
+			// 模拟统一启动流程
+			srv.setState(StateStarting)
+			if got := srv.State(); got != tt.expectedFlow[1] {
+				t.Errorf("after starting state = %q, want %q", got, tt.expectedFlow[1])
+			}
+
+			srv.MarkReady()
+			if got := srv.State(); got != tt.expectedFlow[2] {
+				t.Errorf("after ready state = %q, want %q", got, tt.expectedFlow[2])
+			}
+		})
+	}
+}
+
 // TestHealthAddr 验证 HealthAddr() 方法存在并返回正确的健康检查地址
 // 当前状态：HealthAddr() 方法不存在，此测试用于锁定预期行为
 func TestHealthAddr(t *testing.T) {

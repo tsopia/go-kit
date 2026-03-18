@@ -137,141 +137,22 @@ func (s *Server) Serve(ln net.Listener) error {
 		s.reportServeError(err)
 		return err
 	}
-	s.setState(StateStarting)
-
-	s.prepareMainServer(ln)
-	healthLn, err := s.prepareHealthServer()
-	if err != nil {
-		s.reportServeError(err)
-		return err
-	}
-	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
-	if healthLn != nil {
-		go func() {
-			_ = s.serveHealthListener(healthLn)
-		}()
-	}
-	if !s.manualReady {
-		s.MarkReady()
-	}
-	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
-
-	return s.serveMainListener(ln)
+	return s.startInternal(ln, true, s.serveMainListener)
 }
 
 // Start 启动服务器（非阻塞）
 func (s *Server) Start() error {
-	if err := s.validateConfig(); err != nil {
-		s.reportServeError(err)
-		return err
-	}
-	s.setState(StateStarting)
-
-	ln, err := net.Listen("tcp", s.configuredAddr())
-	if err != nil {
-		s.reportServeError(err)
-		return err
-	}
-
-	s.prepareMainServer(ln)
-	healthLn, err := s.prepareHealthServer()
-	if err != nil {
-		_ = ln.Close()
-		s.reportServeError(err)
-		return err
-	}
-	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
-
-	go func() {
-		_ = s.serveMainListener(ln)
-	}()
-	if healthLn != nil {
-		go func() {
-			_ = s.serveHealthListener(healthLn)
-		}()
-	}
-
-	if !s.manualReady {
-		s.MarkReady()
-	}
-	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
-	return nil
+	return s.startWithNewListener(false)
 }
 
 // Run 启动服务器（阻塞）
 func (s *Server) Run() error {
-	if err := s.validateConfig(); err != nil {
-		s.reportServeError(err)
-		return err
-	}
-	s.setState(StateStarting)
-
-	ln, err := net.Listen("tcp", s.configuredAddr())
-	if err != nil {
-		s.reportServeError(err)
-		return err
-	}
-
-	s.prepareMainServer(ln)
-	healthLn, err := s.prepareHealthServer()
-	if err != nil {
-		_ = ln.Close()
-		s.reportServeError(err)
-		return err
-	}
-	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
-	if healthLn != nil {
-		go func() {
-			_ = s.serveHealthListener(healthLn)
-		}()
-	}
-	if !s.manualReady {
-		s.MarkReady()
-	}
-	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
-
-	return s.serveMainListener(ln)
+	return s.startWithNewListener(true)
 }
 
 // RunTLS 启动HTTPS服务器（阻塞）
 func (s *Server) RunTLS(certFile, keyFile string) error {
-	if err := s.validateConfig(); err != nil {
-		s.reportServeError(err)
-		return err
-	}
-	s.setState(StateStarting)
-
-	ln, err := net.Listen("tcp", s.configuredAddr())
-	if err != nil {
-		s.reportServeError(err)
-		return err
-	}
-
-	s.prepareMainServer(ln)
-	healthLn, err := s.prepareHealthServer()
-	if err != nil {
-		_ = ln.Close()
-		s.reportServeError(err)
-		return err
-	}
-	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
-	if healthLn != nil {
-		go func() {
-			_ = s.serveHealthListener(healthLn)
-		}()
-	}
-	if !s.manualReady {
-		s.MarkReady()
-	}
-	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
-
-	err = s.server.ServeTLS(ln, certFile, keyFile)
-	if err != nil && err != http.ErrServerClosed {
-		s.reportServeError(err)
-		return err
-	}
-
-	return nil
+	return s.startWithNewListenerTLS(certFile, keyFile)
 }
 
 // RunWithGracefulShutdown 启动服务器并自动处理优雅关闭（阻塞）

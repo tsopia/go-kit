@@ -79,6 +79,85 @@ func (s *Server) configuredAddr() string {
 	return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 }
 
+// startInternal 是统一启动入口，所有公开启动方法最终都走这里
+// isBlocking: true 表示阻塞直到服务器关闭，false 表示非阻塞启动
+// serveFn: 实际的服务启动函数，可以是 s.serveMainListener 或 serveTLS 等
+func (s *Server) startInternal(ln net.Listener, isBlocking bool, serveFn func(net.Listener) error) error {
+	s.setState(StateStarting)
+
+	s.prepareMainServer(ln)
+	healthLn, err := s.prepareHealthServer()
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	s.emitHook(s.hooks.OnStarting, s.lifecycleEvent(nil))
+
+	// 启动健康检查服务器（如果有独立端口）
+	if healthLn != nil {
+		go func() {
+			_ = s.serveHealthListener(healthLn)
+		}()
+	}
+
+	// 设置就绪状态
+	if !s.manualReady {
+		s.MarkReady()
+	}
+
+	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))
+
+	// 阻塞或非阻塞服务
+	if isBlocking {
+		return serveFn(ln)
+	}
+
+	go func() {
+		_ = serveFn(ln)
+	}()
+	return nil
+}
+
+// startWithNewListener 创建新 listener 并启动
+func (s *Server) startWithNewListener(isBlocking bool) error {
+	if err := s.validateConfig(); err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	return s.startInternal(ln, isBlocking, s.serveMainListener)
+}
+
+// startWithNewListenerTLS 创建新 listener 并用 TLS 启动
+func (s *Server) startWithNewListenerTLS(certFile, keyFile string) error {
+	if err := s.validateConfig(); err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	ln, err := net.Listen("tcp", s.configuredAddr())
+	if err != nil {
+		s.reportServeError(err)
+		return err
+	}
+
+	return s.startInternal(ln, true, func(l net.Listener) error {
+		err := s.server.ServeTLS(l, certFile, keyFile)
+		if err != nil && err != http.ErrServerClosed {
+			s.reportServeError(err)
+			return err
+		}
+		return nil
+	})
+}
+
 func (s *Server) prepareMainServer(ln net.Listener) {
 	s.server = s.buildHTTPServer(ln.Addr().String(), s.engine)
 }
