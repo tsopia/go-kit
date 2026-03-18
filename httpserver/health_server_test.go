@@ -33,7 +33,9 @@ func TestReadinessAndLivenessEndpoints(t *testing.T) {
 		{
 			name: "draining server becomes unready",
 			action: func(s *Server) {
-				s.MarkDraining()
+				if err := s.MarkDraining(); err != nil {
+					t.Fatalf("MarkDraining(): %v", err)
+				}
 			},
 			wantReadyStatus: http.StatusServiceUnavailable,
 			wantLiveStatus:  http.StatusOK,

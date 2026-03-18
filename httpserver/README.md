@@ -263,7 +263,9 @@ srv := httpserver.NewServer(&httpserver.Config{
 - `ReadinessPath`，默认 `/readyz`
 - `LivenessPath`，默认 `/livez`
 
-如果你需要在预热完成后再接流量，可以通过 `httpserver.WithManualReadiness()` 关闭自动 ready，然后在合适时机调用 `srv.MarkReady()`。
+如果你需要自定义 `HealthCheckPath`，应优先在 `Config` 中传入，或在健康检查路由尚未注册前调用 `SetHealthCheckPath(...)`。一旦 health/readiness/liveness 路由已经注册，`SetHealthCheckPath(...)` 会返回错误，避免配置值与真实路由脱节。
+
+如果你需要在预热完成后再接流量，可以通过 `httpserver.WithManualReadiness()` 关闭自动 ready，然后在合适时机调用 `srv.MarkReady()`。`MarkReady()` / `MarkDraining()` 现在会在非法状态迁移时返回 `error`，而不是 panic。
 
 ## 模块化路由
 

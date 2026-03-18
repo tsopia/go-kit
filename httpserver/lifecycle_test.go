@@ -2,11 +2,38 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 )
+
+type stubListener struct {
+	addr net.Addr
+}
+
+func (l *stubListener) Accept() (net.Conn, error) {
+	return nil, errors.New("accept not implemented")
+}
+
+func (l *stubListener) Close() error {
+	return nil
+}
+
+func (l *stubListener) Addr() net.Addr {
+	return l.addr
+}
+
+type stubAddr string
+
+func (a stubAddr) Network() string {
+	return "tcp"
+}
+
+func (a stubAddr) String() string {
+	return string(a)
+}
 
 func TestServerStateTransitions(t *testing.T) {
 	t.Parallel()
@@ -20,14 +47,73 @@ func TestServerStateTransitions(t *testing.T) {
 	// 必须经过 Starting 才能到 Ready
 	srv.setState(StateStarting)
 
-	srv.MarkReady()
+	if err := srv.MarkReady(); err != nil {
+		t.Fatalf("MarkReady(): %v", err)
+	}
 	if got := srv.State(); got != StateReady {
 		t.Fatalf("state after MarkReady = %q, want %q", got, StateReady)
 	}
 
-	srv.MarkDraining()
+	if err := srv.MarkDraining(); err != nil {
+		t.Fatalf("MarkDraining(): %v", err)
+	}
 	if got := srv.State(); got != StateDraining {
 		t.Fatalf("state after MarkDraining = %q, want %q", got, StateDraining)
+	}
+}
+
+func TestStateTransitionAPIs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		initial   State
+		call      func(*Server) error
+		wantState State
+		wantErr   bool
+	}{
+		{
+			name:      "mark ready from new returns error",
+			initial:   StateNew,
+			call:      func(s *Server) error { return s.MarkReady() },
+			wantState: StateNew,
+			wantErr:   true,
+		},
+		{
+			name:      "mark ready from starting succeeds",
+			initial:   StateStarting,
+			call:      func(s *Server) error { return s.MarkReady() },
+			wantState: StateReady,
+		},
+		{
+			name:      "mark draining from ready succeeds",
+			initial:   StateReady,
+			call:      func(s *Server) error { return s.MarkDraining() },
+			wantState: StateDraining,
+		},
+		{
+			name:      "mark draining from stopped returns error",
+			initial:   StateStopped,
+			call:      func(s *Server) error { return s.MarkDraining() },
+			wantState: StateStopped,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(nil, WithManualReadiness())
+			srv.setState(tt.initial)
+
+			err := tt.call(srv)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("call error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if got := srv.State(); got != tt.wantState {
+				t.Fatalf("State() = %q, want %q", got, tt.wantState)
+			}
+		})
 	}
 }
 
@@ -55,6 +141,45 @@ func TestServerStartReturnsListenError(t *testing.T) {
 	}
 }
 
+func TestReportServeErrorTransitionsToFailed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		initial   State
+		wantState State
+	}{
+		{
+			name:      "starting becomes failed",
+			initial:   StateStarting,
+			wantState: StateFailed,
+		},
+		{
+			name:      "ready becomes failed",
+			initial:   StateReady,
+			wantState: StateFailed,
+		},
+		{
+			name:      "stopped stays stopped",
+			initial:   StateStopped,
+			wantState: StateStopped,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(nil, WithManualReadiness())
+			srv.setState(tt.initial)
+
+			srv.reportServeError(errors.New("boom"))
+
+			if got := srv.State(); got != tt.wantState {
+				t.Fatalf("State() = %q, want %q", got, tt.wantState)
+			}
+		})
+	}
+}
+
 func TestServerServeReportsErrorViaHook(t *testing.T) {
 	t.Parallel()
 
@@ -79,6 +204,64 @@ func TestServerServeReportsErrorViaHook(t *testing.T) {
 	}
 	if gotErr == nil {
 		t.Fatal("expected hook to observe serve error")
+	}
+}
+
+func TestStartInternalValidatesStartState(t *testing.T) {
+	t.Parallel()
+
+	listener := &stubListener{addr: stubAddr("127.0.0.1:8080")}
+
+	tests := []struct {
+		name       string
+		initial    State
+		setup      func(*Server)
+		wantErr    bool
+		wantCalled bool
+		wantState  State
+	}{
+		{
+			name:       "cannot start from ready",
+			initial:    StateReady,
+			wantErr:    true,
+			wantCalled: false,
+			wantState:  StateReady,
+		},
+		{
+			name:    "failed can restart even with stale server reference",
+			initial: StateFailed,
+			setup: func(s *Server) {
+				s.server = &http.Server{Addr: "stale"}
+			},
+			wantErr:    false,
+			wantCalled: true,
+			wantState:  StateReady,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(nil)
+			srv.setState(tt.initial)
+			if tt.setup != nil {
+				tt.setup(srv)
+			}
+
+			called := false
+			err := srv.startInternal(listener, true, func(net.Listener) error {
+				called = true
+				return nil
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("startInternal() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("serveFn called = %v, want %v", called, tt.wantCalled)
+			}
+			if got := srv.State(); got != tt.wantState {
+				t.Fatalf("State() = %q, want %q", got, tt.wantState)
+			}
+		})
 	}
 }
 
@@ -173,7 +356,9 @@ func TestDrainTimeout(t *testing.T) {
 			start := time.Now()
 
 			// 模拟 MarkDraining
-			srv.MarkDraining()
+			if err := srv.MarkDraining(); err != nil {
+				t.Fatalf("MarkDraining(): %v", err)
+			}
 
 			// 验证状态是 Draining
 			if got := srv.State(); got != StateDraining {
@@ -217,13 +402,17 @@ func TestReadinessDuringDraining(t *testing.T) {
 	srv.setState(StateStarting)
 
 	// 标记为 Ready
-	srv.MarkReady()
+	if err := srv.MarkReady(); err != nil {
+		t.Fatalf("MarkReady(): %v", err)
+	}
 	if got := srv.State(); got != StateReady {
 		t.Errorf("state after MarkReady = %q, want %q", got, StateReady)
 	}
 
 	// 标记为 Draining
-	srv.MarkDraining()
+	if err := srv.MarkDraining(); err != nil {
+		t.Fatalf("MarkDraining(): %v", err)
+	}
 	if got := srv.State(); got != StateDraining {
 		t.Errorf("state after MarkDraining = %q, want %q", got, StateDraining)
 	}
@@ -318,7 +507,9 @@ func TestServerStartPaths(t *testing.T) {
 				t.Errorf("after starting state = %q, want %q", got, tt.expectedFlow[1])
 			}
 
-			srv.MarkReady()
+			if err := srv.MarkReady(); err != nil {
+				t.Fatalf("MarkReady(): %v", err)
+			}
 			if got := srv.State(); got != tt.expectedFlow[2] {
 				t.Errorf("after ready state = %q, want %q", got, tt.expectedFlow[2])
 			}
@@ -400,4 +591,62 @@ func TestHTTPServerMutator(t *testing.T) {
 	// 但我们验证了 serverMutators 已经被注册
 
 	t.Log("HTTPServerMutator registered successfully")
+}
+
+func TestHealthCheckPathMutation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		config         *Config
+		beforeSetPath  string
+		enableAfter    bool
+		wantErr        bool
+		wantPath       string
+		wantRegistered bool
+	}{
+		{
+			name:           "reject mutation after routes registered",
+			config:         nil,
+			beforeSetPath:  "/custom-health",
+			wantErr:        true,
+			wantPath:       "/health",
+			wantRegistered: true,
+		},
+		{
+			name: "allow mutation before enabling health check",
+			config: &Config{
+				Host:              "127.0.0.1",
+				Port:              8080,
+				EnableHealthCheck: false,
+			},
+			beforeSetPath:  "/custom-health",
+			enableAfter:    true,
+			wantPath:       "/custom-health",
+			wantRegistered: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := NewServer(tt.config)
+
+			err := srv.SetHealthCheckPath(tt.beforeSetPath)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("SetHealthCheckPath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.enableAfter {
+				srv.EnableHealthCheck()
+			}
+
+			if got := srv.GetHealthCheckPath(); got != tt.wantPath {
+				t.Fatalf("GetHealthCheckPath() = %q, want %q", got, tt.wantPath)
+			}
+
+			if srv.healthRouteRegistered != tt.wantRegistered {
+				t.Fatalf("healthRouteRegistered = %v, want %v", srv.healthRouteRegistered, tt.wantRegistered)
+			}
+		})
+	}
 }

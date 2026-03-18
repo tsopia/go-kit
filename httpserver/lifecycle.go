@@ -66,6 +66,8 @@ func (s *Server) reportServeError(err error) {
 		return
 	}
 
+	_ = s.tryTransitionTo(StateFailed)
+
 	event := s.lifecycleEvent(err)
 	s.emitHook(s.hooks.OnServeError, event)
 
@@ -79,13 +81,32 @@ func (s *Server) configuredAddr() string {
 	return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
 }
 
+func (s *Server) prepareToStart() error {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	if s.state != StateNew && s.state != StateFailed {
+		return fmt.Errorf("cannot start server from state %s", s.state)
+	}
+
+	// 允许 failed -> starting 重启，但要先清理旧的运行时引用。
+	if s.state == StateFailed {
+		s.server = nil
+		s.healthServer = nil
+		s.healthAddr = ""
+	}
+
+	s.state = StateStarting
+	return nil
+}
+
 // startInternal 是统一启动入口，所有公开启动方法最终都走这里
 // isBlocking: true 表示阻塞直到服务器关闭，false 表示非阻塞启动
 // serveFn: 实际的服务启动函数，可以是 s.serveMainListener 或 serveTLS 等
 func (s *Server) startInternal(ln net.Listener, isBlocking bool, serveFn func(net.Listener) error) error {
-	// 从 New 或 Failed 状态转换到 Starting
-	// 使用 setState 而不是 transitionTo 来允许从任意初始状态启动
-	s.setState(StateStarting)
+	if err := s.prepareToStart(); err != nil {
+		return err
+	}
 
 	s.prepareMainServer(ln)
 	healthLn, err := s.prepareHealthServer()
@@ -105,7 +126,10 @@ func (s *Server) startInternal(ln net.Listener, isBlocking bool, serveFn func(ne
 
 	// 设置就绪状态
 	if !s.manualReady {
-		s.MarkReady()
+		if err := s.MarkReady(); err != nil {
+			s.reportServeError(err)
+			return err
+		}
 	}
 
 	s.emitHook(s.hooks.OnStarted, s.lifecycleEvent(nil))

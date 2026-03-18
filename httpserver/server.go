@@ -178,7 +178,9 @@ func (s *Server) WaitForShutdown() error {
 	<-quit
 
 	// 先标记为 draining，让 readiness 立即返回 503
-	s.MarkDraining()
+	if err := s.MarkDraining(); err != nil {
+		return fmt.Errorf("mark draining: %w", err)
+	}
 	s.emitHook(s.hooks.OnShuttingDown, s.lifecycleEvent(nil))
 
 	// 等待 DrainTimeout，让负载均衡器有时间将流量切走
@@ -202,7 +204,12 @@ func (s *Server) WaitForShutdown() error {
 // Shutdown 优雅关闭服务器
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.server == nil && s.healthServer == nil {
-		s.transitionTo(StateStopped)
+		if s.State() == StateStopped {
+			return nil
+		}
+		if err := s.tryTransitionTo(StateStopped); err != nil {
+			return fmt.Errorf("transition to stopped: %w", err)
+		}
 		return nil
 	}
 
@@ -212,28 +219,36 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		defer cancel()
 	}
 
-	s.transitionTo(StateStopping)
+	if err := s.tryTransitionTo(StateStopping); err != nil {
+		return fmt.Errorf("transition to stopping: %w", err)
+	}
 
 	if s.healthServer != nil {
 		if err := s.healthServer.Shutdown(ctx); err != nil {
-			s.transitionTo(StateFailed)
+			_ = s.tryTransitionTo(StateFailed)
 			return fmt.Errorf("shutdown health server: %w", err)
 		}
+		s.healthServer = nil
+		s.healthAddr = ""
 	}
 
 	if s.server == nil {
-		s.transitionTo(StateStopped)
+		if err := s.tryTransitionTo(StateStopped); err != nil {
+			return fmt.Errorf("transition to stopped: %w", err)
+		}
 		return nil
 	}
 
 	if err := s.server.Shutdown(ctx); err != nil {
-		s.transitionTo(StateFailed)
+		_ = s.tryTransitionTo(StateFailed)
 		return fmt.Errorf("shutdown server: %w", err)
 	}
 
 	// 关闭成功后清理 server 引用
 	s.server = nil
-	s.transitionTo(StateStopped)
+	if err := s.tryTransitionTo(StateStopped); err != nil {
+		return fmt.Errorf("transition to stopped: %w", err)
+	}
 	return nil
 }
 
@@ -417,24 +432,30 @@ func HealthHandlerWithManager(manager *HealthCheckManager) gin.HandlerFunc {
 	}
 }
 
-// EnableHealthCheck 启用健康检查
+// EnableHealthCheck 启用健康检查并注册默认健康检查路由。
 func (s *Server) EnableHealthCheck() {
-	if s.config.EnableHealthCheck {
-		s.healthHandler = DefaultHealthHandler()
-		s.registerHealthRoute()
-	}
+	s.config.EnableHealthCheck = true
+	s.healthHandler = DefaultHealthHandler()
+	s.registerHealthRoute()
+	s.registerProbeRoutes()
 }
 
-// EnableHealthCheckWithManager 启用带管理器的健康检查
+// EnableHealthCheckWithManager 启用带管理器的健康检查并注册探针路由。
 func (s *Server) EnableHealthCheckWithManager(manager *HealthCheckManager) {
 	s.config.EnableHealthCheck = true
 	s.healthHandler = HealthHandlerWithManager(manager)
 	s.registerHealthRoute()
+	s.registerProbeRoutes()
 }
 
-// SetHealthCheckPath 设置健康检查路径
-func (s *Server) SetHealthCheckPath(path string) {
+// SetHealthCheckPath 设置健康检查路径。
+// 必须在健康检查路由注册或服务器启动前调用，否则返回错误。
+func (s *Server) SetHealthCheckPath(path string) error {
+	if s.healthRouteRegistered || s.readinessRouteRegistered || s.livenessRouteRegistered || s.server != nil || s.healthServer != nil {
+		return fmt.Errorf("health check path must be configured before route registration or startup")
+	}
 	s.config.HealthCheckPath = path
+	return nil
 }
 
 // GetHealthCheckPath 获取健康检查路径

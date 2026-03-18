@@ -28,7 +28,7 @@ var validTransitions = map[State][]State{
 	StateDraining: {StateStopping, StateStopped, StateFailed},
 	StateStopping: {StateStopped, StateFailed},
 	StateStopped:  {},
-	StateFailed:   {StateStarting}, // 允许从失败重启
+	StateFailed:   {StateStarting, StateStopping, StateStopped}, // 允许从失败重启或进入清理流程
 }
 
 // canTransition 检查状态转换是否合法
@@ -45,16 +45,16 @@ func canTransition(from, to State) bool {
 	return false
 }
 
-// transitionTo 尝试状态转换，如果不合法则 panic（内部使用）
-func (s *Server) transitionTo(state State) {
+// tryTransitionTo 尝试状态转换，失败时返回错误。
+func (s *Server) tryTransitionTo(state State) error {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 
 	if !canTransition(s.state, state) {
-		// 内部使用 panic，因为非法状态转换是编程错误
-		panic(fmt.Sprintf("invalid state transition: %s -> %s", s.state, state))
+		return fmt.Errorf("invalid state transition: %s -> %s", s.state, state)
 	}
 	s.state = state
+	return nil
 }
 
 // setState 直接设置状态（用于初始化或测试）
@@ -74,13 +74,13 @@ func (s *Server) State() State {
 }
 
 // MarkReady 将服务器标记为可接流量。
-func (s *Server) MarkReady() {
-	s.transitionTo(StateReady)
+func (s *Server) MarkReady() error {
+	return s.tryTransitionTo(StateReady)
 }
 
 // MarkDraining 将服务器标记为排空中。
-func (s *Server) MarkDraining() {
-	s.transitionTo(StateDraining)
+func (s *Server) MarkDraining() error {
+	return s.tryTransitionTo(StateDraining)
 }
 
 func (s *Server) registerProbeRoutes() {

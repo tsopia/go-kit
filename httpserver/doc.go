@@ -27,6 +27,9 @@
 //	srv.State()      // 获取当前状态: new/starting/ready/draining/stopping/stopped/failed
 //	srv.IsRunning()  // 是否运行中 (ready 或 draining 状态)
 //	srv.HealthAddr() // 获取健康检查地址
+//	if err := srv.MarkReady(); err != nil {
+//	    // 非法状态迁移会返回错误，而不是 panic
+//	}
 //
 // 优雅关闭配置：
 //
