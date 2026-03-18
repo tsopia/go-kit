@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -413,6 +414,71 @@ func TestCompressionFlushBypassesCompression(t *testing.T) {
 	}
 }
 
+func TestCompressionPreservesFirstStatusCode(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	testCases := []struct {
+		name    string
+		handler func(*gin.Context) error
+	}{
+		{
+			name: "write body before writeheader keeps 200",
+			handler: func(c *gin.Context) error {
+				c.Header("Content-Type", "application/json")
+				if _, err := c.Writer.Write([]byte(strings.Repeat(`{"x":1}`, 32))); err != nil {
+					return err
+				}
+				c.Writer.WriteHeader(http.StatusInternalServerError)
+				return nil
+			},
+		},
+		{
+			name: "first writeheader wins",
+			handler: func(c *gin.Context) error {
+				c.Header("Content-Type", "application/json")
+				c.Writer.WriteHeader(http.StatusCreated)
+				c.Writer.WriteHeader(http.StatusInternalServerError)
+				if _, err := c.Writer.Write([]byte(strings.Repeat(`{"x":1}`, 32))); err != nil {
+					return err
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			engine := gin.New()
+			engine.Use(Compression(CompressionConfig{
+				MinSizeBytes: 1,
+			}))
+			engine.GET("/data", func(c *gin.Context) {
+				if err := tc.handler(c); err != nil {
+					t.Fatalf("handler error: %v", err)
+				}
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/data", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			if tc.name == "write body before writeheader keeps 200" && w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+			}
+			if tc.name == "first writeheader wins" && w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+			}
+		})
+	}
+}
+
 func TestCompressionSetsVaryHeaderWhenSkipping(t *testing.T) {
 	t.Parallel()
 
@@ -460,6 +526,34 @@ func TestCompressionSetsVaryHeaderWhenSkipping(t *testing.T) {
 				t.Fatalf("Vary = %q, want %q", got, "Accept-Encoding")
 			}
 		})
+	}
+}
+
+func TestCompressionDoesNotTreatInlineDispositionAsAttachment(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(Compression(CompressionConfig{
+		MinSizeBytes: 1,
+	}))
+	engine.GET("/inline", func(c *gin.Context) {
+		disposition := mime.FormatMediaType("inline", map[string]string{
+			"filename": "attachment-guide.json",
+		})
+		c.Header("Content-Disposition", disposition)
+		c.Data(http.StatusOK, "application/json", []byte(strings.Repeat(`{"x":1}`, 32)))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/inline", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want %q", got, "gzip")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
+	"mime"
 	"net"
 	"net/http"
 	"strconv"
@@ -100,6 +101,9 @@ func newCompressionResponseWriter(writer gin.ResponseWriter) *compressionRespons
 func (w *compressionResponseWriter) WriteHeader(code int) {
 	if w.bypass {
 		w.ResponseWriter.WriteHeader(code)
+		return
+	}
+	if w.status != 0 {
 		return
 	}
 	w.status = code
@@ -355,7 +359,15 @@ func acceptsEncoding(header string, want string) bool {
 }
 
 func isAttachmentResponse(headers http.Header) bool {
-	return strings.Contains(strings.ToLower(headers.Get("Content-Disposition")), "attachment")
+	disposition := headers.Get("Content-Disposition")
+	if disposition == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(disposition)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(mediaType, "attachment")
 }
 
 func appendVaryHeader(headers http.Header, value string) {
