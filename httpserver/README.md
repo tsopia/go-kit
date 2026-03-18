@@ -500,6 +500,28 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 - 日志、指标、审计统一通过 `Hooks` 接入
 - Swagger 建议通过 `httpserver/swagger` 注册在公共路由组
 
+## 设计约束与已知问题
+
+以下问题将在 Server Core 重构中解决：
+
+### IsRunning() 语义
+
+当前实现：`IsRunning()` 只检查 `s.server != nil`，`Shutdown()` 后 server 未被置 nil，导致返回错误状态。
+
+预期行为：`Shutdown()` 后 `IsRunning()` 应返回 `false`。
+
+### DrainTimeout 配置
+
+当前实现：`DrainTimeout` 只是配置项，未被 `Shutdown()` 流程使用。
+
+预期行为：`WaitForShutdown()` 收到信号后应先 `MarkDraining()`，等待 `DrainTimeout` 后才进入 `Shutdown()`。
+
+### HealthAddr() 方法
+
+当前实现：`HealthAddr()` 方法不存在。
+
+预期行为：提供 `HealthAddr() string` 方法返回健康检查地址（共享端口或独立端口）。
+
 ## 更多说明
 
 更完整的设计说明与用法参考见：
