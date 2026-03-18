@@ -31,6 +31,10 @@ func ConcurrencyLimitWithConfig(config ConcurrencyLimitConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		select {
 		case sem <- struct{}{}:
+			defer func() {
+				<-sem
+			}()
+			c.Next()
 		default:
 			c.Abort()
 			if config.OnRejected != nil {
@@ -41,32 +45,6 @@ func ConcurrencyLimitWithConfig(config ConcurrencyLimitConfig) gin.HandlerFunc {
 			}
 
 			c.AbortWithStatus(http.StatusServiceUnavailable)
-			return
-		}
-
-		defer func() {
-			<-sem
-		}()
-
-		done := make(chan struct{})
-		panicCh := make(chan any, 1)
-
-		go func() {
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					panicCh <- recovered
-				}
-			}()
-
-			c.Next()
-			close(done)
-		}()
-
-		select {
-		case recovered := <-panicCh:
-			panic(recovered)
-		case <-done:
-		case <-c.Request.Context().Done():
 		}
 	}
 }

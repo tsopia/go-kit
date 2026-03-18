@@ -514,8 +514,9 @@ func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
 	finished := make(chan struct{})
 
 	engine := gin.New()
-	engine.Use(Timeout(5 * time.Millisecond))
+	engine.Use(Recovery())
 	engine.Use(ConcurrencyLimit(1))
+	engine.Use(Timeout(5 * time.Millisecond))
 	engine.GET("/slow", func(c *gin.Context) {
 		select {
 		case entered <- struct{}{}:
@@ -523,7 +524,6 @@ func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
 		}
 
 		<-release
-		c.Status(http.StatusNoContent)
 		close(finished)
 	})
 	engine.GET("/probe", func(c *gin.Context) {
