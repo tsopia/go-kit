@@ -9,7 +9,7 @@ import (
 // ConcurrencyLimitConfig 描述并发闸门配置。
 type ConcurrencyLimitConfig struct {
 	Limit int
-	// OnRejected 允许业务自定义限流拒绝响应。
+	// OnRejected 允许业务自定义限流拒绝响应；如果回调未写出响应，则回退到默认 503。
 	OnRejected func(*gin.Context)
 }
 
@@ -39,7 +39,9 @@ func ConcurrencyLimitWithConfig(config ConcurrencyLimitConfig) gin.HandlerFunc {
 			c.Abort()
 			if config.OnRejected != nil {
 				config.OnRejected(c)
-				return
+				if c.Writer.Written() {
+					return
+				}
 			}
 
 			c.AbortWithStatus(http.StatusServiceUnavailable)
