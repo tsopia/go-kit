@@ -510,21 +510,28 @@ func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	entered := make(chan struct{}, 1)
-	release := make(chan struct{})
-	finished := make(chan struct{})
+	contextDone := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	allowReturn := make(chan struct{})
+	returned := make(chan struct{})
 
 	engine := gin.New()
 	engine.Use(Recovery())
 	engine.Use(ConcurrencyLimit(1))
 	engine.Use(Timeout(5 * time.Millisecond))
 	engine.GET("/slow", func(c *gin.Context) {
+		defer close(returned)
+
 		select {
 		case entered <- struct{}{}:
 		default:
 		}
 
-		<-release
-		close(finished)
+		<-c.Request.Context().Done()
+		close(contextDone)
+
+		close(cleanupDone)
+		<-allowReturn
 	})
 	engine.GET("/probe", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
@@ -545,6 +552,32 @@ func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
 	}
 
 	select {
+	case <-contextDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not observe context cancellation")
+	}
+
+	select {
+	case <-cleanupDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first request did not finish cleanup")
+	}
+
+	secondDuringCleanupRecorder := httptest.NewRecorder()
+	secondDuringCleanupReq := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	engine.ServeHTTP(secondDuringCleanupRecorder, secondDuringCleanupReq)
+
+	if secondDuringCleanupRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second status = %d, want %d", secondDuringCleanupRecorder.Code, http.StatusServiceUnavailable)
+	}
+
+	if secondDuringCleanupRecorder.Body.Len() != 0 {
+		t.Fatalf("second body = %q, want empty body", secondDuringCleanupRecorder.Body.String())
+	}
+
+	close(allowReturn)
+
+	select {
 	case <-firstDone:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("first request did not finish")
@@ -560,13 +593,5 @@ func TestConcurrencyLimitReleasesSlotAfterTimeout(t *testing.T) {
 
 	if secondRecorder.Code != http.StatusNoContent {
 		t.Fatalf("second status = %d, want %d", secondRecorder.Code, http.StatusNoContent)
-	}
-
-	close(release)
-
-	select {
-	case <-finished:
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("first handler did not finish")
 	}
 }
