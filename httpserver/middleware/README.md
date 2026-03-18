@@ -8,6 +8,7 @@
 - 需要请求超时控制
 - 需要结构化访问日志和可选 payload 调试日志
 - 需要响应压缩
+- 需要单进程全局并发闸门，超限立即返回 503，不排队
 - 需要 Trace ID / Request ID 注入
 - 需要基础 CORS 与安全响应头
 - 需要限制请求体大小
@@ -18,10 +19,21 @@
 srv := httpserver.NewServer(nil)
 srv.Use(middleware.AccessLog())
 srv.Use(middleware.Compression())
+srv.Use(middleware.ConcurrencyLimit(100))
 srv.Use(middleware.Recovery())
 srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
 ```
+
+## ConcurrencyLimit
+
+`ConcurrencyLimit` 用于控制单进程内的全局并发上限。当前请求数达到阈值时，新请求会直接返回 `503 Service Unavailable`，不会进入队列等待。
+
+适合这些场景：
+
+- 防止单实例被突发流量打满
+- 保护下游数据库、RPC 或第三方接口
+- 希望用简单的闸门而不是排队来削峰
 
 ## AccessLog
 
