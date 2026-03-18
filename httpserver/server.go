@@ -33,6 +33,7 @@ type Server struct {
 	manualReady              bool
 	stateMu                  sync.RWMutex
 	state                    State
+	serverMutators           []HTTPServerMutator
 }
 
 // NewServer 创建新的HTTP服务器
@@ -242,6 +243,23 @@ func (s *Server) Addr() string {
 		return s.server.Addr
 	}
 	return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+}
+
+// HealthAddr 返回健康检查服务器地址。
+// 如果健康检查未启用，返回空字符串。
+// 如果健康检查使用独立端口，返回独立地址；否则返回主服务器地址。
+func (s *Server) HealthAddr() string {
+	if !s.config.EnableHealthCheck {
+		return ""
+	}
+
+	// 如果有独立健康检查端口，返回保存的地址
+	if s.config.HealthCheckPort != 0 {
+		return s.healthAddr
+	}
+
+	// 否则返回主服务器地址
+	return s.Addr()
 }
 
 // IsRunning 检查服务器是否正在运行

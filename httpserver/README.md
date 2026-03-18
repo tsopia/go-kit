@@ -519,9 +519,14 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 
 ### HealthAddr() 方法
 
-当前实现：`HealthAddr()` 方法不存在。
+**已实现**：`HealthAddr()` 方法返回健康检查地址：
+- 健康检查禁用时返回空字符串
+- 共享端口时返回主服务器地址
+- 独立端口时返回独立地址
 
-预期行为：提供 `HealthAddr() string` 方法返回健康检查地址（共享端口或独立端口）。
+### http.Server Mutator
+
+**已实现**：`WithHTTPServerMutator(func(*http.Server)) Option` 允许在 http.Server 创建后、启动前修改底层配置。
 
 ## 更多说明
 

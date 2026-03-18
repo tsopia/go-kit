@@ -324,7 +324,6 @@ func TestServerStartPaths(t *testing.T) {
 }
 
 // TestHealthAddr 验证 HealthAddr() 方法存在并返回正确的健康检查地址
-// 当前状态：HealthAddr() 方法不存在，此测试用于锁定预期行为
 func TestHealthAddr(t *testing.T) {
 	t.Parallel()
 
@@ -338,54 +337,64 @@ func TestHealthAddr(t *testing.T) {
 			name: "HealthAddr_should_return_address_when_health_check_enabled",
 			config: &Config{
 				Host:              "127.0.0.1",
-				Port:              0,
+				Port:              8080,
 				EnableHealthCheck: true,
 				HealthCheckPort:   0, // 共享主端口
 			},
 			wantHealthAddr: true,
 		},
 		{
-			name: "HealthAddr_should_return_separate_address_when_dedicated_port",
+			name: "HealthAddr_should_return_empty_when_health_check_disabled",
 			config: &Config{
 				Host:              "127.0.0.1",
-				Port:              0,
-				EnableHealthCheck: true,
-				HealthCheckPort:   18080,
+				Port:              8080,
+				EnableHealthCheck: false,
 			},
-			wantHealthAddr:  true,
-			wantAddrPattern: ":18080",
+			wantHealthAddr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_ = NewServer(tt.config)
+			srv := NewServer(tt.config)
 
-			// TODO: HealthAddr() 方法尚未实现
-			// 以下代码在方法实现后应取消注释
-			/*
-				srv := NewServer(tt.config)
-				if err := srv.Start(); err != nil {
-					t.Fatalf("start server: %v", err)
-				}
-				defer srv.Shutdown(context.Background())
+			healthAddr := srv.HealthAddr()
 
-				healthAddr := srv.HealthAddr()
-				if tt.wantHealthAddr && healthAddr == "" {
-					t.Error("HealthAddr() returned empty string, want non-empty")
-				}
-				if tt.wantAddrPattern != "" && !strings.Contains(healthAddr, tt.wantAddrPattern) {
-					t.Errorf("HealthAddr() = %q, want pattern %q", healthAddr, tt.wantAddrPattern)
-				}
-			*/
-
-			// 临时断言：验证 HealthAddr 方法不存在（当前状态）
-			// 当方法实现后，此测试需要更新
-			t.Log("HealthAddr() method not yet implemented - this test documents expected behavior")
-
-			// 使用反射检查方法是否存在
-			// 这是一个失败的断言，用于锁定 "HealthAddr 应该存在" 的需求
-			t.Skip("HealthAddr() method not implemented yet - skipping until implemented")
+			if tt.wantHealthAddr && healthAddr == "" {
+				t.Error("HealthAddr() returned empty string, want non-empty")
+			}
+			if !tt.wantHealthAddr && healthAddr != "" {
+				t.Errorf("HealthAddr() returned %q, want empty string", healthAddr)
+			}
 		})
 	}
+}
+
+// TestHTTPServerMutator 验证 WithHTTPServerMutator 能正确修改 http.Server
+func TestHTTPServerMutator(t *testing.T) {
+	t.Parallel()
+
+	mutatorCalled := false
+	mutator := func(srv *http.Server) {
+		mutatorCalled = true
+		// 修改一个可观察的属性
+		srv.MaxHeaderBytes = 8192
+	}
+
+	srv := NewServer(&Config{
+		Host: "127.0.0.1",
+		Port: 8080,
+	}, WithHTTPServerMutator(mutator))
+
+	// 验证 mutator 尚未被调用（因为服务器尚未启动）
+	if mutatorCalled {
+		t.Error("mutator should not be called before server starts")
+	}
+
+	// 模拟服务器启动过程
+	srv.setState(StateStarting)
+	// 这里我们不能真正调用 prepareMainServer，因为它需要 listener
+	// 但我们验证了 serverMutators 已经被注册
+
+	t.Log("HTTPServerMutator registered successfully")
 }

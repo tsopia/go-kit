@@ -83,6 +83,8 @@ func (s *Server) configuredAddr() string {
 // isBlocking: true 表示阻塞直到服务器关闭，false 表示非阻塞启动
 // serveFn: 实际的服务启动函数，可以是 s.serveMainListener 或 serveTLS 等
 func (s *Server) startInternal(ln net.Listener, isBlocking bool, serveFn func(net.Listener) error) error {
+	// 从 New 或 Failed 状态转换到 Starting
+	// 使用 setState 而不是 transitionTo 来允许从任意初始状态启动
 	s.setState(StateStarting)
 
 	s.prepareMainServer(ln)
@@ -160,6 +162,11 @@ func (s *Server) startWithNewListenerTLS(certFile, keyFile string) error {
 
 func (s *Server) prepareMainServer(ln net.Listener) {
 	s.server = s.buildHTTPServer(ln.Addr().String(), s.engine)
+
+	// 应用用户注册的 http.Server mutators
+	for _, mutator := range s.serverMutators {
+		mutator(s.server)
+	}
 }
 
 func (s *Server) healthEndpoint() gin.HandlerFunc {

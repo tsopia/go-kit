@@ -1,6 +1,9 @@
 package httpserver
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // LifecycleEvent 描述服务器生命周期事件。
 type LifecycleEvent struct {
@@ -39,6 +42,17 @@ func WithModules(modules ...RouteModule) Option {
 func WithManualReadiness() Option {
 	return func(s *Server) {
 		s.manualReady = true
+	}
+}
+
+// HTTPServerMutator 是修改 http.Server 的函数类型。
+type HTTPServerMutator func(*http.Server)
+
+// WithHTTPServerMutator 注册一个在 http.Server 创建后、启动前调用的 mutator。
+// 用于需要修改底层 http.Server 高级配置的场景。
+func WithHTTPServerMutator(mutator HTTPServerMutator) Option {
+	return func(s *Server) {
+		s.serverMutators = append(s.serverMutators, mutator)
 	}
 }
 
