@@ -568,9 +568,9 @@ func (dhc *DatabaseHealthChecker) GetName() string {
 
 // HTTPHealthChecker HTTP服务健康检查器
 type HTTPHealthChecker struct {
-	name    string
-	url     string
-	timeout time.Duration
+	name   string
+	url    string
+	client *http.Client
 }
 
 // NewHTTPHealthChecker 创建HTTP服务健康检查器
@@ -579,24 +579,20 @@ func NewHTTPHealthChecker(name, url string, timeout time.Duration) *HTTPHealthCh
 		timeout = 5 * time.Second
 	}
 	return &HTTPHealthChecker{
-		name:    name,
-		url:     url,
-		timeout: timeout,
+		name:   name,
+		url:    url,
+		client: &http.Client{Timeout: timeout},
 	}
 }
 
 // CheckHealth 检查HTTP服务健康状态
 func (hhc *HTTPHealthChecker) CheckHealth(ctx context.Context) (err error) {
-	client := &http.Client{
-		Timeout: hhc.timeout,
-	}
-
 	req, err := http.NewRequestWithContext(ctx, "GET", hhc.url, nil)
 	if err != nil {
 		return err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := hhc.client.Do(req)
 	if err != nil {
 		return err
 	}

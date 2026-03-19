@@ -3,7 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +37,21 @@ type CORSConfig struct {
 func CORS(config CORSConfig) gin.HandlerFunc {
 	config = normalizeCORSConfig(config)
 
+	// 构造期预计算，避免热路径重复计算
+	originSet := make(map[string]struct{}, len(config.AllowOrigins))
+	allowWildcard := false
+	for _, o := range config.AllowOrigins {
+		if o == "*" {
+			allowWildcard = true
+		} else {
+			originSet[o] = struct{}{}
+		}
+	}
+	maxAgeStr := ""
+	if config.MaxAge > 0 {
+		maxAgeStr = strconv.Itoa(int(config.MaxAge.Seconds()))
+	}
+
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin == "" {
@@ -44,7 +59,7 @@ func CORS(config CORSConfig) gin.HandlerFunc {
 			return
 		}
 
-		allowedOrigin := matchOrigin(origin, config)
+		allowedOrigin := matchOrigin(origin, config.AllowOriginFunc, originSet, allowWildcard)
 		if allowedOrigin == "" {
 			c.Next()
 			return
@@ -60,8 +75,8 @@ func CORS(config CORSConfig) gin.HandlerFunc {
 		}
 
 		if c.Request.Method == http.MethodOptions {
-			if config.MaxAge > 0 {
-				c.Header("Access-Control-Max-Age", fmt.Sprintf("%d", int(config.MaxAge.Seconds())))
+			if maxAgeStr != "" {
+				c.Header("Access-Control-Max-Age", maxAgeStr)
 			}
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -99,21 +114,20 @@ func normalizeCORSConfig(config CORSConfig) CORSConfig {
 	return config
 }
 
-func matchOrigin(origin string, config CORSConfig) string {
-	if config.AllowOriginFunc != nil {
-		if config.AllowOriginFunc(origin) {
+func matchOrigin(origin string, allowOriginFunc func(string) bool, originSet map[string]struct{}, allowWildcard bool) string {
+	if allowOriginFunc != nil {
+		if allowOriginFunc(origin) {
 			return origin
 		}
 		return "" // func 是最终判决，不 fallback 到 AllowOrigins
 	}
 
-	for _, allowed := range config.AllowOrigins {
-		if allowed == "*" {
-			return "*"
-		}
-		if strings.EqualFold(allowed, origin) {
-			return origin
-		}
+	if allowWildcard {
+		return "*"
+	}
+
+	if _, ok := originSet[origin]; ok {
+		return origin
 	}
 
 	return ""
