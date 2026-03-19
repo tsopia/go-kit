@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -710,6 +712,8 @@ func TestCORSMiddleware(t *testing.T) {
 	// 创建测试请求
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/test", nil)
+	// CORS 触发要求带 Origin header
+	req.Header.Set("Origin", "http://localhost")
 
 	engine.ServeHTTP(w, req)
 
@@ -719,7 +723,7 @@ func TestCORSMiddleware(t *testing.T) {
 
 	// 检查 CORS 头
 	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("Expected Access-Control-Allow-Origin header to be '*'")
+		t.Errorf("Expected Access-Control-Allow-Origin header to be '*', got %q", w.Header().Get("Access-Control-Allow-Origin"))
 	}
 
 	if w.Header().Get("Access-Control-Allow-Methods") == "" {
@@ -779,5 +783,39 @@ func TestContextFromGin(t *testing.T) {
 	if response["ctx_request_id"] != response["gin_request_id"] {
 		t.Errorf("Context request_id (%s) should match gin request_id (%s)",
 			response["ctx_request_id"], response["gin_request_id"])
+	}
+}
+
+func TestOnStateChangeCalledSynchronously(t *testing.T) {
+	// 验证 OnStateChange 在 tryTransitionTo 返回前已被调用（同步语义）。
+	// 若为异步，tryTransitionTo 返回后 events 可能为空，测试 FAIL。
+	var (
+		mu     sync.Mutex
+		events []string
+	)
+
+	srv := NewServer(nil, WithHooks(Hooks{
+		OnStateChange: func(ctx context.Context, from State, to State) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, fmt.Sprintf("%s->%s", from, to))
+		},
+	}))
+
+	_ = srv.tryTransitionTo(StateStarting)
+	_ = srv.tryTransitionTo(StateReady)
+
+	// 不加任何 sleep/Gosched：同步调用时此处 events 已填充完毕
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events synchronously, got %d: %v", len(events), events)
+	}
+	if events[0] != "new->starting" {
+		t.Errorf("events[0] = %q, want %q", events[0], "new->starting")
+	}
+	if events[1] != "starting->ready" {
+		t.Errorf("events[1] = %q, want %q", events[1], "starting->ready")
 	}
 }

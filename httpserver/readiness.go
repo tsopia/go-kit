@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -48,12 +49,17 @@ func canTransition(from, to State) bool {
 // tryTransitionTo 尝试状态转换，失败时返回错误。
 func (s *Server) tryTransitionTo(state State) error {
 	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-
-	if !canTransition(s.state, state) {
-		return fmt.Errorf("invalid state transition: %s -> %s", s.state, state)
+	from := s.state
+	if !canTransition(from, state) {
+		s.stateMu.Unlock()
+		return fmt.Errorf("invalid state transition: %s -> %s", from, state)
 	}
 	s.state = state
+	s.stateMu.Unlock()
+
+	if s.hooks.OnStateChange != nil {
+		s.hooks.OnStateChange(context.Background(), from, state)
+	}
 	return nil
 }
 

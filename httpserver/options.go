@@ -19,6 +19,11 @@ type Hooks struct {
 	OnServeError       func(context.Context, LifecycleEvent)
 	OnShuttingDown     func(context.Context, LifecycleEvent)
 	OnShutdownComplete func(context.Context, LifecycleEvent)
+	// OnStateChange 在每次状态转换完成后同步调用。
+	// 调用时状态机锁已释放，可安全读取服务器状态。
+	// 注意：hook 会阻塞当前调用链，请确保其快速返回；
+	// 如需异步处理，请在 hook 内部自行开启 goroutine。
+	OnStateChange func(ctx context.Context, from State, to State)
 }
 
 // Option 描述 Server 的可选配置项。
