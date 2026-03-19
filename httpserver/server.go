@@ -167,6 +167,21 @@ func (s *Server) RunWithGracefulShutdown() error {
 	return s.WaitForShutdown()
 }
 
+// RunWithContext 启动服务器，当 ctx 取消时自动优雅关闭（阻塞）。
+// 适用于 errgroup 等并发控制场景。
+func (s *Server) RunWithContext(ctx context.Context) error {
+	if err := s.Start(); err != nil {
+		return err
+	}
+
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
+	defer cancel()
+
+	return s.Shutdown(shutdownCtx)
+}
+
 // WaitForShutdown 等待关闭信号并执行优雅关闭
 func (s *Server) WaitForShutdown() error {
 	// 创建信号通道
@@ -367,18 +382,38 @@ type HealthChecker interface {
 
 // HealthCheckManager 健康检查管理器
 type HealthCheckManager struct {
-	checkers  []HealthChecker
-	startTime time.Time
-	version   string
+	checkers     []HealthChecker
+	startTime    time.Time
+	version      string
+	checkTimeout time.Duration
 }
 
-// NewHealthCheckManager 创建健康检查管理器
-func NewHealthCheckManager(version string) *HealthCheckManager {
-	return &HealthCheckManager{
-		checkers:  make([]HealthChecker, 0),
-		startTime: time.Now(),
-		version:   version,
+// HealthCheckOption 描述 HealthCheckManager 的可选配置。
+type HealthCheckOption func(*HealthCheckManager)
+
+// WithCheckTimeout 设置单个 checker 的超时时间。
+func WithCheckTimeout(timeout time.Duration) HealthCheckOption {
+	return func(hcm *HealthCheckManager) {
+		hcm.checkTimeout = timeout
 	}
+}
+
+const defaultCheckTimeout = 5 * time.Second
+
+// NewHealthCheckManager 创建健康检查管理器
+func NewHealthCheckManager(version string, opts ...HealthCheckOption) *HealthCheckManager {
+	hcm := &HealthCheckManager{
+		checkers:     make([]HealthChecker, 0),
+		startTime:    time.Now(),
+		version:      version,
+		checkTimeout: defaultCheckTimeout,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(hcm)
+		}
+	}
+	return hcm
 }
 
 // AddChecker 添加健康检查器
@@ -386,7 +421,13 @@ func (hcm *HealthCheckManager) AddChecker(checker HealthChecker) {
 	hcm.checkers = append(hcm.checkers, checker)
 }
 
-// CheckHealth 执行所有健康检查
+type checkResult struct {
+	name       string
+	err        error
+	durationMs int64
+}
+
+// CheckHealth 并发执行所有健康检查
 func (hcm *HealthCheckManager) CheckHealth(ctx context.Context) *HealthStatus {
 	status := &HealthStatus{
 		Status:    "healthy",
@@ -396,18 +437,39 @@ func (hcm *HealthCheckManager) CheckHealth(ctx context.Context) *HealthStatus {
 		Checks:    make(map[string]interface{}),
 	}
 
-	// 执行所有检查器
+	if len(hcm.checkers) == 0 {
+		return status
+	}
+
+	results := make(chan checkResult, len(hcm.checkers))
+
 	for _, checker := range hcm.checkers {
-		checkName := checker.GetName()
-		if err := checker.CheckHealth(ctx); err != nil {
+		go func(c HealthChecker) {
+			checkCtx, cancel := context.WithTimeout(context.Background(), hcm.checkTimeout)
+			defer cancel()
+			start := time.Now()
+			err := c.CheckHealth(checkCtx)
+			results <- checkResult{
+				name:       c.GetName(),
+				err:        err,
+				durationMs: time.Since(start).Milliseconds(),
+			}
+		}(checker)
+	}
+
+	for range hcm.checkers {
+		r := <-results
+		if r.err != nil {
 			status.Status = "unhealthy"
-			status.Checks[checkName] = map[string]interface{}{
-				"status": "unhealthy",
-				"error":  err.Error(),
+			status.Checks[r.name] = map[string]interface{}{
+				"status":      "unhealthy",
+				"error":       r.err.Error(),
+				"duration_ms": r.durationMs,
 			}
 		} else {
-			status.Checks[checkName] = map[string]interface{}{
-				"status": "healthy",
+			status.Checks[r.name] = map[string]interface{}{
+				"status":      "healthy",
+				"duration_ms": r.durationMs,
 			}
 		}
 	}

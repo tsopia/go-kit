@@ -819,3 +819,29 @@ func TestOnStateChangeCalledSynchronously(t *testing.T) {
 		t.Errorf("events[1] = %q, want %q", events[1], "starting->ready")
 	}
 }
+
+func TestCheckHealthWithCancelledContext(t *testing.T) {
+	// 验证传入已取消的 ctx 时，健康检查不应因 ctx 取消而立即失败。
+	// 健康检查使用独立 context，不继承请求 ctx 的取消状态。
+	manager := NewHealthCheckManager("v1.0.0")
+
+	manager.AddChecker(NewCustomHealthChecker("ctx-sensitive", func(ctx context.Context) error {
+		// 模拟一个会检查 ctx 状态的 checker（如数据库 Ping）
+		if ctx.Err() != nil {
+			return fmt.Errorf("context cancelled: %w", ctx.Err())
+		}
+		return nil
+	}))
+
+	// 使用已取消的 ctx
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消
+
+	status := manager.CheckHealth(cancelledCtx)
+
+	// 使用独立 context 后，checker 接收到的 ctx 不应是已取消状态
+	if status.Status != "healthy" {
+		t.Errorf("status = %q, want %q — health check should use independent context, not inherit cancelled ctx",
+			status.Status, "healthy")
+	}
+}
