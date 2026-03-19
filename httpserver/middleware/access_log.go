@@ -41,6 +41,14 @@ type AccessLogConfig struct {
 	ShouldCapturePayload   func(*gin.Context, int) bool
 	Multipart              MultipartConfig
 	Redaction              RedactionConfig
+
+	// SkipPaths 精确匹配路径跳过日志记录。
+	// 示例: []string{"/health", "/readyz", "/livez"}
+	SkipPaths []string
+
+	// ShouldLog 完全自定义的日志过滤。
+	// 返回 false 时跳过全部日志。
+	ShouldLog func(*gin.Context) bool
 }
 
 // MultipartCaptureMode 控制 multipart payload 的捕获模式。
@@ -92,7 +100,21 @@ func AccessLog(configs ...AccessLogConfig) gin.HandlerFunc {
 		config = normalizeAccessLogConfig(configs[0])
 	}
 
+	skipSet := make(map[string]struct{}, len(config.SkipPaths))
+	for _, path := range config.SkipPaths {
+		skipSet[path] = struct{}{}
+	}
+
 	return func(c *gin.Context) {
+		if _, skip := skipSet[c.Request.URL.Path]; skip {
+			c.Next()
+			return
+		}
+		if config.ShouldLog != nil && !config.ShouldLog(c) {
+			c.Next()
+			return
+		}
+
 		startedAt := time.Now()
 
 		requestContentType := mediaType(c.Request.Header.Get("Content-Type"))
