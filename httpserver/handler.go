@@ -244,6 +244,35 @@ func HandleQueryURI[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...Handle
 	return Handle(fn, combined...)
 }
 
+// HandleForm 将强类型业务函数适配成 form handler。
+// 使用 Gin 的 ShouldBind，支持 JSON/Form/Multipart 自动识别。
+func HandleForm[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
+	combined := make([]HandlerOption, 0, len(opts)+1)
+	combined = append(combined, WithDecoder(DecodeForm[Req]()))
+	combined = append(combined, opts...)
+
+	return Handle(fn, combined...)
+}
+
+// ActionFunc 描述无响应体的业务处理函数。
+type ActionFunc[Req any] func(ctx context.Context, req Req) error
+
+// HandleNoContent 将无响应体业务函数适配成 HTTP handler（默认 204）。
+func HandleNoContent[Req any](fn ActionFunc[Req], opts ...HandlerOption) gin.HandlerFunc {
+	adapted := func(ctx context.Context, req Req) (struct{}, error) {
+		return struct{}{}, fn(ctx, req)
+	}
+
+	combined := make([]HandlerOption, 0, len(opts)+2)
+	combined = append(combined, WithSuccessStatus(http.StatusNoContent))
+	combined = append(combined, WithEncoder(func(c *gin.Context, status int, _ any) {
+		c.Status(status)
+	}))
+	combined = append(combined, opts...)
+
+	return Handle(adapted, combined...)
+}
+
 // DecodeJSON 使用 JSON body 填充请求对象。
 func DecodeJSON[Req any]() func(*gin.Context, *Req) error {
 	return func(c *gin.Context, req *Req) error {
@@ -262,6 +291,20 @@ func DecodeQuery[Req any]() func(*gin.Context, *Req) error {
 func DecodeURI[Req any]() func(*gin.Context, *Req) error {
 	return func(c *gin.Context, req *Req) error {
 		return c.ShouldBindUri(req)
+	}
+}
+
+// DecodeForm 使用 Gin 的 ShouldBind 填充请求对象（支持 JSON/Form/Multipart 自动识别）。
+func DecodeForm[Req any]() func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		return c.ShouldBind(req)
+	}
+}
+
+// DecodeHeader 使用 Header 填充请求对象。
+func DecodeHeader[Req any]() func(*gin.Context, *Req) error {
+	return func(c *gin.Context, req *Req) error {
+		return c.ShouldBindHeader(req)
 	}
 }
 

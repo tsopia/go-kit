@@ -574,3 +574,150 @@ func extractDetailFields(t *testing.T, details map[string]any) []map[string]any 
 
 	return fields
 }
+
+func TestHandleFormJSONContentType(t *testing.T) {
+	type req struct {
+		Name string `json:"name" form:"name"`
+	}
+
+	srv := NewServer(nil)
+	srv.POST("/form", HandleForm(func(ctx context.Context, r req) (gin.H, error) {
+		return gin.H{"name": r.Name}, nil
+	}))
+
+	w := performJSONRequest(t, srv, http.MethodPost, "/form", gin.H{"name": "alice"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"name":"alice"`)) {
+		t.Fatalf("body = %q, want name=alice", w.Body.String())
+	}
+}
+
+func TestHandleFormURLEncoded(t *testing.T) {
+	type req struct {
+		Name string `form:"name"`
+	}
+
+	srv := NewServer(nil)
+	srv.POST("/form", HandleForm(func(ctx context.Context, r req) (gin.H, error) {
+		return gin.H{"name": r.Name}, nil
+	}))
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader("name=bob")
+	r := httptest.NewRequest(http.MethodPost, "/form", body)
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	srv.Engine().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"name":"bob"`)) {
+		t.Fatalf("body = %q, want name=bob", w.Body.String())
+	}
+}
+
+func TestDecodeHeaderBindsHeaders(t *testing.T) {
+	type req struct {
+		APIVersion string `header:"X-API-Version"`
+	}
+
+	srv := NewServer(nil)
+	srv.GET("/header", Handle(
+		func(ctx context.Context, r req) (gin.H, error) {
+			return gin.H{"version": r.APIVersion}, nil
+		},
+		WithDecoder(DecodeHeader[req]()),
+	))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/header", nil)
+	r.Header.Set("X-API-Version", "v2")
+	srv.Engine().ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"version":"v2"`)) {
+		t.Fatalf("body = %q, want version=v2", w.Body.String())
+	}
+}
+
+func TestHandleNoContentReturns204(t *testing.T) {
+	type deleteReq struct {
+		ID string `uri:"id"`
+	}
+
+	srv := NewServer(nil)
+	srv.DELETE("/items/:id", HandleNoContent(
+		func(ctx context.Context, r deleteReq) error {
+			return nil
+		},
+		WithDecoder(DecodeURI[deleteReq]()),
+	))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/items/123", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", w.Body.String())
+	}
+}
+
+func TestHandleNoContentErrorReturns500(t *testing.T) {
+	type deleteReq struct {
+		ID string `json:"id"`
+	}
+
+	srv := NewServer(nil)
+	srv.DELETE("/items", HandleNoContent(func(ctx context.Context, r deleteReq) error {
+		return fmt.Errorf("database error")
+	}))
+
+	w := performJSONRequest(t, srv, http.MethodDelete, "/items", gin.H{"id": "123"})
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	resp := decodeErrorResponse(t, w)
+	if resp.Code != "internal_error" {
+		t.Fatalf("error code = %q, want %q", resp.Code, "internal_error")
+	}
+}
+
+func TestHandleNoContentValidationError(t *testing.T) {
+	srv := NewServer(nil)
+	srv.POST("/action", HandleNoContent(func(ctx context.Context, r loginRequest) error {
+		return nil
+	}))
+
+	w := performJSONRequest(t, srv, http.MethodPost, "/action", gin.H{"email": ""})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnprocessableEntity)
+	}
+}
+
+func TestHandleNoContentCustomSuccessStatus(t *testing.T) {
+	type req struct {
+		Data string `json:"data"`
+	}
+
+	srv := NewServer(nil)
+	srv.POST("/action", HandleNoContent(
+		func(ctx context.Context, r req) error {
+			return nil
+		},
+		WithSuccessStatus(http.StatusOK),
+	))
+
+	w := performJSONRequest(t, srv, http.MethodPost, "/action", gin.H{"data": "test"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
