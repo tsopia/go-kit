@@ -164,6 +164,9 @@ srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
 	OnServeError: func(ctx context.Context, event httpserver.LifecycleEvent) {
 		log.Printf("server error addr=%s err=%v", event.Addr, event.Err)
 	},
+	OnStateChange: func(ctx context.Context, from httpserver.State, to httpserver.State) {
+		log.Printf("state changed: %s -> %s", from, to)
+	},
 }))
 ```
 
@@ -189,6 +192,34 @@ srv.Use(middleware.TraceID())
 
 ```go
 srv.Use(middleware.ConcurrencyLimit(100))
+```
+
+### CORS
+
+```go
+srv.Use(middleware.CORS(middleware.CORSConfig{
+    AllowOrigins:     []string{"https://app.example.com"},
+    AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
+    AllowHeaders:     "Content-Type, Authorization",
+    AllowCredentials: true,
+    MaxAge:           3600 * time.Second,
+}))
+```
+
+### Rate Limit
+
+```go
+// 简单限流：每秒 100 请求
+srv.Use(middleware.RateLimit(100))
+
+// 自定义配置
+srv.Use(middleware.RateLimitWithConfig(middleware.RateLimitConfig{
+    Rate:  10,
+    Burst: 20,
+    OnRejected: func(c *gin.Context) {
+        c.JSON(429, gin.H{"error": "rate limited"})
+    },
+}))
 ```
 
 如果需要调试请求体和响应体，可以显式开启 payload capture：
@@ -296,6 +327,22 @@ r.POST("/login", httpserver.HandleJSON(login))
 r.GET("/users", httpserver.HandleQuery(listUsers))
 r.GET("/users/:id", httpserver.HandleURI(getUser))
 r.GET("/users/:id", httpserver.HandleQueryURI(getUserDetail))
+
+// 支持 Form/Multipart 自动识别
+r.POST("/upload", httpserver.HandleForm(uploadHandler))
+
+// 无响应体操作（默认返回 204）
+r.DELETE("/items/:id", httpserver.HandleNoContent(deleteItem))
+```
+
+可用 decoder：
+
+```go
+httpserver.DecodeJSON[Req]()   // JSON body
+httpserver.DecodeQuery[Req]()  // Query string
+httpserver.DecodeURI[Req]()    // URI 参数
+httpserver.DecodeForm[Req]()   // JSON/Form/Multipart 自动识别
+httpserver.DecodeHeader[Req]() // Header
 ```
 
 如果你需要更细粒度的解码控制，仍然可以保留底层 decoder 组合：

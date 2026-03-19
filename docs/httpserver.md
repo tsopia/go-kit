@@ -230,8 +230,18 @@ srv := httpserver.NewServer(cfg, httpserver.WithHooks(httpserver.Hooks{
 	OnServeError: func(ctx context.Context, event httpserver.LifecycleEvent) {
 		log.Printf("server error addr=%s err=%v", event.Addr, event.Err)
 	},
+	OnStateChange: func(ctx context.Context, from httpserver.State, to httpserver.State) {
+		log.Printf("state changed: %s -> %s", from, to)
+	},
 }))
 ```
+
+**OnStateChange 说明：**
+
+- 在每次状态转换完成后**同步**调用
+- 调用时状态机锁已释放，可安全读取服务器状态
+- 会阻塞当前调用链，请确保快速返回；如需异步处理，请在 hook 内部自行开启 goroutine
+- 可用状态：`StateNew`, `StateStarting`, `StateReady`, `StateDraining`, `StateStopping`, `StateStopped`, `StateFailed`
 
 ## 健康检查
 
@@ -284,6 +294,8 @@ srv := httpserver.NewServer(&httpserver.Config{
 srv.EnableHealthCheckWithManager(manager)
 ```
 
+**注意：** `CheckHealth` 使用独立 context 执行检查，不继承请求 context 的取消状态。即使传入已取消的 context，健康检查仍会正常执行并返回结果。
+
 ## 模块化路由
 
 如果你希望项目按业务模块组织路由，可以实现 `RouteModule`：
@@ -332,12 +344,41 @@ r.GET("/users", httpserver.Handle(
 ))
 ```
 
+### `HandleForm`
+
+支持 JSON/Form/Multipart 自动识别：
+
+```go
+r.POST("/upload", httpserver.HandleForm(uploadHandler))
+```
+
+### `HandleNoContent`
+
+适用于无响应体的操作（默认返回 204）：
+
+```go
+r.DELETE("/items/:id", httpserver.HandleNoContent(
+	deleteItem,
+	httpserver.WithDecoder(httpserver.DecodeURI[DeleteItemRequest]()),
+))
+```
+
+### `HandleQueryURI`
+
+同时从 Query 和 URI 参数绑定：
+
+```go
+r.GET("/users/:id/orders", httpserver.HandleQueryURI(listUserOrders))
+```
+
 ### 可用 decoder
 
 ```go
-httpserver.DecodeJSON[Req]()
-httpserver.DecodeQuery[Req]()
-httpserver.DecodeURI[Req]()
+httpserver.DecodeJSON[Req]()   // JSON body
+httpserver.DecodeQuery[Req]()  // Query string
+httpserver.DecodeURI[Req]()    // URI 参数
+httpserver.DecodeForm[Req]()   // JSON/Form/Multipart 自动识别
+httpserver.DecodeHeader[Req]() // Header
 httpserver.ComposeDecoder(
 	httpserver.DecodeURI[Req](),
 	httpserver.DecodeQuery[Req](),
@@ -403,6 +444,50 @@ srv.Use(
 ```go
 srv.Use(httpserver.CORSMiddleware())
 ```
+
+或使用自定义配置：
+
+```go
+srv.Use(httpmiddleware.CORS(httpmiddleware.CORSConfig{
+    AllowOrigins:     []string{"https://app.example.com", "https://admin.example.com"},
+    AllowOriginFunc:  nil,                                   // 可选：动态判断 origin
+    AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS",
+    AllowHeaders:     "Content-Type, Authorization, X-Request-ID",
+    ExposeHeaders:    "X-Request-ID, X-Trace-ID",
+    AllowCredentials: true,                                   // 允许携带 cookie
+    MaxAge:           3600 * time.Second,                     // 预检缓存 1 小时
+}))
+```
+
+**字段说明：**
+
+- `AllowOrigins`: 允许的 Origin 列表。如果包含 `"*"`，则允许所有 Origin（不可与 `AllowCredentials` 同时使用）
+- `AllowOriginFunc`: 动态判断 Origin 是否允许。设置后完全接管 origin 判断，`AllowOrigins` 不再生效
+- `AllowCredentials`: 是否允许携带凭证。为 `true` 时不可使用 `"*"` 作为 AllowOrigin
+- `MaxAge`: 预检请求缓存时间
+
+**注意：** HTTP Origin 是大小写敏感的，`https://Example.com` 和 `https://example.com` 被视为不同 origin。
+
+### Rate Limit
+
+```go
+srv.Use(httpmiddleware.RateLimit(100)) // 每秒 100 请求
+```
+
+或使用自定义配置：
+
+```go
+srv.Use(httpmiddleware.RateLimitWithConfig(httpmiddleware.RateLimitConfig{
+    Rate:  10,  // 每秒 10 请求
+    Burst: 20,  // 突发上限 20
+    OnRejected: func(c *gin.Context) {
+        // 自定义拒绝响应（可选）
+        c.JSON(429, gin.H{"error": "rate limited"})
+    },
+}))
+```
+
+- `Retry-After` 响应头会根据实际等待时间自动计算
 
 ### 从 Gin 提取请求上下文
 
