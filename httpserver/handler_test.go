@@ -721,3 +721,65 @@ func TestHandleNoContentCustomSuccessStatus(t *testing.T) {
 	}
 }
 
+func TestHandleUpload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	type UploadReq struct {
+		File string `json:"file"`
+	}
+	type UploadResp struct {
+		URL string `json:"url"`
+	}
+
+	handler := HandleUpload(func(ctx context.Context, req UploadReq) (UploadResp, error) {
+		return UploadResp{URL: "https://example.com/" + req.File}, nil
+	}, 1024)
+
+	w := httptest.NewRecorder()
+	body := `{"file":"test.txt"}`
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	handler(c)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if !strings.Contains(w.Body.String(), "test.txt") {
+		t.Errorf("response should contain filename")
+	}
+}
+
+func TestHandleUpload_BodyTooLarge(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	type UploadReq struct {
+		Data string `json:"data"`
+	}
+	type UploadResp struct {
+		Success bool `json:"success"`
+	}
+
+	handler := HandleUpload(func(ctx context.Context, req UploadReq) (UploadResp, error) {
+		return UploadResp{Success: true}, nil
+	}, 10) // 只允许 10 bytes
+
+	w := httptest.NewRecorder()
+	body := `{"data":"this is a long string that exceeds the limit"}`
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	handler(c)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d (413)", w.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+

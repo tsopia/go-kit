@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -244,6 +245,27 @@ func HandleQueryURI[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...Handle
 	return Handle(fn, combined...)
 }
 
+// HandleUpload 将强类型业务函数适配成上传 handler。
+// 自动清除 ReadDeadline 和 WriteDeadline，限制请求体大小。
+func HandleUpload[Req any, Resp any](
+	fn HandlerFunc[Req, Resp],
+	maxBytes int64,
+	opts ...HandlerOption,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 1. 清除 deadline
+		rc := http.NewResponseController(c.Writer)
+		_ = rc.SetReadDeadline(time.Time{})
+		_ = rc.SetWriteDeadline(time.Time{})
+
+		// 2. 限制 body 大小
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+
+		// 3. 走正常的 Handle 逻辑
+		Handle(fn, opts...)(c)
+	}
+}
+
 // HandleForm 将强类型业务函数适配成 form handler。
 // 使用 Gin 的 ShouldBind，支持 JSON/Form/Multipart 自动识别。
 func HandleForm[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption) gin.HandlerFunc {
@@ -361,6 +383,14 @@ func renderHandlerError(c *gin.Context, cfg handlerConfig, err error) {
 	if errors.As(err, &requestErr) {
 		switch requestErr.kind {
 		case handlerErrorKindDecode:
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(requestErr, &maxBytesErr) {
+				c.JSON(http.StatusRequestEntityTooLarge, ErrorResponse{
+					Code:    "request_too_large",
+					Message: "request body too large",
+				})
+				return
+			}
 			c.JSON(http.StatusBadRequest, ErrorResponse{
 				Code:    "invalid_request",
 				Message: requestErr.Error(),
