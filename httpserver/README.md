@@ -596,6 +596,29 @@ srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
 - 自动清除 `WriteDeadline`，支持长时间连接
 - `ctx` 包含客户端断开和 server shutdown 信号
 
+### SSE 心跳保活
+
+SSE 连接可能被 Nginx/代理因空闲而关闭。框架提供可选的心跳功能：
+
+```go
+// 启用心跳（建议 30s-60s，小于 Nginx 默认 60s 超时）
+srv.SSE("/ai/stream", handleAI, httpserver.WithHeartbeat(30*time.Second))
+
+// 高频推送不需要心跳（数据本身保持连接活跃）
+srv.SSE("/price", handlePrice) // 无心跳
+```
+
+**心跳格式**：`: ping 2026-03-23T10:15:30Z\n\n`
+- 以 `:` 开头是 SSE comment 帧，前端不会触发 `onmessage`
+- 带时间戳便于 Network 面板调试
+- Nginx/代理看到数据流动，不会关闭连接
+
+**断开日志**：
+框架自动在连接断开时打印日志：
+```
+INFO sse client disconnected path=/ai/stream error=context canceled
+```
+
 ## WebSocket 支持
 
 ```go
