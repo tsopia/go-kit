@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	defaultReadTimeout       = 10 * time.Second
+	defaultReadTimeout       = 30 * time.Second
 	defaultReadHeaderTimeout = 5 * time.Second
-	defaultWriteTimeout      = 10 * time.Second
+	defaultWriteTimeout      = 60 * time.Second
 	defaultIdleTimeout       = 60 * time.Second
 	defaultShutdownTimeout   = 10 * time.Second
 	defaultDrainTimeout      = 5 * time.Second
@@ -32,6 +32,11 @@ type Config struct {
 	ReadinessPath     string
 	LivenessPath      string
 	HealthCheckPort   int
+
+	// HandlerTimeout 用于 preset 自动挂载的中间件超时。
+	// 只在 preset.NewProductionServer 中使用，非 preset 场景无效。
+	// 必须小于 WriteTimeout 才能生效。
+	HandlerTimeout time.Duration
 }
 
 // DefaultConfig 返回默认配置。
