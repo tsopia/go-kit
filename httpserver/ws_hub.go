@@ -44,10 +44,13 @@ func (h *WSHub) Leave(roomID string, send chan<- WSMessage) {
 // Broadcast 向房间所有连接广播消息
 func (h *WSHub) Broadcast(roomID string, msg WSMessage) {
 	h.mu.RLock()
-	members := h.rooms[roomID]
+	members := make([]chan<- WSMessage, 0, len(h.rooms[roomID]))
+	for send := range h.rooms[roomID] {
+		members = append(members, send)
+	}
 	h.mu.RUnlock()
 
-	for send := range members {
+	for _, send := range members {
 		select {
 		case send <- msg:
 		default:

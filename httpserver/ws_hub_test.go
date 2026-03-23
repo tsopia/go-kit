@@ -76,3 +76,41 @@ func TestWSHub_MultiRoom(t *testing.T) {
 		// 正确：没有消息
 	}
 }
+
+func TestWSHub_Broadcast_Concurrent(t *testing.T) {
+	hub := NewWSHub()
+	send := make(chan WSMessage, 10)
+
+	hub.Join("room1", send)
+
+	// 并发执行 Broadcast 和 Leave
+	done := make(chan bool, 2)
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			hub.Broadcast("room1", WSMessage{Data: []byte("msg")})
+		}
+		done <- true
+	}()
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			hub.Leave("room1", send)
+			hub.Join("room1", send)
+		}
+		done <- true
+	}()
+
+	// 等待完成或超时
+	select {
+	case <-done:
+		select {
+		case <-done:
+			// 两个都完成
+		case <-time.After(5 * time.Second):
+			t.Error("timeout waiting for second goroutine")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("timeout waiting for first goroutine")
+	}
+}
