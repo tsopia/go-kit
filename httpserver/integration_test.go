@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,5 +52,67 @@ func TestPreset_StreamingSupport(t *testing.T) {
 	}
 	if !strings.Contains(w2.Body.String(), "event: test") {
 		t.Errorf("sse response missing event")
+	}
+}
+
+func TestSSE_Integration_WithHeartbeat(t *testing.T) {
+	cfg := &httpserver.Config{Port: 18081}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	srv.SSE("/heartbeat-test", func(ctx context.Context, send httpserver.SSESender) {
+		// 等待一段时间让心跳发送
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+	}, httpserver.WithHeartbeat(50*time.Millisecond))
+
+	// 启动服务器
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		srv.Serve(ln)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// 连接 SSE
+	url := "http://" + ln.Addr().String() + "/stream/heartbeat-test"
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应内容
+	var body strings.Builder
+	buf := make([]byte, 1024)
+	deadline := time.AfterFunc(400*time.Millisecond, func() {
+		resp.Body.Close()
+	})
+	defer deadline.Stop()
+
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			body.Write(buf[:n])
+		}
+		if err != nil {
+			break
+		}
+	}
+
+	// 验证心跳存在
+	content := body.String()
+	if !strings.Contains(content, ": ping") {
+		t.Errorf("expected ping in response, got: %s", content)
 	}
 }
