@@ -34,6 +34,9 @@ type Server struct {
 	stateMu                  sync.RWMutex
 	state                    State
 	serverMutators           []HTTPServerMutator
+	// 路由分组
+	regularGroup   *gin.RouterGroup // 有 Timeout 中间件
+	streamingGroup *gin.RouterGroup // 无 Timeout 中间件，用于 SSE/WS
 }
 
 // NewServer 创建新的HTTP服务器
@@ -76,52 +79,74 @@ func (s *Server) RegisterRoutes(routes func(r *gin.Engine)) {
 
 // GET 注册GET路由的便利方法
 func (s *Server) GET(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.GET(relativePath, handlers...)
+	s.getRegularGroup().GET(relativePath, handlers...)
 }
 
 // POST 注册POST路由的便利方法
 func (s *Server) POST(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.POST(relativePath, handlers...)
+	s.getRegularGroup().POST(relativePath, handlers...)
 }
 
 // PUT 注册PUT路由的便利方法
 func (s *Server) PUT(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.PUT(relativePath, handlers...)
+	s.getRegularGroup().PUT(relativePath, handlers...)
 }
 
 // DELETE 注册DELETE路由的便利方法
 func (s *Server) DELETE(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.DELETE(relativePath, handlers...)
+	s.getRegularGroup().DELETE(relativePath, handlers...)
 }
 
 // PATCH 注册PATCH路由的便利方法
 func (s *Server) PATCH(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.PATCH(relativePath, handlers...)
+	s.getRegularGroup().PATCH(relativePath, handlers...)
 }
 
 // HEAD 注册HEAD路由的便利方法
 func (s *Server) HEAD(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.HEAD(relativePath, handlers...)
+	s.getRegularGroup().HEAD(relativePath, handlers...)
 }
 
 // OPTIONS 注册OPTIONS路由的便利方法
 func (s *Server) OPTIONS(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.OPTIONS(relativePath, handlers...)
+	s.getRegularGroup().OPTIONS(relativePath, handlers...)
 }
 
 // Any 注册所有HTTP方法的便利方法
 func (s *Server) Any(relativePath string, handlers ...gin.HandlerFunc) {
-	s.engine.Any(relativePath, handlers...)
+	s.getRegularGroup().Any(relativePath, handlers...)
 }
 
 // Group 创建路由组的便利方法
 func (s *Server) Group(relativePath string, handlers ...gin.HandlerFunc) *gin.RouterGroup {
-	return s.engine.Group(relativePath, handlers...)
+	return s.getRegularGroup().Group(relativePath, handlers...)
 }
 
 // Use 添加中间件的便利方法
 func (s *Server) Use(middleware ...gin.HandlerFunc) {
 	s.engine.Use(middleware...)
+}
+
+// SetGroups 设置普通和流式路由组，由 preset 调用。
+func (s *Server) SetGroups(regular, streaming *gin.RouterGroup) {
+	s.regularGroup = regular
+	s.streamingGroup = streaming
+}
+
+// getRegularGroup 返回普通路由组。
+func (s *Server) getRegularGroup() *gin.RouterGroup {
+	if s.regularGroup != nil {
+		return s.regularGroup
+	}
+	return &s.engine.RouterGroup
+}
+
+// getStreamingGroup 返回流式路由组。
+func (s *Server) getStreamingGroup() *gin.RouterGroup {
+	if s.streamingGroup != nil {
+		return s.streamingGroup
+	}
+	return &s.engine.RouterGroup
 }
 
 // Errors 返回服务器运行期错误通道。
