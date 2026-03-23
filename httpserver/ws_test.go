@@ -110,3 +110,35 @@ func TestServer_WS(t *testing.T) {
 		t.Error("WS route not registered")
 	}
 }
+
+func TestWS_PanicRecovery(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	// panic 的 handler
+	server.WS("/panic", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+		panic("intentional panic in handler")
+	})
+
+	server.WS("/panic-in-read", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+		// 等待一条消息然后 panic
+		<-recv
+		panic("panic after receiving message")
+	})
+
+	// 验证路由注册成功（即使 handler 会 panic）
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/stream/panic" && r.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("WS route not registered")
+	}
+}

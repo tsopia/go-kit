@@ -204,6 +204,15 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 
 		// 5. 启动读 goroutine（客户端 → recv）
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("websocket read goroutine panic",
+						"path", c.Request.URL.Path,
+						"recover", r,
+					)
+					cancel()
+				}
+			}()
 			defer close(recv)
 			for {
 				msgType, data, err := conn.ReadMessage()
@@ -239,6 +248,15 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 
 		// 6. 启动 ping goroutine，带 Pong 超时检测
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("websocket ping goroutine panic",
+						"path", c.Request.URL.Path,
+						"recover", r,
+					)
+					cancel()
+				}
+			}()
 			ticker := time.NewTicker(cfg.PingPeriod)
 			defer ticker.Stop()
 
@@ -271,7 +289,15 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 
 		// 7. 启动写 goroutine（send → 客户端）
 		go func() {
-			defer cancel() // 写 goroutine 退出时触发清理
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("websocket write goroutine panic",
+						"path", c.Request.URL.Path,
+						"recover", r,
+					)
+				}
+				cancel()
+			}()
 			for msg := range send {
 				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
 					return
