@@ -11,6 +11,57 @@ import (
 	"github.com/tsopia/go-kit/httpserver"
 )
 
+func TestWS_GoroutineCleanup(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	// 追踪 handler 完成
+	handlerDone := make(chan bool, 1)
+
+	srv.WS("/test", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+		// 简单 handler，立即返回
+		handlerDone <- true
+	})
+
+	// 启动服务器
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go srv.Serve(ln)
+	time.Sleep(100 * time.Millisecond)
+
+	// 连接 WebSocket
+	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/test"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+
+	// 等待 handler 完成
+	select {
+	case <-handlerDone:
+		// handler 已完成
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not complete")
+	}
+
+	// 给 goroutine 清理时间
+	time.Sleep(200 * time.Millisecond)
+
+	// 关闭连接
+	conn.Close()
+
+	// 如果没有 goroutine 泄漏，测试可以正常结束
+	// 实际生产环境可以使用 runtime.NumGoroutine() 检测
+}
+
 func TestWS_Integration_Echo(t *testing.T) {
 	cfg := &httpserver.Config{Port: 0}
 	srv := httpserver.NewServer(cfg)

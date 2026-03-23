@@ -253,9 +253,9 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 
 		// 7. 启动写 goroutine（send → 客户端）
 		go func() {
+			defer cancel() // 写 goroutine 退出时触发清理
 			for msg := range send {
 				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
-					cancel()
 					return
 				}
 			}
@@ -264,7 +264,10 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 		// 8. 调用用户 handler
 		handler(ctx, recv, send)
 
-		// 9. 断开日志
+		// 9. 关闭 send channel 触发写 goroutine 退出
+		close(send)
+
+		// 10. 断开日志
 		if err := ctx.Err(); err != nil {
 			slog.Info("websocket client disconnected",
 				"path", c.Request.URL.Path,
