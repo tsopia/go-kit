@@ -252,6 +252,7 @@ func HandleUpload[Req any, Resp any](
 	maxBytes int64,
 	opts ...HandlerOption,
 ) gin.HandlerFunc {
+	innerHandler := Handle(fn, opts...)
 	return func(c *gin.Context) {
 		// 1. 清除 deadline
 		rc := http.NewResponseController(c.Writer)
@@ -262,7 +263,7 @@ func HandleUpload[Req any, Resp any](
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
 
 		// 3. 走正常的 Handle 逻辑
-		Handle(fn, opts...)(c)
+		innerHandler(c)
 	}
 }
 
