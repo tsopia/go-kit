@@ -129,7 +129,13 @@ func (s *Server) Use(middleware ...gin.HandlerFunc) {
 
 // SSE 注册一个 Server-Sent Events 路由。
 // 自动设置 SSE 响应头，清除 WriteDeadline，使用 streamingGroup（无 Timeout 中间件）。
-func (s *Server) SSE(relativePath string, handler SSEHandlerFunc) {
+func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOption) {
+	// 应用选项
+	cfg := &sseConfig{}
+	for _, opt := range opts {
+		opt.apply(cfg)
+	}
+
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
 		// 清除 WriteDeadline
 		rc := http.NewResponseController(c.Writer)
@@ -144,9 +150,17 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc) {
 		// 立即 flush header
 		c.Writer.Flush()
 
-		// 创建 sender 并调用 handler
-		sender := &sseSender{ginCtx: c}
-		handler(c.Request.Context(), sender)
+		// 创建 sender
+		sender := &sseSender{ginCtx: c, config: cfg}
+
+		// 启动心跳（如果配置了）
+		ctx := sender.runHeartbeat(c.Request.Context())
+
+		// 调用 handler
+		handler(ctx, sender)
+
+		// 连接断开时打印日志
+		sender.logDisconnect(ctx)
 	})
 }
 

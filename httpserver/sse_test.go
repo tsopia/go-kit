@@ -165,6 +165,31 @@ func TestSSESender_logDisconnect(t *testing.T) {
 	sender.logDisconnect(ctx)
 }
 
+func TestServer_SSE_withHeartbeat(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	server.SSE("/events", func(ctx context.Context, send SSESender) {
+		<-ctx.Done()
+	}, WithHeartbeat(100*time.Millisecond))
+
+	// 验证路由已注册（streamingGroup 前缀为 /stream）
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/stream/events" && r.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("SSE route not registered")
+	}
+}
+
 func TestSplitLines(t *testing.T) {
 	tests := []struct {
 		name  string
