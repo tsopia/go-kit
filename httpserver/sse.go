@@ -4,9 +4,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// SSEOption 是 SSE 路由的配置选项。
+type SSEOption interface {
+	apply(*sseConfig)
+}
+
+// sseConfig 是 SSE 内部配置。
+type sseConfig struct {
+	heartbeatInterval time.Duration
+}
+
+type sseOptionFunc func(*sseConfig)
+
+func (f sseOptionFunc) apply(cfg *sseConfig) {
+	f(cfg)
+}
+
+// WithHeartbeat 启用 SSE 心跳保活。
+// interval 是心跳间隔，建议 30s-60s（小于 Nginx 默认 60s 超时）。
+// 心跳格式为: `: ping 2026-03-23T10:15:30Z\n\n`
+func WithHeartbeat(interval time.Duration) SSEOption {
+	return sseOptionFunc(func(cfg *sseConfig) {
+		cfg.heartbeatInterval = interval
+	})
+}
 
 // SSESender 是 SSE 事件发送接口。
 type SSESender interface {

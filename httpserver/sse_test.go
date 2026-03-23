@@ -3,6 +3,7 @@ package httpserver
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -94,6 +95,22 @@ func TestSSESender_EventMultiline(t *testing.T) {
 	want := "event: msg\ndata: line1\ndata: line2\ndata: line3\n\n"
 	if body != want {
 		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+func TestWithHeartbeat(t *testing.T) {
+	opt := WithHeartbeat(30 * time.Second)
+	if opt == nil {
+		t.Fatal("WithHeartbeat should return non-nil option")
+	}
+}
+
+func TestSSEOption_apply(t *testing.T) {
+	cfg := &sseConfig{}
+	opt := WithHeartbeat(30 * time.Second)
+	opt.apply(cfg)
+	if cfg.heartbeatInterval != 30*time.Second {
+		t.Errorf("expected 30s, got %v", cfg.heartbeatInterval)
 	}
 }
 
