@@ -621,15 +621,68 @@ INFO sse client disconnected path=/ai/stream error=context canceled
 
 ## WebSocket 支持
 
+### 基础使用
+
 ```go
-ws := srv.StreamingGroup("/ws")
-ws.GET("/chat", func(c *gin.Context) {
-    conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-    // ... 使用你选择的 WS 库
+srv.WS("/chat", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+    // 第1条消息通常是认证
+    auth := <-recv
+    userID := validate(auth.Data)
+
+    for msg := range recv {
+        // 处理消息，发送响应
+        send <- httpserver.WSMessage{
+            Type: websocket.TextMessage,
+            Data: []byte("收到: " + string(msg.Data)),
+        }
+    }
 })
 ```
 
-`StreamingGroup` 创建的组不会挂载 Timeout 中间件，适合 WebSocket 等长连接场景。
+### 自定义配置
+
+```go
+srv.WS("/chat", handler,
+    httpserver.WithRecvBuffer(500, httpserver.DropNewest),
+    httpserver.WithSendBuffer(500, httpserver.DropOldest),
+    httpserver.WithWSPingPeriod(30*time.Second),
+    httpserver.WithWSPongTimeout(60*time.Second),
+)
+```
+
+### 缓冲策略
+
+| 策略 | 说明 |
+|------|------|
+| `Block` | 缓冲满时阻塞等待 |
+| `DropNewest` | 丢弃最新消息（默认 recv）|
+| `DropOldest` | 丢弃最旧消息（默认 send）|
+| `Disconnect` | 断开连接 |
+
+### 使用 Hub 实现聊天室
+
+```go
+var chatHub = httpserver.NewWSHub()
+
+srv.WS("/room/:id", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+    roomID := ctx.Value("params").(gin.Params).ByName("id")
+
+    // 加入房间
+    chatHub.Join(roomID, send)
+    defer chatHub.Leave(roomID, send)
+
+    for msg := range recv {
+        // 广播给房间所有人
+        chatHub.Broadcast(roomID, msg)
+    }
+})
+```
+
+### 自动功能
+
+- **Ping/Pong**：自动发送 ping，检测死连接
+- **断开日志**：自动记录客户端断开
+- **并发安全**：每个连接独立 handler
 
 ## 文件上传
 
