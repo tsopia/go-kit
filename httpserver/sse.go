@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -46,6 +47,7 @@ type SSEHandlerFunc func(ctx context.Context, send SSESender)
 
 type sseSender struct {
 	ginCtx *gin.Context
+	config *sseConfig
 }
 
 func (s *sseSender) Event(name string, data any) error {
@@ -104,6 +106,42 @@ func (s *sseSender) writeEvent(name string, data any) error {
 
 	s.ginCtx.Writer.Flush()
 	return nil
+}
+
+// runHeartbeat 启动心跳 goroutine，返回带取消的 context。
+// 如果未配置心跳间隔，直接返回原 context。
+func (s *sseSender) runHeartbeat(ctx context.Context) context.Context {
+	if s.config == nil || s.config.heartbeatInterval <= 0 {
+		return ctx
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		defer cancel()
+		ticker := time.NewTicker(s.config.heartbeatInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-ticker.C:
+				timestamp := t.Format(time.RFC3339)
+				_ = s.Comment(fmt.Sprintf("ping %s", timestamp))
+			}
+		}
+	}()
+	return ctx
+}
+
+// logDisconnect 在连接断开时打印日志。
+func (s *sseSender) logDisconnect(ctx context.Context) {
+	if err := ctx.Err(); err != nil {
+		slog.Info("sse client disconnected",
+			"path", s.ginCtx.Request.URL.Path,
+			"error", err,
+		)
+	}
 }
 
 func splitLines(s string) []string {

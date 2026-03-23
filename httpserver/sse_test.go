@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"context"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +114,55 @@ func TestSSEOption_apply(t *testing.T) {
 	if cfg.heartbeatInterval != 30*time.Second {
 		t.Errorf("expected 30s, got %v", cfg.heartbeatInterval)
 	}
+}
+
+func TestSSESender_heartbeat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	sender := &sseSender{
+		ginCtx: c,
+		config: &sseConfig{heartbeatInterval: 100 * time.Millisecond},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	sender.runHeartbeat(ctx)
+	time.Sleep(300 * time.Millisecond) // 等待心跳发送
+
+	body := w.Body.String()
+	if !strings.Contains(body, ": ping") {
+		t.Errorf("expected ping in body, got: %s", body)
+	}
+}
+
+func TestSSESender_runHeartbeat_noConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	sender := &sseSender{ginCtx: c}
+	ctx := context.Background()
+	got := sender.runHeartbeat(ctx)
+	if got != ctx {
+		t.Error("expected original context returned when no config")
+	}
+}
+
+func TestSSESender_logDisconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	req := httptest.NewRequest("GET", "/events", nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	sender := &sseSender{ginCtx: c}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消，模拟断开
+	// 仅验证不 panic
+	sender.logDisconnect(ctx)
 }
 
 func TestSplitLines(t *testing.T) {
