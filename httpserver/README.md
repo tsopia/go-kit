@@ -577,6 +577,47 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 
 **已实现**：`WithHTTPServerMutator(func(*http.Server)) Option` 允许在 http.Server 创建后、启动前修改底层配置。
 
+## SSE 支持
+
+```go
+srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
+    for {
+        select {
+        case <-ctx.Done():
+            return  // 客户端断开或 server 关闭
+        case data := <-updates:
+            send.Event("update", data)
+        }
+    }
+})
+```
+
+- 自动设置 `text/event-stream` 响应头
+- 自动清除 `WriteDeadline`，支持长时间连接
+- `ctx` 包含客户端断开和 server shutdown 信号
+
+## WebSocket 支持
+
+```go
+ws := srv.StreamingGroup("/ws")
+ws.GET("/chat", func(c *gin.Context) {
+    conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+    // ... 使用你选择的 WS 库
+})
+```
+
+`StreamingGroup` 创建的组不会挂载 Timeout 中间件，适合 WebSocket 等长连接场景。
+
+## 文件上传
+
+```go
+srv.POST("/upload", httpserver.HandleUpload(uploadHandler, 100<<20)) // 100MB 限制
+```
+
+- 自动清除 `ReadDeadline` 和 `WriteDeadline`
+- 使用 `MaxBytesReader` 限制 body 大小
+- 超出限制返回 413
+
 ## 更多说明
 
 更完整的设计说明与用法参考见：
