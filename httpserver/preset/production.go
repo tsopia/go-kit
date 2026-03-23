@@ -7,6 +7,10 @@ import (
 
 // NewProductionServer 创建带官方生产默认链路的服务器。
 func NewProductionServer(config *httpserver.Config, opts ...httpserver.Option) *httpserver.Server {
+	if config == nil {
+		config = httpserver.DefaultConfig()
+	}
+
 	// 1. 创建基础 server（此时还没有任何中间件）
 	srv := httpserver.NewServer(config, opts...)
 

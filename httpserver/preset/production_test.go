@@ -17,6 +17,7 @@ func TestNewProductionServerAppliesExpectedMiddlewareBehavior(t *testing.T) {
 	srv := NewProductionServer(&httpserver.Config{
 		EnableHealthCheck: false,
 		ReadTimeout:       5 * time.Millisecond,
+		HandlerTimeout:    5 * time.Millisecond,
 	})
 
 	srv.GET("/ok", func(c *gin.Context) {
