@@ -659,6 +659,8 @@ srv.WS("/chat", handler,
 | `DropOldest` | 丢弃最旧消息（默认 send）|
 | `Disconnect` | 断开连接 |
 
+**注意**: SendPolicy 当前版本预留未实现，send channel 的写入阻塞由用户 handler 控制。
+
 ### 使用 Hub 实现聊天室
 
 ```go

@@ -23,6 +23,8 @@ type WSConfig struct {
 	RecvBufferSize int
 	SendBufferSize int
 	RecvPolicy     WSBufferPolicy
+	// SendPolicy 当前未生效，预留用于未来版本
+	// 目前 send channel 的阻塞行为由用户 handler 控制
 	SendPolicy     WSBufferPolicy
 	PingPeriod     time.Duration
 	PongTimeout    time.Duration
