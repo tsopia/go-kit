@@ -3,6 +3,8 @@ package httpserver
 import (
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestWSBufferPolicy_Constants(t *testing.T) {
@@ -39,5 +41,46 @@ func TestWSConfig_Defaults(t *testing.T) {
 	}
 	if cfg.PongTimeout != 60*time.Second {
 		t.Errorf("expected PongTimeout=60s, got %v", cfg.PongTimeout)
+	}
+}
+
+func TestWSMessage(t *testing.T) {
+	msg := WSMessage{
+		Type: websocket.TextMessage,
+		Data: []byte("hello"),
+	}
+	if msg.Type != websocket.TextMessage {
+		t.Error("Type mismatch")
+	}
+	if string(msg.Data) != "hello" {
+		t.Error("Data mismatch")
+	}
+}
+
+func TestWSOptions(t *testing.T) {
+	cfg := defaultWSConfig()
+
+	opt1 := WithRecvBuffer(200, Block)
+	opt1.apply(&cfg)
+	if cfg.RecvBufferSize != 200 || cfg.RecvPolicy != Block {
+		t.Error("WithRecvBuffer failed")
+	}
+
+	opt2 := WithWSPingPeriod(10 * time.Second)
+	opt2.apply(&cfg)
+	if cfg.PingPeriod != 10*time.Second {
+		t.Error("WithWSPingPeriod failed")
+	}
+
+	opt3 := WithSendBuffer(300, DropOldest)
+	opt3.apply(&cfg)
+	if cfg.SendBufferSize != 300 || cfg.SendPolicy != DropOldest {
+		t.Error("WithSendBuffer failed")
+	}
+
+	opt4 := WithWSPongTimeout(20 * time.Second)
+	opt4.apply(&cfg)
+	if cfg.PongTimeout != 20*time.Second {
+		t.Error("WithWSPongTimeout failed")
 	}
 }
