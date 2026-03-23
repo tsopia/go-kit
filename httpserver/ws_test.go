@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -82,5 +83,30 @@ func TestWSOptions(t *testing.T) {
 	opt4.apply(&cfg)
 	if cfg.PongTimeout != 20*time.Second {
 		t.Error("WithWSPongTimeout failed")
+	}
+}
+
+func TestServer_WS(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	server.WS("/ws", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+		<-ctx.Done()
+	})
+
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		// WS 路由注册在 streamingGroup 下，路径为 /stream/ws
+		if r.Path == "/stream/ws" && r.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("WS route not registered")
 	}
 }

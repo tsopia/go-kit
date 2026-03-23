@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/tsopia/go-kit/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 // Server HTTP服务器 - 最小化封装
@@ -161,6 +163,114 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 
 		// 连接断开时打印日志
 		sender.logDisconnect(ctx)
+	})
+}
+
+// WS 注册一个 WebSocket 路由。
+// 自动处理 Upgrade、ping/pong、缓冲策略和断开日志。
+func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption) {
+	cfg := defaultWSConfig()
+	for _, opt := range opts {
+		opt.apply(&cfg)
+	}
+
+	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
+		// 1. Upgrade 连接
+		conn, err := WSUpgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// 2. 配置 pong handler
+		conn.SetPongHandler(func(string) error {
+			return nil
+		})
+
+		// 3. 创建缓冲 channel
+		recv := make(chan WSMessage, cfg.RecvBufferSize)
+		send := make(chan WSMessage, cfg.SendBufferSize)
+
+		// 4. 启动上下文
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+
+		// 5. 启动读 goroutine（客户端 → recv）
+		go func() {
+			defer close(recv)
+			for {
+				msgType, data, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				msg := WSMessage{Type: msgType, Data: data}
+
+				select {
+				case recv <- msg:
+				default:
+					switch cfg.RecvPolicy {
+					case Block:
+						recv <- msg
+					case DropNewest:
+						// 丢弃
+					case DropOldest:
+						select {
+						case <-recv:
+						default:
+						}
+						select {
+						case recv <- msg:
+						default:
+						}
+					case Disconnect:
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+
+		// 6. 启动 ping goroutine
+		go func() {
+			ticker := time.NewTicker(cfg.PingPeriod)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					deadline := time.Now().Add(cfg.PongTimeout)
+					conn.SetWriteDeadline(deadline)
+					if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+						cancel()
+						return
+					}
+					conn.SetWriteDeadline(time.Time{})
+				}
+			}
+		}()
+
+		// 7. 启动写 goroutine（send → 客户端）
+		go func() {
+			for msg := range send {
+				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
+					cancel()
+					return
+				}
+			}
+		}()
+
+		// 8. 调用用户 handler
+		handler(ctx, recv, send)
+
+		// 9. 断开日志
+		if err := ctx.Err(); err != nil {
+			slog.Info("websocket client disconnected",
+				"path", c.Request.URL.Path,
+				"error", err,
+			)
+		}
 	})
 }
 
