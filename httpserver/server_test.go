@@ -64,8 +64,11 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default port 8080, got %d", config.Port)
 	}
 
-	if config.ReadTimeout != 10*time.Second {
-		t.Errorf("Expected default ReadTimeout 10s, got %v", config.ReadTimeout)
+	if config.ReadTimeout != 30*time.Second {
+		t.Errorf("Expected default ReadTimeout 30s, got %v", config.ReadTimeout)
+	}
+	if config.WriteTimeout != 60*time.Second {
+		t.Errorf("Expected default WriteTimeout 60s, got %v", config.WriteTimeout)
 	}
 }
 
