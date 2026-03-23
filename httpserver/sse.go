@@ -61,6 +61,11 @@ func (s *sseSender) writeEvent(name string, data any) error {
 	}
 
 	lines := splitLines(dataStr)
+	if len(lines) == 0 {
+		if _, err := fmt.Fprint(s.ginCtx.Writer, "data: \n"); err != nil {
+			return err
+		}
+	}
 	for _, line := range lines {
 		if _, err := fmt.Fprintf(s.ginCtx.Writer, "data: %s\n", line); err != nil {
 			return err

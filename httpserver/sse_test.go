@@ -60,3 +60,87 @@ func TestSSESender_Comment(t *testing.T) {
 		t.Errorf("body = %q, want %q", body, want)
 	}
 }
+
+func TestSSESender_DataEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	sender := &sseSender{ginCtx: c}
+	err := sender.Data("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := w.Body.String()
+	want := "data: \n\n"
+	if body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+func TestSSESender_EventMultiline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	sender := &sseSender{ginCtx: c}
+	err := sender.Event("msg", "line1\nline2\nline3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	body := w.Body.String()
+	want := "event: msg\ndata: line1\ndata: line2\ndata: line3\n\n"
+	if body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "empty string",
+			input: "",
+			want:  nil,
+		},
+		{
+			name:  "single line no newline",
+			input: "hello",
+			want:  []string{"hello"},
+		},
+		{
+			name:  "single line with trailing newline",
+			input: "hello\n",
+			want:  []string{"hello"},
+		},
+		{
+			name:  "multiple lines",
+			input: "line1\nline2\nline3",
+			want:  []string{"line1", "line2", "line3"},
+		},
+		{
+			name:  "multiple lines with trailing newline",
+			input: "line1\nline2\n",
+			want:  []string{"line1", "line2"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitLines(tc.input)
+			if len(got) != len(tc.want) {
+				t.Fatalf("splitLines(%q) = %v (len %d), want %v (len %d)", tc.input, got, len(got), tc.want, len(tc.want))
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("splitLines(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
