@@ -62,6 +62,61 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	// 实际生产环境可以使用 runtime.NumGoroutine() 检测
 }
 
+func TestWS_PongTimeout(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	ctxCancelled := make(chan bool, 1)
+
+	// 使用非常短的 ping/pong 超时用于测试
+	srv.WS("/pongtest", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+		<-ctx.Done()
+		ctxCancelled <- true
+	},
+		httpserver.WithWSPingPeriod(100*time.Millisecond),
+		httpserver.WithWSPongTimeout(200*time.Millisecond),
+	)
+
+	// 启动服务器
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go srv.Serve(ln)
+	time.Sleep(100 * time.Millisecond)
+
+	// 使用自定义 dialer，禁用自动 pong 响应来模拟假死客户端
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 5 * time.Second,
+	}
+
+	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/pongtest"}
+	conn, _, err := dialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	// 禁用自动 pong 响应（模拟假死）
+	conn.SetPongHandler(func(string) error {
+		return nil // 不更新任何状态
+	})
+
+	// 等待 context 被取消（由于 pong 超时）
+	select {
+	case <-ctxCancelled:
+		// 成功：pong 超时触发了 context 取消
+	case <-time.After(2 * time.Second):
+		t.Error("context was not cancelled due to pong timeout")
+	}
+}
+
 func TestWS_Integration_Echo(t *testing.T) {
 	cfg := &httpserver.Config{Port: 0}
 	srv := httpserver.NewServer(cfg)

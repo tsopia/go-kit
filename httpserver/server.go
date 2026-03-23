@@ -182,8 +182,15 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 		}
 		defer conn.Close()
 
-		// 2. 配置 pong handler
+		// 2. 配置 pong handler，跟踪最后收到 pong 的时间
+		var (
+			lastPong   = time.Now()
+			lastPongMu sync.Mutex
+		)
 		conn.SetPongHandler(func(string) error {
+			lastPongMu.Lock()
+			lastPong = time.Now()
+			lastPongMu.Unlock()
 			return nil
 		})
 
@@ -230,7 +237,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 			}
 		}()
 
-		// 6. 启动 ping goroutine
+		// 6. 启动 ping goroutine，带 Pong 超时检测
 		go func() {
 			ticker := time.NewTicker(cfg.PingPeriod)
 			defer ticker.Stop()
@@ -240,6 +247,17 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					// 检查是否超过 PongTimeout 没有收到 pong
+					lastPongMu.Lock()
+					sinceLastPong := time.Since(lastPong)
+					lastPongMu.Unlock()
+
+					if sinceLastPong > cfg.PongTimeout {
+						// 超过 pong 超时时间，断开连接
+						cancel()
+						return
+					}
+
 					deadline := time.Now().Add(cfg.PongTimeout)
 					conn.SetWriteDeadline(deadline)
 					if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
