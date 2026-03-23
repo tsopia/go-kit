@@ -127,6 +127,35 @@ func (s *Server) Use(middleware ...gin.HandlerFunc) {
 	s.engine.Use(middleware...)
 }
 
+// SSE 注册一个 Server-Sent Events 路由。
+// 自动设置 SSE 响应头，清除 WriteDeadline，使用 streamingGroup（无 Timeout 中间件）。
+func (s *Server) SSE(relativePath string, handler SSEHandlerFunc) {
+	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
+		// 清除 WriteDeadline
+		rc := http.NewResponseController(c.Writer)
+		_ = rc.SetWriteDeadline(time.Time{})
+
+		// 设置 SSE 响应头
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("X-Accel-Buffering", "no")
+		c.Status(http.StatusOK)
+
+		// 立即 flush header
+		c.Writer.Flush()
+
+		// 创建 sender 并调用 handler
+		sender := &sseSender{ginCtx: c}
+		handler(c.Request.Context(), sender)
+	})
+}
+
+// StreamingGroup 创建一个流式路由组，用于 WebSocket 等长连接场景。
+// 该组不会挂载 Timeout 中间件。
+func (s *Server) StreamingGroup(relativePath string, handlers ...gin.HandlerFunc) *gin.RouterGroup {
+	return s.getStreamingGroup().Group(relativePath, handlers...)
+}
+
 // SetGroups 设置普通和流式路由组，由 preset 调用。
 func (s *Server) SetGroups(regular, streaming *gin.RouterGroup) {
 	s.regularGroup = regular

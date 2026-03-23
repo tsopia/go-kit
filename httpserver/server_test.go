@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -875,5 +876,38 @@ func TestCheckHealthWithCancelledContext(t *testing.T) {
 	if status.Status != "healthy" {
 		t.Errorf("status = %q, want %q — health check should use independent context, not inherit cancelled ctx",
 			status.Status, "healthy")
+	}
+}
+
+func TestServer_SSE(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := DefaultConfig()
+	srv := NewServer(config)
+
+	// 设置 streaming group（模拟 preset 行为）
+	streamingGroup := srv.Engine().Group("/")
+	srv.SetGroups(nil, streamingGroup)
+
+	srv.SSE("/events", func(ctx context.Context, send SSESender) {
+		send.Event("test", "hello")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want %q", contentType, "text/event-stream")
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "event: test") {
+		t.Errorf("body should contain 'event: test', got: %s", body)
 	}
 }
