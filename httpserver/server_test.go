@@ -87,9 +87,9 @@ func TestConfigNormalizeAndValidate(t *testing.T) {
 			wantCfg: Config{
 				Host:              "0.0.0.0",
 				Port:              8080,
-				ReadTimeout:       10 * time.Second,
+				ReadTimeout:       30 * time.Second,
 				ReadHeaderTimeout: 5 * time.Second,
-				WriteTimeout:      10 * time.Second,
+				WriteTimeout:      60 * time.Second,
 				IdleTimeout:       60 * time.Second,
 				MaxHeaderBytes:    1 << 20,
 				ShutdownTimeout:   10 * time.Second,
@@ -820,6 +820,35 @@ func TestOnStateChangeCalledSynchronously(t *testing.T) {
 	}
 	if events[1] != "starting->ready" {
 		t.Errorf("events[1] = %q, want %q", events[1], "starting->ready")
+	}
+}
+
+func TestServer_SetGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := DefaultConfig()
+	srv := NewServer(config)
+
+	// Create a custom group to verify SetGroups works
+	regularGroup := srv.Engine().Group("/regular")
+	streamingGroup := srv.Engine().Group("/streaming")
+
+	// Set the groups
+	srv.SetGroups(regularGroup, streamingGroup)
+
+	// Register a route - should go to regularGroup
+	srv.GET("/test", func(c *gin.Context) {
+		c.String(200, "ok")
+	})
+
+	// Verify the route was registered
+	// The route should be accessible via the engine
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/regular/test", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected route to be registered, got status %d", w.Code)
 	}
 }
 
