@@ -279,11 +279,11 @@ regularGroup   *gin.RouterGroup  // 有 Timeout 中间件
 streamingGroup *gin.RouterGroup  // 无 Timeout 中间件，用于 SSE/WS
 ```
 
-- [ ] **Step 2: 新增设置 Group 的方法（内部使用）**
+- [ ] **Step 2: 新增设置 Group 的方法**
 
 ```go
-// setGroups 设置路由分组，由 preset 调用。
-func (s *Server) setGroups(regular, streaming *gin.RouterGroup) {
+// SetGroups 设置普通和流式路由组，由 preset 调用。
+func (s *Server) SetGroups(regular, streaming *gin.RouterGroup) {
 	s.regularGroup = regular
 	s.streamingGroup = streaming
 }
@@ -383,30 +383,6 @@ git commit -m "refactor(httpserver): support dual route groups for timeout handl
 // 自动设置 SSE 响应头，清除 WriteDeadline，使用 streamingGroup（无 Timeout 中间件）。
 func (s *Server) SSE(relativePath string, handler SSEHandlerFunc) {
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
-		// 1. 清除 WriteDeadline
-		if rc, ok := c.Writer.(interface{ SetWriteDeadline(t time.Time) error }); ok {
-			_ = rc.SetWriteDeadline(time.Time{})
-		}
-
-		// 2. 设置 SSE 响应头
-		c.Header("Content-Type", "text/event-stream")
-		c.Header("Cache-Control", "no-cache")
-		c.Header("X-Accel-Buffering", "no")
-		c.Status(http.StatusOK)
-
-		// 3. 创建 sender 并调用 handler
-		sender := &sseSender{ginCtx: c}
-		handler(c.Request.Context(), sender)
-	})
-}
-```
-
-**注意:** `SetWriteDeadline` 需要通过 http.ResponseController 来做，上面的代码需要调整。正确写法：
-
-```go
-// SSE 注册一个 Server-Sent Events 路由。
-func (s *Server) SSE(relativePath string, handler SSEHandlerFunc) {
-	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
 		// 清除 WriteDeadline
 		rc := http.NewResponseController(c.Writer)
 		_ = rc.SetWriteDeadline(time.Time{})
@@ -466,7 +442,7 @@ func TestServer_SSE(t *testing.T) {
 
 	// 设置 streaming group（模拟 preset 行为）
 	streamingGroup := srv.Engine().Group("/")
-	srv.setGroups(nil, streamingGroup)
+	srv.SetGroups(nil, streamingGroup)
 
 	srv.SSE("/events", func(ctx context.Context, send SSESender) {
 		send.Event("test", "hello")
@@ -684,9 +660,9 @@ func NewProductionServer(config *httpserver.Config, opts ...httpserver.Option) *
 }
 ```
 
-- [ ] **Step 2: 修改 Server 添加 SetGroups 方法（暴露版本）**
+- [ ] **Step 2: 确认 SetGroups 方法**
 
-在 `httpserver/server.go` 中，把之前内部的 `setGroups` 改成导出的 `SetGroups`：
+Task 3 中已添加 `SetGroups` 方法，确保 `httpserver/server.go` 中有：
 
 ```go
 // SetGroups 设置普通和流式路由组，由 preset 调用。
@@ -717,9 +693,9 @@ git commit -m "feat(httpserver/preset): create dual route groups for streaming s
 ## Task 7: 创建集成测试验证完整流程
 
 **Files:**
-- Create: `httpserver/integration_test.go`（可选，如果已有测试覆盖可跳过）
+- Create: `httpserver/integration_test.go`
 
-**背景:** 验证 preset 创建的双 Group 工作正常。
+**背景:** 验证 preset 创建的双 Group 端到端工作正常。
 
 - [ ] **Step 1: 创建集成测试**
 
