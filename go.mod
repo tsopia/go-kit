@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.4
 	github.com/aws/smithy-go v1.24.2
-	github.com/cloudwego/eino v0.7.32
+	github.com/cloudwego/eino v0.8.4
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20260204064123-1f91f547c77e
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
 	github.com/cloudwego/eino-ext/components/model/arkbot v0.1.2
@@ -72,8 +72,8 @@ require (
 	github.com/baidubce/bce-sdk-go v0.9.164 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic v1.14.1 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic v1.15.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
