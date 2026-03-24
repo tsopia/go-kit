@@ -31,6 +31,7 @@ type PromptConfig struct {
 type ToolsConfig struct {
 	Standard  []tool.BaseTool
 	Invokable []InvokableTool
+	MCPServers []MCPConfig
 }
 
 type ExecutionConfig struct {

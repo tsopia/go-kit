@@ -34,3 +34,7 @@ func adaptTools(tools []InvokableTool) []tool.BaseTool {
 	}
 	return adapted
 }
+
+func appendInvokableTools(dst []tool.BaseTool, tools []InvokableTool) []tool.BaseTool {
+	return append(dst, adaptTools(tools)...)
+}

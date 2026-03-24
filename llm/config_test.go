@@ -32,6 +32,9 @@ func TestAgentConfigDefaults(t *testing.T) {
 	if cfg.Tools.Invokable != nil {
 		t.Fatalf("expected nil invokable tools, got %#v", cfg.Tools.Invokable)
 	}
+	if cfg.Tools.MCPServers != nil {
+		t.Fatalf("expected nil MCP servers, got %#v", cfg.Tools.MCPServers)
+	}
 	if cfg.Execution.Mode != "" {
 		t.Fatalf("expected zero value mode before normalization, got %q", cfg.Execution.Mode)
 	}
