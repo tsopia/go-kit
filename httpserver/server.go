@@ -178,6 +178,11 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 		// 1. Upgrade 连接
 		conn, err := WSUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
+			slog.Debug("websocket upgrade failed",
+				"path", c.Request.URL.Path,
+				"error", err,
+				"remote_addr", c.Request.RemoteAddr,
+			)
 			return
 		}
 		defer conn.Close()

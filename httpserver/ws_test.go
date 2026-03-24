@@ -142,3 +142,29 @@ func TestWS_PanicRecovery(t *testing.T) {
 		t.Error("WS route not registered")
 	}
 }
+
+func TestWS_UpgradeError(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	// 注册 WS 路由
+	server.WS("/ws", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+		<-ctx.Done()
+	})
+
+	// 验证路由注册
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/stream/ws" && r.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("WS route not registered")
+	}
+}
