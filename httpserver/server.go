@@ -194,173 +194,131 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 		}
 		defer conn.Close()
 
-		// 2. 创建带超时的 context
+		// 2. 创建 session context
 		ctx, cancel := context.WithCancel(c.Request.Context())
 		defer cancel()
 
-		// 3. 启动读超时监控（如果配置了）
-		if cfg.ReadTimeout > 0 {
-			go func() {
-				timer := time.NewTimer(cfg.ReadTimeout)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					cancel() // 读超时触发关闭
-				case <-ctx.Done():
-					// 正常关闭
-				}
-			}()
+		readIdleTimeout := cfg.ReadIdleTimeout
+		if readIdleTimeout <= 0 {
+			readIdleTimeout = cfg.PongTimeout
 		}
 
-		// 4. 配置 pong handler，跟踪最后收到 pong 的时间
-		var (
-			lastPong   = time.Now()
-			lastPongMu sync.Mutex
-		)
+		controlDeadline := func() time.Time {
+			switch {
+			case cfg.WriteTimeout > 0:
+				return time.Now().Add(cfg.WriteTimeout)
+			case cfg.PongTimeout > 0:
+				return time.Now().Add(cfg.PongTimeout)
+			default:
+				return time.Time{}
+			}
+		}
+
+		if readIdleTimeout > 0 {
+			_ = conn.SetReadDeadline(time.Now().Add(readIdleTimeout))
+		}
 		conn.SetPongHandler(func(string) error {
-			lastPongMu.Lock()
-			lastPong = time.Now()
-			lastPongMu.Unlock()
-			return nil
+			if readIdleTimeout <= 0 {
+				return nil
+			}
+			return conn.SetReadDeadline(time.Now().Add(readIdleTimeout))
 		})
 
-		// 5. 创建带策略的发送器
-		sender := newWSSender(cfg.SendBufferSize, cfg.SendPolicy)
-
-		// 6. 启动发送器 goroutine（应用 SendPolicy）
-		go sender.Run(cancel)
-
-		// 7. 创建接收 channel
-		recv := make(chan WSMessage, cfg.RecvBufferSize)
-
-		// 8. 启动读 goroutine（客户端 → recv）
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("websocket read goroutine panic",
-						"path", c.Request.URL.Path,
-						"recover", r,
-					)
-					cancel()
-				}
-			}()
-			defer close(recv)
-			for {
-				msgType, data, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
-				msg := WSMessage{Type: msgType, Data: data}
-
-				select {
-				case recv <- msg:
-				default:
-					switch cfg.RecvPolicy {
-					case Block:
-						recv <- msg
-					case DropNewest:
-						// 丢弃
-					case DropOldest:
-						select {
-						case <-recv:
-						default:
-						}
-						select {
-						case recv <- msg:
-						default:
-						}
-					case Disconnect:
-						cancel()
-						return
-					}
-				}
-			}
-		}()
-
-		// 9. 启动 ping goroutine，带 Pong 超时检测
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("websocket ping goroutine panic",
-						"path", c.Request.URL.Path,
-						"recover", r,
-					)
-					cancel()
-				}
-			}()
-			ticker := time.NewTicker(cfg.PingPeriod)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					// 检查是否超过 PongTimeout 没有收到 pong
-					lastPongMu.Lock()
-					sinceLastPong := time.Since(lastPong)
-					lastPongMu.Unlock()
-
-					if sinceLastPong > cfg.PongTimeout {
-						// 超过 pong 超时时间，断开连接
-						cancel()
-						return
-					}
-
-					deadline := time.Now().Add(cfg.PongTimeout)
-					conn.SetWriteDeadline(deadline)
-					if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-						cancel()
-						return
-					}
-					conn.SetWriteDeadline(time.Time{})
-				}
-			}
-		}()
-
-		// 10. 启动写 goroutine（sender.Channel() → 客户端）
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("websocket write goroutine panic",
-						"path", c.Request.URL.Path,
-						"recover", r,
-					)
-				}
-				cancel()
-			}()
-			for msg := range sender.Channel() {
-				if cfg.WriteTimeout > 0 {
-					conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
-				}
-				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
-					return
-				}
-				if cfg.WriteTimeout > 0 {
-					conn.SetWriteDeadline(time.Time{})
-				}
-			}
-		}()
-
+		send := make(chan WSMessage, cfg.SendBufferSize)
+		recv := make(chan WSMessage, 1)
 		session := &wsSession{
 			ctx:     ctx,
 			request: c.Request,
 			params:  c.Params,
 			recv:    recv,
-			send:    sender.Proxy(),
-			closeFn: func(_ int, _ string) error {
+			send:    send,
+			closeFn: func(code int, reason string) error {
 				cancel()
-				return nil
+				err := conn.WriteControl(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(code, reason),
+					controlDeadline(),
+				)
+				if closeErr := conn.Close(); err == nil && closeErr != nil {
+					err = closeErr
+				}
+				return err
 			},
 		}
 
-		// 8. 调用用户 handler
+		var pumps sync.WaitGroup
+
+		pumps.Add(1)
+		go func() {
+			defer pumps.Done()
+			defer close(recv)
+			defer cancel()
+			for {
+				msgType, data, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				if readIdleTimeout > 0 {
+					_ = conn.SetReadDeadline(time.Now().Add(readIdleTimeout))
+				}
+				select {
+				case recv <- WSMessage{Type: msgType, Data: data}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
+		pumps.Add(1)
+		go func() {
+			defer pumps.Done()
+			defer cancel()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case msg, ok := <-send:
+					if !ok {
+						return
+					}
+					if cfg.WriteTimeout > 0 {
+						_ = conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
+					}
+					if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
+						return
+					}
+					if cfg.WriteTimeout > 0 {
+						_ = conn.SetWriteDeadline(time.Time{})
+					}
+				}
+			}
+		}()
+
+		if cfg.PingPeriod > 0 {
+			pumps.Add(1)
+			go func() {
+				defer pumps.Done()
+				ticker := time.NewTicker(cfg.PingPeriod)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if err := conn.WriteControl(websocket.PingMessage, nil, controlDeadline()); err != nil {
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+		}
+
 		handler(session)
 
-		// 9. 关闭代理 channel 触发发送器退出
-		close(sender.Proxy())
+		_ = session.Close(websocket.CloseNormalClosure, "")
+		pumps.Wait()
 
-		// 10. 断开日志
 		if err := ctx.Err(); err != nil {
 			slog.Info("websocket client disconnected",
 				"path", c.Request.URL.Path,

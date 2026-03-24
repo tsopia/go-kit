@@ -3,17 +3,20 @@ package httpserver
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
 
 type wsSession struct {
-	ctx     context.Context
-	request *http.Request
-	params  gin.Params
-	recv    <-chan WSMessage
-	send    chan<- WSMessage
-	closeFn func(int, string) error
+	ctx       context.Context
+	request   *http.Request
+	params    gin.Params
+	recv      <-chan WSMessage
+	send      chan WSMessage
+	closeFn   func(int, string) error
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (s *wsSession) Context() context.Context {
@@ -53,8 +56,10 @@ func (s *wsSession) TrySend(msg WSMessage) bool {
 }
 
 func (s *wsSession) Close(code int, reason string) error {
-	if s.closeFn == nil {
-		return nil
-	}
-	return s.closeFn(code, reason)
+	s.closeOnce.Do(func() {
+		if s.closeFn != nil {
+			s.closeErr = s.closeFn(code, reason)
+		}
+	})
+	return s.closeErr
 }

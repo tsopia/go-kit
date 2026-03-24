@@ -8,24 +8,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// WSBufferPolicy 定义缓冲满时的处理策略
-type WSBufferPolicy int
-
-const (
-	Block      WSBufferPolicy = iota // 阻塞等待
-	DropNewest                       // 丢弃最新消息
-	DropOldest                       // 丢弃最旧消息
-	Disconnect                       // 断开连接
-)
-
 // WSConfig 是 WebSocket 配置
 type WSConfig struct {
-	RecvBufferSize int
 	SendBufferSize int
-	RecvPolicy     WSBufferPolicy
-	// SendPolicy 当前未生效，预留用于未来版本
-	// 目前 send channel 的阻塞行为由用户 handler 控制
-	SendPolicy     WSBufferPolicy
 	PingPeriod     time.Duration
 	PongTimeout    time.Duration
 }
@@ -33,16 +18,13 @@ type WSConfig struct {
 // WSRouteConfig 是 WebSocket 路由级配置
 type WSRouteConfig struct {
 	WSConfig
-	ReadTimeout  time.Duration // 读取消息超时，0 = 无超时
-	WriteTimeout time.Duration // 发送消息超时，0 = 无超时
+	ReadIdleTimeout time.Duration // 0 = 使用 PongTimeout
+	WriteTimeout    time.Duration // 发送消息超时，0 = 无超时
 }
 
 func defaultWSConfig() WSConfig {
 	return WSConfig{
-		RecvBufferSize: 100,
 		SendBufferSize: 100,
-		RecvPolicy:     DropNewest,
-		SendPolicy:     DropOldest,
 		PingPeriod:     30 * time.Second,
 		PongTimeout:    60 * time.Second,
 	}
@@ -51,7 +33,6 @@ func defaultWSConfig() WSConfig {
 func defaultWSRouteConfig() WSRouteConfig {
 	return WSRouteConfig{
 		WSConfig:     defaultWSConfig(),
-		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 }
@@ -111,10 +92,10 @@ func (f wsRouteOptionFunc) applyRoute(cfg *WSRouteConfig) {
 	f(cfg)
 }
 
-// WithReadTimeout 设置读取消息超时
-func WithReadTimeout(d time.Duration) WSRouteOption {
+// WithReadIdleTimeout 设置读空闲超时。
+func WithReadIdleTimeout(d time.Duration) WSRouteOption {
 	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
-		cfg.ReadTimeout = d
+		cfg.ReadIdleTimeout = d
 	})
 }
 
@@ -125,19 +106,10 @@ func WithWriteTimeout(d time.Duration) WSRouteOption {
 	})
 }
 
-// WithRecvBuffer 设置接收缓冲大小和策略
-func WithRecvBuffer(size int, policy WSBufferPolicy) wsOptionFunc {
-	return wsOptionFunc(func(cfg *WSConfig) {
-		cfg.RecvBufferSize = size
-		cfg.RecvPolicy = policy
-	})
-}
-
-// WithSendBuffer 设置发送缓冲大小和策略
-func WithSendBuffer(size int, policy WSBufferPolicy) wsOptionFunc {
+// WithWSSendBuffer 设置发送队列大小。
+func WithWSSendBuffer(size int) wsOptionFunc {
 	return wsOptionFunc(func(cfg *WSConfig) {
 		cfg.SendBufferSize = size
-		cfg.SendPolicy = policy
 	})
 }
 
