@@ -212,7 +212,3 @@ func (a *Agent) Close() error {
 func (a *Agent) ExportGraph() (compose.AnyGraph, []compose.GraphAddNodeOpt) {
 	return a.inner.ExportGraph()
 }
-
-// Deprecated: 新代码应优先使用 AgentConfig.Execution.Mode。
-// ToolChoiceForced 仅保留给旧配置的兼容路径。
-var ToolChoiceForced = schema.ToolChoiceForced

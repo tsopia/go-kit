@@ -507,9 +507,9 @@ func TestNewAgent_ExtractionMode(t *testing.T) {
 	}
 }
 
-// ── 兼容路径测试 ───────────────────────────────────────────────────
+// ── legacy-only 兼容路径测试 ───────────────────────────────────────
 
-func TestNewAgent_ToolChoiceCompatibilityBuild(t *testing.T) {
+func TestNewAgent_LegacyToolChoiceBuild(t *testing.T) {
 	fm := &fakeToolCallingModel{
 		responses: []*schema.Message{{Content: "hello"}},
 	}
