@@ -1,0 +1,91 @@
+package llm
+
+import (
+	"fmt"
+
+	"github.com/cloudwego/eino/schema"
+)
+
+type RuntimeSpec struct {
+	Model         AgentModelConfig
+	Prompt        PromptConfig
+	Tools         ToolsConfig
+	Execution     RuntimeExecutionSpec
+	Streaming     StreamingConfig
+	Observability ObservabilityConfig
+}
+
+type RuntimeExecutionSpec struct {
+	Mode              ExecutionMode
+	DisableTools      bool
+	ToolChoice        schema.ToolChoice
+	RepairMaxAttempts int
+	MaxStep           int
+	DirectReturnTools map[string]struct{}
+}
+
+func compileRuntimeSpec(cfg AgentConfig) (RuntimeSpec, error) {
+	mode, err := normalizeExecutionMode(cfg)
+	if err != nil {
+		return RuntimeSpec{}, err
+	}
+
+	spec := RuntimeSpec{
+		Model:         cfg.Model,
+		Prompt:        cfg.Prompt,
+		Tools:         cfg.Tools,
+		Streaming:     cfg.Streaming,
+		Observability: cfg.Observability,
+		Execution: RuntimeExecutionSpec{
+			Mode:              mode,
+			MaxStep:           cfg.Execution.MaxStep,
+			DirectReturnTools: cloneDirectReturnTools(cfg.Execution.DirectReturnTools),
+		},
+	}
+
+	switch mode {
+	case Conversation:
+		spec.Execution.DisableTools = true
+		spec.Execution.ToolChoice = schema.ToolChoiceForbidden
+	case Assistant:
+		spec.Execution.ToolChoice = schema.ToolChoiceAllowed
+	case Extraction:
+		spec.Execution.ToolChoice = schema.ToolChoiceForced
+		spec.Execution.RepairMaxAttempts = cfg.Execution.MaxRetries
+		if spec.Execution.RepairMaxAttempts <= 0 {
+			spec.Execution.RepairMaxAttempts = 3
+		}
+	default:
+		return RuntimeSpec{}, fmt.Errorf("unsupported execution mode: %q", mode)
+	}
+
+	return spec, nil
+}
+
+func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
+	switch cfg.Execution.Mode {
+	case "":
+		if len(cfg.Tools.Standard) == 0 && len(cfg.Tools.Invokable) == 0 {
+			return Conversation, nil
+		}
+		if cfg.Execution.ToolChoice != nil && *cfg.Execution.ToolChoice == schema.ToolChoiceForced {
+			return Extraction, nil
+		}
+		return Assistant, nil
+	case Conversation, Assistant, Extraction:
+		return cfg.Execution.Mode, nil
+	default:
+		return "", fmt.Errorf("unknown execution mode: %q", cfg.Execution.Mode)
+	}
+}
+
+func cloneDirectReturnTools(src map[string]struct{}) map[string]struct{} {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]struct{}, len(src))
+	for name := range src {
+		dst[name] = struct{}{}
+	}
+	return dst
+}
