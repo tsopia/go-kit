@@ -342,8 +342,20 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			}
 		}()
 
-		// 8. 调用用户 handler，传入代理 channel
-		handler(ctx, recv, sender.Proxy())
+		session := &wsSession{
+			ctx:     ctx,
+			request: c.Request,
+			params:  c.Params,
+			recv:    recv,
+			send:    sender.Proxy(),
+			closeFn: func(_ int, _ string) error {
+				cancel()
+				return nil
+			},
+		}
+
+		// 8. 调用用户 handler
+		handler(session)
 
 		// 9. 关闭代理 channel 触发发送器退出
 		close(sender.Proxy())

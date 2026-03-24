@@ -71,8 +71,19 @@ type WSMessage struct {
 	Data []byte // 消息内容
 }
 
+// WSSession 描述 WebSocket handler 可见的连接能力。
+type WSSession interface {
+	Context() context.Context
+	Request() *http.Request
+	Param(name string) string
+	Recv() <-chan WSMessage
+	Send(msg WSMessage) error
+	TrySend(msg WSMessage) bool
+	Close(code int, reason string) error
+}
+
 // WSHandlerFunc 是 WebSocket handler 的函数签名
-type WSHandlerFunc func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage)
+type WSHandlerFunc func(session WSSession)
 
 // WSOption 是 WebSocket 配置选项
 type WSOption interface {

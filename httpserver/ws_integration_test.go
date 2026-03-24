@@ -1,7 +1,6 @@
 package httpserver_test
 
 import (
-	"context"
 	"net"
 	"net/url"
 	"testing"
@@ -22,7 +21,7 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	// 追踪 handler 完成
 	handlerDone := make(chan bool, 1)
 
-	srv.WS("/test", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+	srv.WS("/test", func(session httpserver.WSSession) {
 		// 简单 handler，立即返回
 		handlerDone <- true
 	})
@@ -73,8 +72,8 @@ func TestWS_PongTimeout(t *testing.T) {
 	ctxCancelled := make(chan bool, 1)
 
 	// 使用非常短的 ping/pong 超时用于测试
-	srv.WS("/pongtest", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
-		<-ctx.Done()
+	srv.WS("/pongtest", func(session httpserver.WSSession) {
+		<-session.Context().Done()
 		ctxCancelled <- true
 	},
 		httpserver.WithWSPingPeriod(100*time.Millisecond),
@@ -173,9 +172,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	)
 
 	// Echo 服务
-	srv.WS("/echo", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
-		for msg := range recv {
-			send <- msg
+	srv.WS("/echo", func(session httpserver.WSSession) {
+		for msg := range session.Recv() {
+			_ = session.Send(msg)
 		}
 	})
 

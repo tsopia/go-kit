@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -116,8 +115,8 @@ func TestServer_WS(t *testing.T) {
 		server.Engine().Group("/stream"),
 	)
 
-	server.WS("/ws", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
-		<-ctx.Done()
+	server.WS("/ws", func(session WSSession) {
+		<-session.Context().Done()
 	})
 
 	routes := server.Engine().Routes()
@@ -142,13 +141,13 @@ func TestWS_PanicRecovery(t *testing.T) {
 	)
 
 	// panic 的 handler
-	server.WS("/panic", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/panic", func(session WSSession) {
 		panic("intentional panic in handler")
 	})
 
-	server.WS("/panic-in-read", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/panic-in-read", func(session WSSession) {
 		// 等待一条消息然后 panic
-		<-recv
+		<-session.Recv()
 		panic("panic after receiving message")
 	})
 
@@ -174,8 +173,8 @@ func TestWS_UpgradeError(t *testing.T) {
 	)
 
 	// 注册 WS 路由
-	server.WS("/ws", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
-		<-ctx.Done()
+	server.WS("/ws", func(session WSSession) {
+		<-session.Context().Done()
 	})
 
 	// 验证路由注册
@@ -201,11 +200,11 @@ func TestWS_ReadTimeout(t *testing.T) {
 
 	timeoutCalled := make(chan bool, 1)
 
-	server.WS("/timeout", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/timeout", func(session WSSession) {
 		select {
-		case <-recv:
+		case <-session.Recv():
 			// 不应该收到，因为客户端不发消息
-		case <-ctx.Done():
+		case <-session.Context().Done():
 			timeoutCalled <- true
 		}
 	}, WithReadTimeout(100*time.Millisecond))
@@ -248,15 +247,15 @@ func TestWS_SendPolicy_Block(t *testing.T) {
 	received := make(chan string, 10)
 
 	// 使用极小的发送缓冲区 (1) 和 Block 策略
-	server.WS("/block", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/block", func(session WSSession) {
 		// 发送两条消息，第一条占满 buffer，第二条应该阻塞
 		go func() {
-			send <- WSMessage{Type: websocket.TextMessage, Data: []byte("msg1")}
-			send <- WSMessage{Type: websocket.TextMessage, Data: []byte("msg2")}
+			_ = session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte("msg1")})
+			_ = session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte("msg2")})
 			received <- "sent"
 		}()
 
-		<-ctx.Done()
+		<-session.Context().Done()
 	}, WithSendBuffer(1, Block))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -318,13 +317,13 @@ func TestWS_SendPolicy_DropNewest(t *testing.T) {
 	sendDone := make(chan bool, 1)
 
 	// 使用缓冲区大小为 1 和 DropNewest 策略
-	server.WS("/dropnew", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/dropnew", func(session WSSession) {
 		// 快速发送多条消息
 		for i := 0; i < 5; i++ {
-			send <- WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))}
+			_ = session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))})
 		}
 		sendDone <- true
-		<-ctx.Done()
+		<-session.Context().Done()
 	}, WithSendBuffer(1, DropNewest))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -384,12 +383,12 @@ func TestWS_SendPolicy_DropOldest(t *testing.T) {
 	)
 
 	// 使用缓冲区大小为 2 和 DropOldest 策略
-	server.WS("/dropold", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/dropold", func(session WSSession) {
 		// 发送多条消息
 		for i := 0; i < 5; i++ {
-			send <- WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))}
+			_ = session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))})
 		}
-		<-ctx.Done()
+		<-session.Context().Done()
 	}, WithSendBuffer(2, DropOldest))
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -436,21 +435,25 @@ func TestWS_SendPolicy_Disconnect(t *testing.T) {
 	disconnected := make(chan bool, 1)
 
 	// 使用极小的发送缓冲区 (1) 和 Disconnect 策略
-	server.WS("/disconnect", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+	server.WS("/disconnect", func(session WSSession) {
 		// 快速发送多条消息，填满 buffer 并触发断开
 		// 由于 proxy channel 无缓冲，每条消息都会等待 Run() 接收
 		// 当内部 channel 满时，Disconnect 策略会触发
 		for i := 0; i < 10; i++ {
 			select {
-			case send <- WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))}:
+			case <-session.Context().Done():
+				disconnected <- true
+				return
+			default:
+			}
+			if err := session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte(fmt.Sprintf("msg%d", i))}); err == nil {
 				// 发送成功
-			case <-ctx.Done():
-				// 连接已断开
+			} else {
 				disconnected <- true
 				return
 			}
 		}
-		<-ctx.Done()
+		<-session.Context().Done()
 		disconnected <- true
 	}, WithSendBuffer(1, Disconnect))
 
