@@ -29,6 +29,9 @@ func compileRuntimeSpec(cfg AgentConfig) (RuntimeSpec, error) {
 	if err != nil {
 		return RuntimeSpec{}, err
 	}
+	if err := validateExecutionConfig(cfg, mode); err != nil {
+		return RuntimeSpec{}, err
+	}
 
 	spec := RuntimeSpec{
 		Model:         cfg.Model,
@@ -89,6 +92,30 @@ func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 	default:
 		return "", fmt.Errorf("unknown execution mode: %q", cfg.Execution.Mode)
 	}
+}
+
+func validateExecutionConfig(cfg AgentConfig, mode ExecutionMode) error {
+	switch mode {
+	case Conversation:
+		if cfg.Execution.Mode == Conversation && hasConfiguredTools(cfg.Tools) {
+			return fmt.Errorf("conversation mode does not allow tools")
+		}
+		if cfg.Execution.MaxRetries > 0 {
+			return fmt.Errorf("conversation mode does not allow max retries")
+		}
+		if len(cfg.Execution.DirectReturnTools) > 0 {
+			return fmt.Errorf("conversation mode does not allow direct return tools")
+		}
+	case Assistant:
+		if cfg.Execution.MaxRetries > 0 {
+			return fmt.Errorf("assistant mode does not allow max retries")
+		}
+	}
+	return nil
+}
+
+func hasConfiguredTools(cfg ToolsConfig) bool {
+	return len(cfg.Standard) > 0 || len(cfg.Invokable) > 0 || len(cfg.MCPServers) > 0
 }
 
 func cloneDirectReturnTools(src map[string]struct{}) map[string]struct{} {

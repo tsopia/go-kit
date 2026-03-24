@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -29,7 +30,6 @@ func TestCompileRuntimeSpec(t *testing.T) {
 		{
 			name: "conversation",
 			cfg: AgentConfig{
-				Tools:     ToolsConfig{Invokable: []InvokableTool{forcedTool}},
 				Execution: ExecutionConfig{Mode: Conversation},
 			},
 			wantMode:         Conversation,
@@ -120,6 +120,10 @@ func TestCompileRuntimeSpec_LegacyToolChoiceCompatibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			choice := tt.toolChoice
+			maxRetries := 0
+			if choice == schema.ToolChoiceForced {
+				maxRetries = 5
+			}
 			spec, err := compileRuntimeSpec(AgentConfig{
 				Tools: ToolsConfig{Invokable: []InvokableTool{
 					&simpleTool{
@@ -135,7 +139,7 @@ func TestCompileRuntimeSpec_LegacyToolChoiceCompatibility(t *testing.T) {
 				}},
 				Execution: ExecutionConfig{
 					ToolChoice: &choice,
-					MaxRetries: 5,
+					MaxRetries: maxRetries,
 				},
 			})
 			if err != nil {
@@ -154,5 +158,108 @@ func TestCompileRuntimeSpec_LegacyToolChoiceCompatibility(t *testing.T) {
 				t.Fatalf("unexpected repair max attempts: got %d want %d", spec.Execution.RepairMaxAttempts, tt.wantRepairMax)
 			}
 		})
+	}
+}
+
+func TestCompileRuntimeSpec_RejectsInvalidExecutionConfig(t *testing.T) {
+	extractTool := &simpleTool{
+		info: &schema.ToolInfo{
+			Name: "extract_order",
+			Desc: "extract order",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"title": {Type: schema.String, Desc: "title"},
+			}),
+		},
+		ret: `{"ok":true}`,
+	}
+
+	tests := []struct {
+		name    string
+		cfg     AgentConfig
+		wantErr string
+	}{
+		{
+			name: "conversation_rejects_tools",
+			cfg: AgentConfig{
+				Tools:     ToolsConfig{Invokable: []InvokableTool{extractTool}},
+				Execution: ExecutionConfig{Mode: Conversation},
+			},
+			wantErr: "conversation mode does not allow tools",
+		},
+		{
+			name: "conversation_rejects_retries",
+			cfg: AgentConfig{
+				Execution: ExecutionConfig{
+					Mode:       Conversation,
+					MaxRetries: 1,
+				},
+			},
+			wantErr: "conversation mode does not allow max retries",
+		},
+		{
+			name: "conversation_rejects_direct_return",
+			cfg: AgentConfig{
+				Execution: ExecutionConfig{
+					Mode:              Conversation,
+					DirectReturnTools: map[string]struct{}{"extract_order": {}},
+				},
+			},
+			wantErr: "conversation mode does not allow direct return tools",
+		},
+		{
+			name: "assistant_rejects_retries",
+			cfg: AgentConfig{
+				Tools: ToolsConfig{Invokable: []InvokableTool{extractTool}},
+				Execution: ExecutionConfig{
+					Mode:       Assistant,
+					MaxRetries: 1,
+				},
+			},
+			wantErr: "assistant mode does not allow max retries",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileRuntimeSpec(tt.cfg)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("unexpected error: got %q want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCompileRuntimeSpec_ModeOverridesLegacyToolChoice(t *testing.T) {
+	forced := schema.ToolChoiceForced
+
+	spec, err := compileRuntimeSpec(AgentConfig{
+		Tools: ToolsConfig{Invokable: []InvokableTool{
+			&simpleTool{
+				info: &schema.ToolInfo{
+					Name: "lookup_user",
+					Desc: "lookup user",
+					ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+						"name": {Type: schema.String, Desc: "name"},
+					}),
+				},
+				ret: `{"name":"Alice"}`,
+			},
+		}},
+		Execution: ExecutionConfig{
+			Mode:       Assistant,
+			ToolChoice: &forced,
+		},
+	})
+	if err != nil {
+		t.Fatalf("compileRuntimeSpec failed: %v", err)
+	}
+	if spec.Execution.Mode != Assistant {
+		t.Fatalf("unexpected mode: got %q want %q", spec.Execution.Mode, Assistant)
+	}
+	if spec.Execution.ToolChoice != schema.ToolChoiceAllowed {
+		t.Fatalf("unexpected tool choice: got %q want %q", spec.Execution.ToolChoice, schema.ToolChoiceAllowed)
 	}
 }

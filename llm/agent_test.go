@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
@@ -363,22 +364,10 @@ func TestNewAgent_ConversationAndAssistantModes(t *testing.T) {
 		wantWithToolsCall int
 	}{
 		{
-			name: "conversation_does_not_bind_tools",
+			name: "conversation_without_tools",
 			cfg: AgentConfig{
 				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
 					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
-				}},
-				Tools: ToolsConfig{Invokable: []InvokableTool{
-					&simpleTool{
-						info: &schema.ToolInfo{
-							Name: "lookup_user",
-							Desc: "lookup user",
-							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-								"name": {Type: schema.String, Desc: "name"},
-							}),
-						},
-						ret: `{"name":"Alice"}`,
-					},
 				}},
 				Execution: ExecutionConfig{Mode: Conversation},
 			},
@@ -612,6 +601,38 @@ func TestNewAgent_LegacyToolChoiceCompatibilityModes(t *testing.T) {
 				t.Fatalf("unexpected WithTools count: got %d want %d", model.withTools, tt.wantWithToolsCall)
 			}
 		})
+	}
+}
+
+func TestNewAgent_RejectsUnknownDirectReturnTool(t *testing.T) {
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+	}
+
+	_, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{
+			&simpleTool{
+				info: &schema.ToolInfo{
+					Name: "lookup_user",
+					Desc: "lookup user",
+					ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+						"name": {Type: schema.String, Desc: "name"},
+					}),
+				},
+				ret: `{"name":"Alice"}`,
+			},
+		}},
+		Execution: ExecutionConfig{
+			Mode:              Assistant,
+			DirectReturnTools: map[string]struct{}{"missing_tool": {}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "direct return tool not found") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -38,6 +38,12 @@ func buildPromptAndTools(ctx context.Context, spec RuntimeSpec) (runtimeBuilderR
 		tools = append(tools, loaded...)
 		cleanups = append(cleanups, cleanup)
 	}
+	if err := validateDirectReturnTools(ctx, spec.Execution.DirectReturnTools, tools); err != nil {
+		if cleanupErr := runCleanups(cleanups); cleanupErr != nil {
+			return runtimeBuilderResult{}, fmt.Errorf("validate direct return tools: %w (cleanup: %v)", err, cleanupErr)
+		}
+		return runtimeBuilderResult{}, fmt.Errorf("validate direct return tools: %w", err)
+	}
 
 	return runtimeBuilderResult{
 		MessageModifier: buildMessageModifier(spec.Prompt),
@@ -45,6 +51,26 @@ func buildPromptAndTools(ctx context.Context, spec RuntimeSpec) (runtimeBuilderR
 		Tools:           tools,
 		Cleanup:         onceCleanup(cleanups),
 	}, nil
+}
+
+func validateDirectReturnTools(ctx context.Context, configured map[string]struct{}, tools []tool.BaseTool) error {
+	if len(configured) == 0 {
+		return nil
+	}
+	known := make(map[string]struct{}, len(tools))
+	for _, candidate := range tools {
+		info, err := candidate.Info(ctx)
+		if err != nil {
+			return fmt.Errorf("inspect tool info: %w", err)
+		}
+		known[info.Name] = struct{}{}
+	}
+	for name := range configured {
+		if _, ok := known[name]; !ok {
+			return fmt.Errorf("direct return tool not found: %s", name)
+		}
+	}
+	return nil
 }
 
 func buildMessageModifier(cfg PromptConfig) MessageModifier {
