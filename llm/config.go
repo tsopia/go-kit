@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
@@ -54,7 +55,12 @@ type StreamingConfig struct {
 }
 
 type ObservabilityConfig struct {
-	Callbacks []callbacks.Handler
+	Callbacks      []callbacks.Handler
+	StructuredLogs *StructuredLogConfig
+}
+
+type StructuredLogConfig struct {
+	Logger *slog.Logger
 }
 
 type AgentConfig struct {
