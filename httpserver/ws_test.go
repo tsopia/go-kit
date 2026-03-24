@@ -289,9 +289,13 @@ func TestWS_ReadIdleTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go server.Serve(ln)
+	go func() {
+		_ = server.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond) // 等待服务器启动
 
 	// WebSocket 连接
@@ -300,7 +304,9 @@ func TestWS_ReadIdleTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	select {
 	case <-time.After(60 * time.Millisecond):

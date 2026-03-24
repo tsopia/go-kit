@@ -77,10 +77,12 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	go func() {
-		srv.Serve(ln)
+		_ = srv.Serve(ln)
 	}()
 	time.Sleep(100 * time.Millisecond)
 
@@ -90,13 +92,15 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// 读取响应内容
 	var body strings.Builder
 	buf := make([]byte, 1024)
 	deadline := time.AfterFunc(400*time.Millisecond, func() {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	})
 	defer deadline.Stop()
 
@@ -133,7 +137,9 @@ func TestSSEHeartbeatDoesNotBlockFiniteStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	go func() {
 		_ = srv.Serve(ln)
@@ -144,7 +150,9 @@ func TestSSEHeartbeatDoesNotBlockFiniteStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	done := make(chan error, 1)
 	go func() {

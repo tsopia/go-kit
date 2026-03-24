@@ -31,9 +31,13 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// 连接 WebSocket
@@ -55,7 +59,9 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// 关闭连接
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
 
 	// 如果没有 goroutine 泄漏，测试可以正常结束
 	// 实际生产环境可以使用 runtime.NumGoroutine() 检测
@@ -85,9 +91,13 @@ func TestWS_PongTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// 使用自定义 dialer，禁用自动 pong 响应来模拟假死客户端
@@ -100,7 +110,9 @@ func TestWS_PongTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	// 禁用自动 pong 响应（模拟假死）
 	conn.SetPongHandler(func(string) error {
@@ -144,9 +156,13 @@ func TestWSSessionContract_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/session/42"}
@@ -154,7 +170,9 @@ func TestWSSessionContract_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	select {
 	case <-ready:
@@ -183,9 +201,13 @@ func TestWS_Integration_Echo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// WebSocket 连接
@@ -194,7 +216,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	// 发送消息
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
@@ -202,7 +226,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	}
 
 	// 接收回显
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
 	msgType, data, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read failed: %v", err)

@@ -192,7 +192,14 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				slog.Debug("websocket close failed",
+					"path", c.Request.URL.Path,
+					"error", err,
+				)
+			}
+		}()
 
 		// 2. 创建 session context
 		ctx, cancel := context.WithCancel(c.Request.Context())
