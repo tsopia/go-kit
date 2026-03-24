@@ -46,12 +46,11 @@ func TestStructTool_FullScenario(t *testing.T) {
 		},
 	}
 
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
 		Model: AgentModelConfig{Instance: model},
 		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
 		Execution: ExecutionConfig{
-			ToolChoice:        &forced,
+			Mode:              Extraction,
 			DirectReturnTools: map[string]struct{}{"extract_order": {}},
 		},
 	})

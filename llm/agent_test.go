@@ -303,7 +303,7 @@ func TestExecutionModeContracts(t *testing.T) {
 					},
 				}},
 				Execution: ExecutionConfig{
-					ToolChoice:        func() *schema.ToolChoice { v := schema.ToolChoiceForced; return &v }(),
+					Mode:              Extraction,
 					MaxRetries:        2,
 					DirectReturnTools: map[string]struct{}{"extract_order": {}},
 				},
@@ -518,9 +518,9 @@ func TestNewAgent_ExtractionMode(t *testing.T) {
 	}
 }
 
-// ── ToolChoice 强制调用测试 ────────────────────────────────────────
+// ── 兼容路径测试 ───────────────────────────────────────────────────
 
-func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
+func TestNewAgent_ToolChoiceCompatibilityBuild(t *testing.T) {
 	fm := &fakeToolCallingModel{
 		responses: []*schema.Message{{Content: "hello"}},
 	}
@@ -545,7 +545,7 @@ func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewAgent with ToolChoiceForced failed: %v", err)
+		t.Fatalf("NewAgent with legacy ToolChoice failed: %v", err)
 	}
 	if agent == nil {
 		t.Fatal("agent should not be nil")
@@ -648,7 +648,7 @@ func (f *failingTool) Invoke(_ context.Context, _ string) (string, error) {
 	return `{"result":"success"}`, nil
 }
 
-func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
+func TestNewAgent_ExtractionMode_WithRetry(t *testing.T) {
 	// 模型第一次被迫调工具 → 工具失败 → 错误回模型 → 模型再调工具 → 工具成功 → 模型总结
 	toolInfo := &schema.ToolInfo{
 		Name: "extract",
@@ -674,13 +674,11 @@ func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
 			{Role: schema.Assistant, Content: "提取结果: success"},
 		},
 	}
-
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
 		Model: AgentModelConfig{Instance: fm},
 		Tools: ToolsConfig{Invokable: []InvokableTool{ft}},
 		Execution: ExecutionConfig{
-			ToolChoice: &forced,
+			Mode:       Extraction,
 			MaxRetries: 3,
 		},
 	})
@@ -722,12 +720,11 @@ func TestNewAgent_ToolReturnDirectly(t *testing.T) {
 		},
 	}
 
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
 		Model: AgentModelConfig{Instance: fm},
 		Tools: ToolsConfig{Invokable: []InvokableTool{jdTool}},
 		Execution: ExecutionConfig{
-			ToolChoice:        &forced,
+			Mode:              Extraction,
 			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},
 	})
@@ -804,7 +801,7 @@ func TestStructTool_Invoke_InvalidJSON(t *testing.T) {
 // TestStructTool_RetryAndDirectReturn 完整模拟用户场景：
 //
 //	用户：「生成 Go 后端工程师 JD」
-//	→ 模型被迫调 generate_jd 工具（ToolChoiceForced）
+//	→ 模型进入 Extraction 模式并先调 generate_jd 工具
 //	→ 第1次：模型生成了非法 JSON → 工具 json.Unmarshal 失败 → 自动重试
 //	→ 第2次：模型生成了合法 JSON → 工具成功 → 直接返回（ToolReturnDirectly）
 //	→ 用户拿到 JobPosting 结构体
@@ -830,12 +827,11 @@ func TestStructTool_RetryAndDirectReturn(t *testing.T) {
 		},
 	}
 
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
 		Model: AgentModelConfig{Instance: fm},
 		Tools: ToolsConfig{Invokable: []InvokableTool{st}},
 		Execution: ExecutionConfig{
-			ToolChoice:        &forced,
+			Mode:              Extraction,
 			MaxRetries:        3,
 			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},

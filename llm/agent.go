@@ -75,8 +75,8 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 
 	// 4. 处理 Extraction 模式下的强制工具调用和修复机制
 	var extraction *extractionRuntime
-	// ReactAgent 的 ToolReturnDirectly 配置
-	// 如果开启了 ToolChoiceForced，我们需要接管 ToolReturnDirectly 逻辑，所以传给 ReactAgent 的要清空
+	// ReactAgent 的 ToolReturnDirectly 配置。
+	// Extraction 运行时需要接管 direct return，避免和修复链路冲突。
 	reactToolReturnDirectly := spec.Execution.DirectReturnTools
 
 	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
@@ -207,5 +207,6 @@ func (a *Agent) ExportGraph() (compose.AnyGraph, []compose.GraphAddNodeOpt) {
 	return a.inner.ExportGraph()
 }
 
-// ToolChoiceForced 是一个便捷变量，避免每次都声明指针。
+// Deprecated: 新代码应优先使用 AgentConfig.Execution.Mode。
+// ToolChoiceForced 仅保留给旧配置的兼容路径。
 var ToolChoiceForced = schema.ToolChoiceForced

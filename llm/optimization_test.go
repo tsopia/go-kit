@@ -31,7 +31,6 @@ func TestOptimization_RealAgent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockCountModel{}
-			forced := schema.ToolChoiceForced
 			tool := &testTool{
 				name: "test_tool",
 				fn: func(ctx context.Context, args string) (string, error) {
@@ -43,7 +42,7 @@ func TestOptimization_RealAgent(t *testing.T) {
 				Model: AgentModelConfig{Instance: mock},
 				Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
 				Execution: ExecutionConfig{
-					ToolChoice:        &forced,
+					Mode:              Extraction,
 					DirectReturnTools: tt.toolReturnDirectly,
 				},
 			})

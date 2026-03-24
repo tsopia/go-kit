@@ -83,3 +83,38 @@ func TestCompileRuntimeSpec(t *testing.T) {
 		})
 	}
 }
+
+func TestCompileRuntimeSpec_LegacyToolChoiceCompatibility(t *testing.T) {
+	forced := schema.ToolChoiceForced
+
+	spec, err := compileRuntimeSpec(AgentConfig{
+		Tools: ToolsConfig{Invokable: []InvokableTool{
+			&simpleTool{
+				info: &schema.ToolInfo{
+					Name: "extract_order",
+					Desc: "extract order",
+					ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+						"title": {Type: schema.String, Desc: "title"},
+					}),
+				},
+				ret: `{"ok":true}`,
+			},
+		}},
+		Execution: ExecutionConfig{
+			ToolChoice: &forced,
+			MaxRetries: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("compileRuntimeSpec failed: %v", err)
+	}
+	if spec.Execution.Mode != Extraction {
+		t.Fatalf("unexpected mode: got %q want %q", spec.Execution.Mode, Extraction)
+	}
+	if spec.Execution.ToolChoice != schema.ToolChoiceForced {
+		t.Fatalf("unexpected tool choice: got %q want %q", spec.Execution.ToolChoice, schema.ToolChoiceForced)
+	}
+	if spec.Execution.RepairMaxAttempts != 5 {
+		t.Fatalf("unexpected repair max attempts: got %d want 5", spec.Execution.RepairMaxAttempts)
+	}
+}

@@ -12,9 +12,12 @@ import (
 type ExecutionMode string
 
 const (
+	// Conversation 表示纯对话，不启用工具。
 	Conversation ExecutionMode = "conversation"
-	Assistant    ExecutionMode = "assistant"
-	Extraction   ExecutionMode = "extraction"
+	// Assistant 表示工具可用，由模型自行决定是否调用。
+	Assistant ExecutionMode = "assistant"
+	// Extraction 表示先完成工具任务，再决定是否继续总结。
+	Extraction ExecutionMode = "extraction"
 )
 
 type AgentModelConfig struct {
@@ -29,13 +32,15 @@ type PromptConfig struct {
 }
 
 type ToolsConfig struct {
-	Standard  []tool.BaseTool
-	Invokable []InvokableTool
+	Standard   []tool.BaseTool
+	Invokable  []InvokableTool
 	MCPServers []MCPConfig
 }
 
 type ExecutionConfig struct {
-	Mode              ExecutionMode
+	// Mode 是推荐配置入口，用于声明 Agent 的高层执行模式。
+	Mode ExecutionMode
+	// ToolChoice 仅保留给旧配置的兼容路径；新代码应优先使用 Mode。
 	ToolChoice        *schema.ToolChoice
 	MaxRetries        int
 	MaxStep           int
