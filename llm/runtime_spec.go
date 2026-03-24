@@ -73,7 +73,7 @@ func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 			case schema.ToolChoiceForbidden:
 				return Conversation, nil
 			case schema.ToolChoiceAllowed:
-				if len(cfg.Tools.Standard) == 0 && len(cfg.Tools.Invokable) == 0 {
+				if !hasConfiguredTools(cfg.Tools) {
 					return Conversation, nil
 				}
 				return Assistant, nil
@@ -83,7 +83,7 @@ func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 				return "", fmt.Errorf("unknown tool choice: %q", *cfg.Execution.ToolChoice)
 			}
 		}
-		if len(cfg.Tools.Standard) == 0 && len(cfg.Tools.Invokable) == 0 {
+		if !hasConfiguredTools(cfg.Tools) {
 			return Conversation, nil
 		}
 		return Assistant, nil

@@ -263,3 +263,52 @@ func TestCompileRuntimeSpec_ModeOverridesLegacyToolChoice(t *testing.T) {
 		t.Fatalf("unexpected tool choice: got %q want %q", spec.Execution.ToolChoice, schema.ToolChoiceAllowed)
 	}
 }
+
+func TestCompileRuntimeSpec_MCPServersEnableTools(t *testing.T) {
+	tests := []struct {
+		name             string
+		cfg              AgentConfig
+		wantMode         ExecutionMode
+		wantDisableTools bool
+	}{
+		{
+			name: "default_mode_with_mcp_servers_uses_assistant",
+			cfg: AgentConfig{
+				Tools: ToolsConfig{
+					MCPServers: []MCPConfig{{Name: "mcp_tool", Protocol: MCPProtocolSSE, BaseURL: "http://example.com"}},
+				},
+			},
+			wantMode:         Assistant,
+			wantDisableTools: false,
+		},
+		{
+			name: "legacy_allowed_with_only_mcp_servers_keeps_tools_enabled",
+			cfg: func() AgentConfig {
+				allowed := schema.ToolChoiceAllowed
+				return AgentConfig{
+					Tools: ToolsConfig{
+						MCPServers: []MCPConfig{{Name: "mcp_tool", Protocol: MCPProtocolSSE, BaseURL: "http://example.com"}},
+					},
+					Execution: ExecutionConfig{ToolChoice: &allowed},
+				}
+			}(),
+			wantMode:         Assistant,
+			wantDisableTools: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := compileRuntimeSpec(tt.cfg)
+			if err != nil {
+				t.Fatalf("compileRuntimeSpec failed: %v", err)
+			}
+			if spec.Execution.Mode != tt.wantMode {
+				t.Fatalf("unexpected mode: got %q want %q", spec.Execution.Mode, tt.wantMode)
+			}
+			if spec.Execution.DisableTools != tt.wantDisableTools {
+				t.Fatalf("unexpected disable tools flag: got %v want %v", spec.Execution.DisableTools, tt.wantDisableTools)
+			}
+		})
+	}
+}

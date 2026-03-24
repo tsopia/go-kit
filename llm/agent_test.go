@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -715,6 +716,101 @@ func TestExtractionRuntime_DirectReturnMessage(t *testing.T) {
 	}
 }
 
+func TestExtractionRetryMiddleware(t *testing.T) {
+	tests := []struct {
+		name              string
+		maxRetries        int
+		next              compose.InvokableToolEndpoint
+		wantErr           string
+		wantResult        string
+		wantFailureCount  int
+		wantSuccessTool   string
+		wantSuccessResult string
+	}{
+		{
+			name:       "tool_failure_before_limit_returns_repair_message",
+			maxRetries: 2,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return nil, errors.New("tool execution failed")
+			},
+			wantResult:       "工具执行失败: tool execution failed\n请分析错误原因，调整参数后重新调用工具。",
+			wantFailureCount: 1,
+		},
+		{
+			name:       "tool_failure_at_limit_returns_error",
+			maxRetries: 1,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return nil, errors.New("tool execution failed")
+			},
+			wantErr:          "tool extract: max retries (1) exceeded: tool execution failed",
+			wantFailureCount: 1,
+		},
+		{
+			name:       "tool_success_records_last_result",
+			maxRetries: 2,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return &compose.ToolOutput{Result: `{"result":"success"}`}, nil
+			},
+			wantResult:        `{"result":"success"}`,
+			wantSuccessTool:   "extract",
+			wantSuccessResult: `{"result":"success"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &extractionState{maxRetries: tt.maxRetries}
+			endpoint := newExtractionRetryMiddleware(state).Invokable(tt.next)
+
+			output, err := endpoint(context.Background(), &compose.ToolInput{
+				Name:      "extract",
+				Arguments: `{"query":"test"}`,
+				CallID:    "call-1",
+			})
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("unexpected error: got %q want %q", err.Error(), tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantResult == "" {
+				if output != nil {
+					t.Fatalf("expected nil output, got %#v", output)
+				}
+			} else {
+				if output == nil {
+					t.Fatal("expected output")
+				}
+				if output.Result != tt.wantResult {
+					t.Fatalf("unexpected result: got %q want %q", output.Result, tt.wantResult)
+				}
+			}
+
+			if state.failureCount != tt.wantFailureCount {
+				t.Fatalf("unexpected failure count: got %d want %d", state.failureCount, tt.wantFailureCount)
+			}
+			if tt.wantSuccessTool != "" {
+				name, result, ok := state.lastSuccessfulTool()
+				if !ok {
+					t.Fatal("expected successful tool result")
+				}
+				if name != tt.wantSuccessTool {
+					t.Fatalf("unexpected tool name: got %q want %q", name, tt.wantSuccessTool)
+				}
+				if result != tt.wantSuccessResult {
+					t.Fatalf("unexpected tool result: got %q want %q", result, tt.wantSuccessResult)
+				}
+			}
+		})
+	}
+}
+
 // ── retryMiddleware 单元测试 ──────────────────────────────────────
 
 type failingTool struct {
@@ -782,6 +878,56 @@ func TestNewAgent_ExtractionMode_WithRetry(t *testing.T) {
 	}
 	if msg.Content != "提取结果: success" {
 		t.Fatalf("unexpected response: %q", msg.Content)
+	}
+}
+
+func TestNewAgent_ExtractionMode_RetryExhausted(t *testing.T) {
+	toolInfo := &schema.ToolInfo{
+		Name: "extract",
+		Desc: "extract data",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"query": {Type: schema.String, Desc: "query"},
+		}),
+	}
+
+	ft := &failingTool{info: toolInfo, failCount: 2}
+	fm := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+				{ID: "tc1", Function: schema.FunctionCall{Name: "extract", Arguments: `{"query":"test"}`}},
+			}},
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+				{ID: "tc2", Function: schema.FunctionCall{Name: "extract", Arguments: `{"query":"retry"}`}},
+			}},
+		},
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{ft}},
+		Execution: ExecutionConfig{
+			Mode:       Extraction,
+			MaxRetries: 2,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "提取数据"},
+	})
+	if err == nil {
+		t.Fatal("expected retry exhausted error")
+	}
+	if !strings.Contains(err.Error(), "max retries (2) exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ft.calls != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", ft.calls)
+	}
+	if fm.calls != 2 {
+		t.Fatalf("expected 2 model calls, got %d", fm.calls)
 	}
 }
 

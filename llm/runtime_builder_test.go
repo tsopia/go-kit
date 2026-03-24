@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -89,5 +90,103 @@ func TestBuildPromptAndTools(t *testing.T) {
 	}
 	if !mcpCleanupCalled {
 		t.Fatal("expected MCP cleanup to be called")
+	}
+}
+
+func TestBuildPromptAndTools_ErrorPathCleanup(t *testing.T) {
+	t.Helper()
+
+	tests := []struct {
+		name         string
+		cfg          AgentConfig
+		loader       func(*int) func(context.Context, MCPConfig) ([]tool.BaseTool, func() error, error)
+		wantErr      string
+		wantCleanups int
+	}{
+		{
+			name: "load_error_cleans_previous_mcp_clients",
+			cfg: AgentConfig{
+				Tools: ToolsConfig{
+					MCPServers: []MCPConfig{
+						{Name: "first", Protocol: MCPProtocolSSE, BaseURL: "http://example.com/1"},
+						{Name: "second", Protocol: MCPProtocolSSE, BaseURL: "http://example.com/2"},
+					},
+				},
+				Execution: ExecutionConfig{Mode: Assistant},
+			},
+			loader: func(cleanups *int) func(context.Context, MCPConfig) ([]tool.BaseTool, func() error, error) {
+				call := 0
+				return func(_ context.Context, cfg MCPConfig) ([]tool.BaseTool, func() error, error) {
+					call++
+					if call == 2 {
+						return nil, nil, errors.New("boom")
+					}
+					loaded := &ToolAdapter{inner: &simpleTool{
+						info: &schema.ToolInfo{Name: cfg.Name, Desc: "mcp"},
+						ret:  `{"source":"mcp"}`,
+					}}
+					return []tool.BaseTool{loaded}, func() error {
+						*cleanups = *cleanups + 1
+						return nil
+					}, nil
+				}
+			},
+			wantErr:      "load MCP tools: boom",
+			wantCleanups: 1,
+		},
+		{
+			name: "validation_error_cleans_loaded_mcp_clients",
+			cfg: AgentConfig{
+				Tools: ToolsConfig{
+					MCPServers: []MCPConfig{{Name: "mcp_tool", Protocol: MCPProtocolSSE, BaseURL: "http://example.com"}},
+				},
+				Execution: ExecutionConfig{
+					Mode:              Assistant,
+					DirectReturnTools: map[string]struct{}{"missing_tool": {}},
+				},
+			},
+			loader: func(cleanups *int) func(context.Context, MCPConfig) ([]tool.BaseTool, func() error, error) {
+				return func(_ context.Context, cfg MCPConfig) ([]tool.BaseTool, func() error, error) {
+					loaded := &ToolAdapter{inner: &simpleTool{
+						info: &schema.ToolInfo{Name: cfg.Name, Desc: "mcp"},
+						ret:  `{"source":"mcp"}`,
+					}}
+					return []tool.BaseTool{loaded}, func() error {
+						*cleanups = *cleanups + 1
+						return nil
+					}, nil
+				}
+			},
+			wantErr:      "validate direct return tools: direct return tool not found: missing_tool",
+			wantCleanups: 1,
+		},
+	}
+
+	originalLoader := mcpToolLoader
+	defer func() {
+		mcpToolLoader = originalLoader
+	}()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanupCalls := 0
+			mcpToolLoader = tt.loader(&cleanupCalls)
+
+			spec, err := compileRuntimeSpec(tt.cfg)
+			if err != nil {
+				t.Fatalf("compileRuntimeSpec failed: %v", err)
+			}
+
+			_, err = buildPromptAndTools(context.Background(), spec)
+			if err == nil {
+				t.Fatal("expected buildPromptAndTools to fail")
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("unexpected error: got %q want %q", err.Error(), tt.wantErr)
+			}
+			if cleanupCalls != tt.wantCleanups {
+				t.Fatalf("unexpected cleanup call count: got %d want %d", cleanupCalls, tt.wantCleanups)
+			}
+		})
 	}
 }
