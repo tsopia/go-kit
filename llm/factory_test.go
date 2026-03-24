@@ -55,6 +55,50 @@ func TestOllamaSkipsAPIKeyCheck(t *testing.T) {
 	}
 }
 
+func TestNewModelFactory_AfterUpgrade(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  ModelConfig
+	}{
+		{
+			name: "openai",
+			cfg: ModelConfig{
+				Protocol: OPENAI,
+				Model:    "gpt-4o-mini",
+				APIKey:   "test-key",
+			},
+		},
+		{
+			name: "qwen",
+			cfg: ModelConfig{
+				Protocol: QWEN,
+				Model:    "qwen-plus",
+				APIKey:   "test-key",
+			},
+		},
+		{
+			name: "gemini",
+			cfg: ModelConfig{
+				Protocol: GEMINI,
+				Model:    "gemini-2.0-flash",
+				APIKey:   "test-key",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model, err := NewModel(context.Background(), tt.cfg)
+			if err != nil {
+				t.Fatalf("NewModel failed: %v", err)
+			}
+			if model == nil {
+				t.Fatal("expected non-nil model")
+			}
+		})
+	}
+}
+
 func containsStr(s, sub string) bool {
 	return len(s) >= len(sub) && findStr(s, sub)
 }
