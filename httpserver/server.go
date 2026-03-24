@@ -156,10 +156,13 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 		sender := &sseSender{ginCtx: c, config: cfg}
 
 		// 启动心跳（如果配置了）
-		ctx := sender.runHeartbeat(c.Request.Context())
+		ctx, done := sender.runHeartbeat(c.Request.Context())
 
 		// 调用 handler
 		handler(ctx, sender)
+
+		// 等待心跳 goroutine 退出，避免 data race
+		<-done
 
 		// 连接断开时打印日志
 		sender.logDisconnect(ctx)
@@ -217,11 +220,16 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			return nil
 		})
 
-		// 5. 创建缓冲 channel
-		recv := make(chan WSMessage, cfg.RecvBufferSize)
-		send := make(chan WSMessage, cfg.SendBufferSize)
+		// 5. 创建带策略的发送器
+		sender := newWSSender(cfg.SendBufferSize, cfg.SendPolicy)
 
-		// 6. 启动读 goroutine（客户端 → recv）
+		// 6. 启动发送器 goroutine（应用 SendPolicy）
+		go sender.Run(cancel)
+
+		// 7. 创建接收 channel
+		recv := make(chan WSMessage, cfg.RecvBufferSize)
+
+		// 8. 启动读 goroutine（客户端 → recv）
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -265,7 +273,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			}
 		}()
 
-		// 6. 启动 ping goroutine，带 Pong 超时检测
+		// 9. 启动 ping goroutine，带 Pong 超时检测
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -306,7 +314,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			}
 		}()
 
-		// 7. 启动写 goroutine（send → 客户端）
+		// 10. 启动写 goroutine（sender.Channel() → 客户端）
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -317,18 +325,24 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 				}
 				cancel()
 			}()
-			for msg := range send {
+			for msg := range sender.Channel() {
+				if cfg.WriteTimeout > 0 {
+					conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
+				}
 				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
 					return
+				}
+				if cfg.WriteTimeout > 0 {
+					conn.SetWriteDeadline(time.Time{})
 				}
 			}
 		}()
 
-		// 8. 调用用户 handler
-		handler(ctx, recv, send)
+		// 8. 调用用户 handler，传入代理 channel
+		handler(ctx, recv, sender.Proxy())
 
-		// 9. 关闭 send channel 触发写 goroutine 退出
-		close(send)
+		// 9. 关闭代理 channel 触发发送器退出
+		close(sender.Proxy())
 
 		// 10. 断开日志
 		if err := ctx.Err(); err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,7 @@ type SSEHandlerFunc func(ctx context.Context, send SSESender)
 type sseSender struct {
 	ginCtx *gin.Context
 	config *sseConfig
+	mu     sync.Mutex // 保护 Writer 并发访问
 }
 
 func (s *sseSender) Event(name string, data any) error {
@@ -59,6 +61,9 @@ func (s *sseSender) Data(data any) error {
 }
 
 func (s *sseSender) Comment(text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	_, err := fmt.Fprintf(s.ginCtx.Writer, ": %s\n\n", text)
 	if err != nil {
 		return err
@@ -68,6 +73,9 @@ func (s *sseSender) Comment(text string) error {
 }
 
 func (s *sseSender) writeEvent(name string, data any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	var dataStr string
 	switch d := data.(type) {
 	case string:
@@ -108,15 +116,17 @@ func (s *sseSender) writeEvent(name string, data any) error {
 	return nil
 }
 
-// runHeartbeat 启动心跳 goroutine，返回带取消的 context。
-// 如果未配置心跳间隔，直接返回原 context。
-func (s *sseSender) runHeartbeat(ctx context.Context) context.Context {
+// runHeartbeat 启动心跳 goroutine，返回带取消的 context 和 done channel。
+// 如果未配置心跳间隔，直接返回原 context 和已关闭的 done channel。
+func (s *sseSender) runHeartbeat(ctx context.Context) (context.Context, <-chan struct{}) {
 	if s.config == nil || s.config.heartbeatInterval <= 0 {
-		return ctx
+		return ctx, closedChan()
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer cancel()
 		ticker := time.NewTicker(s.config.heartbeatInterval)
 		defer ticker.Stop()
@@ -131,7 +141,14 @@ func (s *sseSender) runHeartbeat(ctx context.Context) context.Context {
 			}
 		}
 	}()
-	return ctx
+	return ctx, done
+}
+
+// closedChan 返回一个已关闭的 channel
+func closedChan() <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 // logDisconnect 在连接断开时打印日志。

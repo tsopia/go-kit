@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,8 +130,11 @@ func TestSSESender_heartbeat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	sender.runHeartbeat(ctx)
+	_, done := sender.runHeartbeat(ctx)
 	time.Sleep(300 * time.Millisecond) // 等待心跳发送
+
+	// 等待心跳 goroutine 退出
+	<-done
 
 	body := w.Body.String()
 	if !strings.Contains(body, ": ping") {
@@ -145,9 +149,16 @@ func TestSSESender_runHeartbeat_noConfig(t *testing.T) {
 
 	sender := &sseSender{ginCtx: c}
 	ctx := context.Background()
-	got := sender.runHeartbeat(ctx)
+	got, done := sender.runHeartbeat(ctx)
 	if got != ctx {
 		t.Error("expected original context returned when no config")
+	}
+	// done channel 应该是已关闭的
+	select {
+	case <-done:
+		// 预期行为
+	default:
+		t.Error("expected done channel to be closed when no config")
 	}
 }
 
@@ -163,6 +174,46 @@ func TestSSESender_logDisconnect(t *testing.T) {
 	cancel() // 立即取消，模拟断开
 	// 仅验证不 panic
 	sender.logDisconnect(ctx)
+}
+
+// TestSSESender_ConcurrentWrite 验证并发写入不会导致 data race
+func TestSSESender_ConcurrentWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	sender := &sseSender{
+		ginCtx: c,
+		config: &sseConfig{heartbeatInterval: 50 * time.Millisecond},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	// 启动心跳
+	_, done := sender.runHeartbeat(ctx)
+
+	// 同时从 handler 发送事件
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+			_ = sender.Event("update", map[string]int{"count": i})
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	// 等待所有 goroutine 完成
+	wg.Wait()
+	cancel()          // 取消心跳
+	<-done // 等待心跳 goroutine 退出
+
+	// 验证有内容写入
+	body := w.Body.String()
+	if len(body) == 0 {
+		t.Error("expected non-empty body")
+	}
 }
 
 func TestServer_SSE_withHeartbeat(t *testing.T) {
