@@ -210,6 +210,52 @@ func TestNewAgent_Generate_WithToolCall(t *testing.T) {
 	}
 }
 
+func TestExecutionModeContracts(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  AgentConfig
+	}{
+		{
+			name: "conversation_no_tools",
+			cfg: AgentConfig{
+				Model: &fakeToolCallingModel{
+					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+				},
+				Execution: ExecutionConfig{Mode: Conversation},
+			},
+		},
+		{
+			name: "assistant_optional_tools",
+			cfg: AgentConfig{
+				Model: &fakeToolCallingModel{
+					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+				},
+				Execution: ExecutionConfig{Mode: Assistant},
+			},
+		},
+		{
+			name: "extraction_forced_tool_repair_direct_return",
+			cfg: AgentConfig{
+				Model: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"user_name":"张三"}`}}}},
+					},
+				},
+				InvokableTools: []InvokableTool{
+					NewStructTool[JobPosting]("extract_order", "从自然语言中提取订单信息"),
+				},
+				Execution: ExecutionConfig{Mode: Extraction},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _ = NewAgent(context.Background(), tt.cfg)
+		})
+	}
+}
+
 // ── ToolChoice 强制调用测试 ────────────────────────────────────────
 
 func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {

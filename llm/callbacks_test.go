@@ -13,45 +13,37 @@ import (
 )
 
 func TestLogHandler_Integration(t *testing.T) {
-	// 1. 设置 Capturing Logger
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-
-	// 2. 创建 LogHandler
 	handler := NewLogHandler(logger)
 
-	// 3. 创建 Fake Agent
 	ctx := context.Background()
 	agent, err := NewAgent(ctx, AgentConfig{
-		Model: &mockCallbackModel{}, // 使用本地 mock model
-		Callbacks: []callbacks.Handler{
-			handler,
-		},
+		Model:     &mockCallbackModel{},
+		Callbacks: []callbacks.Handler{handler},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
 	}
 
-	// 4. 执行 Generate
-	input := []*schema.Message{schema.UserMessage("hello")}
-	_, err = agent.Generate(ctx, input)
-	if err != nil {
+	if _, err = agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello")}); err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
 
-	// 5. 验证日志输出
 	logs := buf.String()
-	t.Logf("Captured Logs:\n%s", logs)
-
-	//检查是否包含关键日志
-	if !strings.Contains(logs, "Component Start") {
-		t.Error("Expected log to contain 'Component Start'")
+	checks := []struct {
+		name string
+		want string
+	}{
+		{name: "start", want: "Component Start"},
+		{name: "end", want: "Component End"},
 	}
-	if !strings.Contains(logs, "Component End") {
-		t.Error("Expected log to contain 'Component End'")
+	for _, check := range checks {
+		if !strings.Contains(logs, check.want) {
+			t.Errorf("expected log to contain %q", check.want)
+		}
 	}
-	// 检查是否包含组件信息
-	if !strings.Contains(logs, "\"component\":\"ChatModel\"") { // Eino JSON log format
+	if !strings.Contains(logs, "\"component\":\"ChatModel\"") {
 		t.Log("JSON Handler 字段格式可能不同，跳过 component 字段断言")
 	}
 }

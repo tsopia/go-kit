@@ -64,19 +64,17 @@ func TestReal_StructTool_FullScenario(t *testing.T) {
 
 	fmt.Printf("Raw Response (JSON): %s\n", msg.Content)
 
-	// 3. 验证结果
-	// 注意：真实模型可能并不总是完美遵循 schema（尤其是非常复杂的嵌套），但在简单-中等复杂度下通常表现良好。
-	// 这里我们验证核心字段是否正确解析。
-
-	// 使用 StructTool 的 Invoke 来验证（虽然这里已经是结果了，但可以用 tool.Invoke 做一次反序列化检查 + 格式化）
-	// 或者直接 json.Unmarshal
-	if !strings.Contains(msg.Content, "张三") {
-		t.Error("Validation Failed: expected '张三'")
+	checks := []struct {
+		name string
+		want string
+	}{
+		{name: "user_name", want: "张三"},
+		{name: "request_type", want: "CREATE"},
+		{name: "amount", want: "100.5"},
 	}
-	if !strings.Contains(msg.Content, "CREATE") {
-		t.Error("Validation Failed: expected enum 'CREATE'")
-	}
-	if !strings.Contains(msg.Content, "100.5") {
-		t.Error("Validation Failed: expected amount 100.5")
+	for _, check := range checks {
+		if !strings.Contains(msg.Content, check.want) {
+			t.Errorf("Validation Failed: expected %q", check.want)
+		}
 	}
 }

@@ -9,53 +9,60 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// TestOptimization_RealAgent verifies that the robust Agent implementation
-// correctly cancels the context after a successful tool call when ToolReturnDirectly is enabled,
-// preventing the model from being called a second time for summary generation.
 func TestOptimization_RealAgent(t *testing.T) {
-	mock := &mockCountModel{}
-	forced := schema.ToolChoiceForced
-
-	// Define a simple tool
-	tool := &testTool{
-		name: "test_tool",
-		fn: func(ctx context.Context, args string) (string, error) {
-			return `{"status": "success"}`, nil
+	tests := []struct {
+		name               string
+		toolReturnDirectly map[string]struct{}
+		wantContent        string
+		wantCalls          int
+	}{
+		{
+			name:               "direct_return_skips_summary",
+			toolReturnDirectly: map[string]struct{}{"test_tool": {}},
+			wantContent:        `{"status": "success"}`,
+			wantCalls:          1,
+		},
+		{
+			name:        "fallback_summary_after_tool_call",
+			wantContent: "Done.",
+			wantCalls:   2,
 		},
 	}
 
-	// Create Agent with ToolReturnDirectly enabled
-	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:              mock,
-		InvokableTools:     []InvokableTool{tool},
-		ToolChoice:         &forced,
-		ToolReturnDirectly: map[string]struct{}{"test_tool": {}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockCountModel{}
+			forced := schema.ToolChoiceForced
+			tool := &testTool{
+				name: "test_tool",
+				fn: func(ctx context.Context, args string) (string, error) {
+					return `{"status": "success"}`, nil
+				},
+			}
 
-	// Execute
-	resp, err := agent.Generate(context.Background(), []*schema.Message{
-		{Role: schema.User, Content: "run test"},
-	})
-	if err != nil {
-		t.Fatalf("Agent.Generate failed: %v", err)
-	}
+			agent, err := NewAgent(context.Background(), AgentConfig{
+				Model:              mock,
+				InvokableTools:     []InvokableTool{tool},
+				ToolChoice:         &forced,
+				ToolReturnDirectly: tt.toolReturnDirectly,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	// Verify Result
-	if resp.Content != `{"status": "success"}` {
-		t.Errorf("Expected result '{\"status\": \"success\"}', got '%s'", resp.Content)
-	}
-
-	// Verify Model Calls
-	// Should be 1 (Tool Call) -> Tool Exec -> Cancel -> Done.
-	// If 2, then optimization failed (Summary generation started).
-	fmt.Printf("Model Calls: %d\n", mock.calls)
-	if mock.calls != 1 {
-		t.Errorf("Optimization failed! Model was called %d times (expected 1)", mock.calls)
-	} else {
-		fmt.Println("Optimization SUCCESS: Model was called only once.")
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Agent.Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected content: got %q want %q", resp.Content, tt.wantContent)
+			}
+			if mock.calls != tt.wantCalls {
+				t.Fatalf("unexpected model call count: got %d want %d", mock.calls, tt.wantCalls)
+			}
+		})
 	}
 }
 
