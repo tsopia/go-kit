@@ -74,3 +74,25 @@ func TestAgentConfigDefaults(t *testing.T) {
 		t.Fatalf("expected zero max field length, got %d", sl.MaxFieldLength)
 	}
 }
+
+func TestTruncateFieldUTF8(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		limit int
+		want  string
+	}{
+		{name: "ascii_within_limit", value: "hello", limit: 10, want: "hello"},
+		{name: "ascii_truncate", value: "hello", limit: 3, want: "hel"},
+		{name: "utf8_truncate", value: "你好世界", limit: 7, want: "你好"},
+		{name: "zero_limit", value: "hello", limit: 0, want: "hello"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := truncateField(tt.value, tt.limit); got != tt.want {
+				t.Fatalf("unexpected result: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
