@@ -552,6 +552,69 @@ func TestNewAgent_ToolChoiceCompatibilityBuild(t *testing.T) {
 	}
 }
 
+func TestNewAgent_LegacyToolChoiceCompatibilityModes(t *testing.T) {
+	tests := []struct {
+		name              string
+		toolChoice        schema.ToolChoice
+		wantContent       string
+		wantWithToolsCall int
+	}{
+		{
+			name:              "forbidden_disables_tools",
+			toolChoice:        schema.ToolChoiceForbidden,
+			wantContent:       "plain answer",
+			wantWithToolsCall: 0,
+		},
+		{
+			name:              "allowed_keeps_tools_enabled",
+			toolChoice:        schema.ToolChoiceAllowed,
+			wantContent:       "plain answer",
+			wantWithToolsCall: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			choice := tt.toolChoice
+			model := &fakeToolCallingModel{
+				responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+			}
+			agent, err := NewAgent(context.Background(), AgentConfig{
+				Model: AgentModelConfig{Instance: model},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice"}`,
+					},
+				}},
+				Execution: ExecutionConfig{ToolChoice: &choice},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+			if model.withTools != tt.wantWithToolsCall {
+				t.Fatalf("unexpected WithTools count: got %d want %d", model.withTools, tt.wantWithToolsCall)
+			}
+		})
+	}
+}
+
 // ── Extraction 内部状态单元测试 ───────────────────────────────────
 
 func TestExtractionState_ShouldForceToolCall(t *testing.T) {

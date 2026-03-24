@@ -65,11 +65,23 @@ func compileRuntimeSpec(cfg AgentConfig) (RuntimeSpec, error) {
 func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 	switch cfg.Execution.Mode {
 	case "":
+		if cfg.Execution.ToolChoice != nil {
+			switch *cfg.Execution.ToolChoice {
+			case schema.ToolChoiceForbidden:
+				return Conversation, nil
+			case schema.ToolChoiceAllowed:
+				if len(cfg.Tools.Standard) == 0 && len(cfg.Tools.Invokable) == 0 {
+					return Conversation, nil
+				}
+				return Assistant, nil
+			case schema.ToolChoiceForced:
+				return Extraction, nil
+			default:
+				return "", fmt.Errorf("unknown tool choice: %q", *cfg.Execution.ToolChoice)
+			}
+		}
 		if len(cfg.Tools.Standard) == 0 && len(cfg.Tools.Invokable) == 0 {
 			return Conversation, nil
-		}
-		if cfg.Execution.ToolChoice != nil && *cfg.Execution.ToolChoice == schema.ToolChoiceForced {
-			return Extraction, nil
 		}
 		return Assistant, nil
 	case Conversation, Assistant, Extraction:
