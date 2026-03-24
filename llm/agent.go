@@ -74,6 +74,9 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		}
 	}
 
+	structuredLogs := newStructuredLogger(spec.Observability.StructuredLogs)
+	chatModel = newObservedToolCallingModel(chatModel, structuredLogs, spec.Execution.Mode, spec.Execution.ToolChoice)
+
 	// 2. 合并工具列表：Eino 标准工具 + 适配后的简化工具
 	toolsConfig := compose.ToolsNodeConfig{
 		Tools: built.Tools,
