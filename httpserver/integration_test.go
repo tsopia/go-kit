@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -114,5 +115,50 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	content := body.String()
 	if !strings.Contains(content, ": ping") {
 		t.Errorf("expected ping in response, got: %s", content)
+	}
+}
+
+func TestSSEHeartbeatDoesNotBlockFiniteStream(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	srv.SSE("/finite", func(stream httpserver.SSEStream) {
+		_ = stream.Event("done", "ok")
+	}, httpserver.WithHeartbeat(50*time.Millisecond))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/stream/finite")
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(resp.Body)
+		done <- readErr
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("response did not finish after handler returned")
 	}
 }

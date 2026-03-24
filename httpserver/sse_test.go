@@ -223,8 +223,8 @@ func TestServer_SSE_withHeartbeat(t *testing.T) {
 		server.Engine().Group("/stream"),
 	)
 
-	server.SSE("/events", func(ctx context.Context, send SSESender) {
-		<-ctx.Done()
+	server.SSE("/events", func(stream SSEStream) {
+		<-stream.Context().Done()
 	}, WithHeartbeat(100*time.Millisecond))
 
 	// 验证路由已注册（streamingGroup 前缀为 /stream）
