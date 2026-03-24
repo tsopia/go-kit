@@ -24,6 +24,12 @@ type Agent struct {
 }
 
 // NewAgent 创建一个 Agent。
+// Mode 是推荐配置入口；如果 Mode 和 ToolChoice 同时设置，以 Mode 为准。
+//
+// 配置约束：
+//   - Conversation 不允许同时配置工具、MaxRetries 或 DirectReturnTools
+//   - Assistant 不允许配置 MaxRetries
+//   - DirectReturnTools 只能引用已注册的工具名
 //
 // 使用示例：
 //

@@ -61,6 +61,21 @@ fmt.Println(msg.Content)
 
 ## 🛠 高级功能
 
+### 0. 执行模式与配置约束
+
+推荐优先使用 `Execution.Mode` 描述 Agent 行为：
+
+- `Conversation`：纯对话，不启用工具
+- `Assistant`：工具可用，由模型自行决定是否调用
+- `Extraction`：先完成工具任务，再决定是否总结
+
+配置约束：
+
+- `Mode` 和 `ToolChoice` 同时传入时，以 `Mode` 为准；`ToolChoice` 仅保留兼容路径
+- `Conversation` 不允许同时配置工具、`MaxRetries` 或 `DirectReturnTools`
+- `Assistant` 不允许配置 `MaxRetries`
+- `DirectReturnTools` 中的工具名必须真实存在，否则 `NewAgent` 会直接返回错误
+
 ### 1. 可观测性 (Observability)
 
 支持 Langfuse 链路追踪和标准日志记录。
@@ -94,6 +109,8 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 })
 ```
 
+`MaxRetries` 只在 `Extraction` 模式下有效；如果放到 `Conversation` 或 `Assistant`，`NewAgent` 会直接报错。
+
 ### 3. 工具结果直接返回 (Direct Return)
 
 某些场景下（如搜索），工具执行后不需要模型再通过 LLM 总结，直接返回工具结果可节省 Token：
@@ -109,6 +126,8 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     },
 })
 ```
+
+`DirectReturnTools` 只能填写已经注册到 `Tools.Standard`、`Tools.Invokable` 或 MCP 中的工具名。
 
 ### 4. 运行时动态控制 (Runtime Options)
 

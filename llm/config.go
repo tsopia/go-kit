@@ -41,9 +41,11 @@ type ExecutionConfig struct {
 	// Mode 是推荐配置入口，用于声明 Agent 的高层执行模式。
 	Mode ExecutionMode
 	// ToolChoice 仅保留给旧配置的兼容路径；新代码应优先使用 Mode。
-	ToolChoice        *schema.ToolChoice
-	MaxRetries        int
-	MaxStep           int
+	ToolChoice *schema.ToolChoice
+	// MaxRetries 仅用于 Extraction；Conversation 和 Assistant 会拒绝该配置。
+	MaxRetries int
+	MaxStep    int
+	// DirectReturnTools 仅允许引用已注册的工具名；Conversation 会拒绝该配置。
 	DirectReturnTools map[string]struct{}
 }
 
