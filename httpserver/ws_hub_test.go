@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+type testWSSender struct {
+	messages []WSMessage
+	allow    bool
+}
+
+func (s *testWSSender) TrySend(msg WSMessage) bool {
+	if !s.allow {
+		return false
+	}
+	s.messages = append(s.messages, msg)
+	return true
+}
+
 func TestWSHub_JoinLeave(t *testing.T) {
 	hub := NewWSHub()
 	send := make(chan WSMessage, 10)
@@ -17,6 +30,21 @@ func TestWSHub_JoinLeave(t *testing.T) {
 	hub.Leave("room1", send)
 	if hub.RoomCount("room1") != 0 {
 		t.Error("Leave failed")
+	}
+}
+
+func TestWSHub_UsesTrySend(t *testing.T) {
+	hub := NewWSHub()
+	sender := &testWSSender{allow: true}
+
+	hub.Join("room1", sender)
+	hub.Broadcast("room1", WSMessage{Type: 1, Data: []byte("hello")})
+
+	if len(sender.messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(sender.messages))
+	}
+	if string(sender.messages[0].Data) != "hello" {
+		t.Fatalf("message = %q, want %q", string(sender.messages[0].Data), "hello")
 	}
 }
 

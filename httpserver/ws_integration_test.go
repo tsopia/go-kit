@@ -117,6 +117,53 @@ func TestWS_PongTimeout(t *testing.T) {
 	}
 }
 
+func TestWSSessionContract_Integration(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	ready := make(chan struct{}, 1)
+
+	srv.WS("/session/:id", func(session httpserver.WSSession) {
+		if session.Param("id") != "42" {
+			t.Fatalf("id = %q, want %q", session.Param("id"), "42")
+		}
+		if session.Request().URL.Path != "/stream/session/42" {
+			t.Fatalf("path = %q, want %q", session.Request().URL.Path, "/stream/session/42")
+		}
+		if err := session.Send(httpserver.WSMessage{Type: websocket.TextMessage, Data: []byte("hello")}); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		ready <- struct{}{}
+		<-session.Context().Done()
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go srv.Serve(ln)
+	time.Sleep(100 * time.Millisecond)
+
+	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/session/42"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session handler did not complete setup")
+	}
+}
+
 func TestWS_Integration_Echo(t *testing.T) {
 	cfg := &httpserver.Config{Port: 0}
 	srv := httpserver.NewServer(cfg)

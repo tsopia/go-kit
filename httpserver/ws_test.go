@@ -88,6 +88,27 @@ func TestWSOptions(t *testing.T) {
 	}
 }
 
+func TestWSSessionContract(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	server.WS("/ws/:id", func(session WSSession) {
+		if session.Request().URL.Path != "/stream/ws/42" {
+			t.Fatalf("path = %q, want %q", session.Request().URL.Path, "/stream/ws/42")
+		}
+		if session.Param("id") != "42" {
+			t.Fatalf("id = %q, want %q", session.Param("id"), "42")
+		}
+		if !session.TrySend(WSMessage{Type: websocket.TextMessage, Data: []byte("hello")}) {
+			t.Fatal("expected TrySend to accept first message")
+		}
+		<-session.Context().Done()
+	})
+}
+
 func TestServer_WS(t *testing.T) {
 	server := NewServer(&Config{Port: 8080})
 	server.SetGroups(
