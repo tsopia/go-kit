@@ -1,7 +1,6 @@
 package httpserver_test
 
 import (
-	"context"
 	"io"
 	"net"
 	"net/http"
@@ -32,8 +31,8 @@ func TestPreset_StreamingSupport(t *testing.T) {
 	})
 
 	// 注册 SSE 路由
-	srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
-		send.Event("test", "data")
+	srv.SSE("/events", func(stream httpserver.SSEStream) {
+		_ = stream.Event("test", "data")
 	})
 
 	// 测试普通路由
@@ -64,10 +63,10 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 		srv.Engine().Group("/stream"),
 	)
 
-	srv.SSE("/heartbeat-test", func(ctx context.Context, send httpserver.SSESender) {
+	srv.SSE("/heartbeat-test", func(stream httpserver.SSEStream) {
 		// 等待一段时间让心跳发送
 		select {
-		case <-ctx.Done():
+		case <-stream.Context().Done():
 			return
 		case <-time.After(300 * time.Millisecond):
 		}

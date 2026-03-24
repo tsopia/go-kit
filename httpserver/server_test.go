@@ -889,8 +889,8 @@ func TestServer_SSE(t *testing.T) {
 	streamingGroup := srv.Engine().Group("/")
 	srv.SetGroups(nil, streamingGroup)
 
-	srv.SSE("/events", func(ctx context.Context, send SSESender) {
-		send.Event("test", "hello")
+	srv.SSE("/events", func(stream SSEStream) {
+		_ = stream.Event("test", "hello")
 	})
 
 	w := httptest.NewRecorder()

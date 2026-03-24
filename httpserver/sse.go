@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -43,13 +44,43 @@ type SSESender interface {
 	Comment(text string) error
 }
 
+// SSEStream 描述 SSE handler 可见的请求与发送能力。
+type SSEStream interface {
+	SSESender
+	Context() context.Context
+	Request() *http.Request
+	Param(name string) string
+}
+
 // SSEHandlerFunc 是 SSE handler 的函数签名。
-type SSEHandlerFunc func(ctx context.Context, send SSESender)
+type SSEHandlerFunc func(stream SSEStream)
 
 type sseSender struct {
 	ginCtx *gin.Context
+	ctx    context.Context
 	config *sseConfig
 	mu     sync.Mutex // 保护 Writer 并发访问
+}
+
+func (s *sseSender) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *sseSender) Request() *http.Request {
+	if s.ginCtx == nil {
+		return nil
+	}
+	return s.ginCtx.Request
+}
+
+func (s *sseSender) Param(name string) string {
+	if s.ginCtx == nil {
+		return ""
+	}
+	return s.ginCtx.Param(name)
 }
 
 func (s *sseSender) Event(name string, data any) error {
@@ -116,18 +147,18 @@ func (s *sseSender) writeEvent(name string, data any) error {
 	return nil
 }
 
-// runHeartbeat 启动心跳 goroutine，返回带取消的 context 和 done channel。
-// 如果未配置心跳间隔，直接返回原 context 和已关闭的 done channel。
-func (s *sseSender) runHeartbeat(ctx context.Context) (context.Context, <-chan struct{}) {
+// startHeartbeat 启动心跳 goroutine，返回停止函数。
+// 如果未配置心跳间隔，返回空操作函数。
+func (s *sseSender) startHeartbeat(ctx context.Context) func() {
 	if s.config == nil || s.config.heartbeatInterval <= 0 {
-		return ctx, closedChan()
+		return func() {}
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	stopCh := make(chan struct{})
+	var once sync.Once
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer cancel()
 		ticker := time.NewTicker(s.config.heartbeatInterval)
 		defer ticker.Stop()
 
@@ -135,20 +166,20 @@ func (s *sseSender) runHeartbeat(ctx context.Context) (context.Context, <-chan s
 			select {
 			case <-ctx.Done():
 				return
+			case <-stopCh:
+				return
 			case t := <-ticker.C:
 				timestamp := t.Format(time.RFC3339)
 				_ = s.Comment(fmt.Sprintf("ping %s", timestamp))
 			}
 		}
 	}()
-	return ctx, done
-}
-
-// closedChan 返回一个已关闭的 channel
-func closedChan() <-chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
+	return func() {
+		once.Do(func() {
+			close(stopCh)
+			<-done
+		})
+	}
 }
 
 // logDisconnect 在连接断开时打印日志。

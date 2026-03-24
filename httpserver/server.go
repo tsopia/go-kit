@@ -152,20 +152,24 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 		// 立即 flush header
 		c.Writer.Flush()
 
-		// 创建 sender
-		sender := &sseSender{ginCtx: c, config: cfg}
+		// 为 handler 构建独立 ctx，便于未来扩展内部取消
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+
+		// 创建 stream
+		stream := &sseSender{ginCtx: c, ctx: ctx, config: cfg}
 
 		// 启动心跳（如果配置了）
-		ctx, done := sender.runHeartbeat(c.Request.Context())
+		stopHeartbeat := stream.startHeartbeat(ctx)
 
 		// 调用 handler
-		handler(ctx, sender)
+		handler(stream)
 
-		// 等待心跳 goroutine 退出，避免 data race
-		<-done
+		// handler 返回后主动停止 heartbeat，允许有限流自然结束
+		stopHeartbeat()
 
 		// 连接断开时打印日志
-		sender.logDisconnect(ctx)
+		stream.logDisconnect(c.Request.Context())
 	})
 }
 

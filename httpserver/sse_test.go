@@ -130,11 +130,9 @@ func TestSSESender_heartbeat(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	_, done := sender.runHeartbeat(ctx)
+	stopHeartbeat := sender.startHeartbeat(ctx)
 	time.Sleep(300 * time.Millisecond) // 等待心跳发送
-
-	// 等待心跳 goroutine 退出
-	<-done
+	stopHeartbeat()
 
 	body := w.Body.String()
 	if !strings.Contains(body, ": ping") {
@@ -142,24 +140,14 @@ func TestSSESender_heartbeat(t *testing.T) {
 	}
 }
 
-func TestSSESender_runHeartbeat_noConfig(t *testing.T) {
+func TestSSESender_startHeartbeat_noConfig(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
 	sender := &sseSender{ginCtx: c}
-	ctx := context.Background()
-	got, done := sender.runHeartbeat(ctx)
-	if got != ctx {
-		t.Error("expected original context returned when no config")
-	}
-	// done channel 应该是已关闭的
-	select {
-	case <-done:
-		// 预期行为
-	default:
-		t.Error("expected done channel to be closed when no config")
-	}
+	stopHeartbeat := sender.startHeartbeat(context.Background())
+	stopHeartbeat()
 }
 
 func TestSSESender_logDisconnect(t *testing.T) {
@@ -191,7 +179,7 @@ func TestSSESender_ConcurrentWrite(t *testing.T) {
 	defer cancel()
 
 	// 启动心跳
-	_, done := sender.runHeartbeat(ctx)
+	stopHeartbeat := sender.startHeartbeat(ctx)
 
 	// 同时从 handler 发送事件
 	var wg sync.WaitGroup
@@ -206,8 +194,8 @@ func TestSSESender_ConcurrentWrite(t *testing.T) {
 
 	// 等待所有 goroutine 完成
 	wg.Wait()
-	cancel()          // 取消心跳
-	<-done // 等待心跳 goroutine 退出
+	cancel() // 取消心跳
+	stopHeartbeat()
 
 	// 验证有内容写入
 	body := w.Body.String()
