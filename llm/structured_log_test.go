@@ -12,9 +12,10 @@ import (
 
 func TestStructuredLogs_Contract(t *testing.T) {
 	tests := []struct {
-		name string
-		cfg  AgentConfig
-		want []string
+		name   string
+		cfg    AgentConfig
+		want   []string
+		forbid []string
 	}{
 		{
 			name: "conversation_logs_agent_and_model_decision",
@@ -23,11 +24,10 @@ func TestStructuredLogs_Contract(t *testing.T) {
 					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
 				}},
 				Execution: ExecutionConfig{Mode: Conversation},
-				Observability: ObservabilityConfig{
-					StructuredLogs: &StructuredLogConfig{Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))},
-				},
+				Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{}},
 			},
 			want: []string{`"event":"agent.start"`, `"event":"model.decision"`, `"event":"agent.end"`},
+			forbid: []string{`"event":"tool.start"`, `"event":"tool.success"`, `"event":"tool.error"`},
 		},
 		{
 			name: "assistant_logs_tool_lifecycle",
@@ -53,9 +53,7 @@ func TestStructuredLogs_Contract(t *testing.T) {
 					},
 				}},
 				Execution: ExecutionConfig{Mode: Assistant},
-				Observability: ObservabilityConfig{
-					StructuredLogs: &StructuredLogConfig{Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))},
-				},
+				Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{}},
 			},
 			want: []string{`"event":"tool.start"`, `"event":"tool.success"`},
 		},
@@ -95,9 +93,7 @@ func TestStructuredLogs_Contract(t *testing.T) {
 					MaxRetries:        2,
 					DirectReturnTools: map[string]struct{}{"extract": {}},
 				},
-				Observability: ObservabilityConfig{
-					StructuredLogs: &StructuredLogConfig{Logger: slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))},
-				},
+				Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{}},
 			},
 			want: []string{`"event":"tool.error"`, `"retryable":true`, `"event":"tool.success"`, `"direct_return":true`, `"event":"agent.end"`},
 		},
@@ -124,6 +120,11 @@ func TestStructuredLogs_Contract(t *testing.T) {
 			for _, want := range tt.want {
 				if !strings.Contains(logs, want) {
 					t.Fatalf("missing log fragment %q\nlogs=%s", want, logs)
+				}
+			}
+			for _, forbid := range tt.forbid {
+				if strings.Contains(logs, forbid) {
+					t.Fatalf("unexpected log fragment %q\nlogs=%s", forbid, logs)
 				}
 			}
 		})

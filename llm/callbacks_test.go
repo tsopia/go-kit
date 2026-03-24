@@ -47,8 +47,8 @@ func TestLogHandler_Integration(t *testing.T) {
 			t.Errorf("expected log to contain %q", check.want)
 		}
 	}
-	if strings.Contains(logs, "\"event\":\"agent.start\"") {
-		t.Fatal("did not expect structured log event in NewLogHandler output")
+	if strings.Contains(logs, "\"event\":") {
+		t.Fatal("did not expect structured event fields in NewLogHandler output")
 	}
 	if !strings.Contains(logs, "\"component\":\"ChatModel\"") {
 		t.Log("JSON Handler 字段格式可能不同，跳过 component 字段断言")
