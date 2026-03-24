@@ -85,6 +85,7 @@ type fakeToolCallingModel struct {
 	responses []*schema.Message
 	idx       int
 	calls     int
+	withTools int
 }
 
 func (f *fakeToolCallingModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
@@ -113,6 +114,7 @@ func (f *fakeToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ 
 }
 
 func (f *fakeToolCallingModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	f.withTools++
 	return f, nil
 }
 
@@ -348,6 +350,171 @@ func TestExecutionModeContracts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewAgent_ConversationAndAssistantModes(t *testing.T) {
+	tests := []struct {
+		name              string
+		cfg               AgentConfig
+		wantContent       string
+		wantModelCalls    int
+		wantToolCalls     int
+		wantWithToolsCall int
+	}{
+		{
+			name: "conversation_does_not_bind_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice"}`,
+					},
+				}},
+				Execution: ExecutionConfig{Mode: Conversation},
+			},
+			wantContent:       "plain answer",
+			wantModelCalls:    1,
+			wantWithToolsCall: 0,
+		},
+		{
+			name: "assistant_direct_return_uses_bound_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "lookup_user", Arguments: `{"name":"Alice"}`}},
+							},
+						},
+					},
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice","age":18}`,
+					},
+				}},
+				Execution: ExecutionConfig{
+					Mode:              Assistant,
+					DirectReturnTools: map[string]struct{}{"lookup_user": {}},
+				},
+			},
+			wantContent:       `{"name":"Alice","age":18}`,
+			wantModelCalls:    1,
+			wantToolCalls:     1,
+			wantWithToolsCall: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewAgent(context.Background(), tt.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+
+			model := tt.cfg.Model.Instance.(*fakeToolCallingModel)
+			if model.calls != tt.wantModelCalls {
+				t.Fatalf("unexpected model call count: got %d want %d", model.calls, tt.wantModelCalls)
+			}
+			if model.withTools != tt.wantWithToolsCall {
+				t.Fatalf("unexpected WithTools count: got %d want %d", model.withTools, tt.wantWithToolsCall)
+			}
+
+			if tt.wantToolCalls > 0 {
+				tool := tt.cfg.Tools.Invokable[0].(*simpleTool)
+				if tool.calls != tt.wantToolCalls {
+					t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestNewAgent_ExtractionMode(t *testing.T) {
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: "tc1", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"bad"}`}},
+				},
+			},
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: "tc2", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"Go 后端工程师","company":"Acme","requirements":["Go","K8s"],"salary":"30-50K"}`}},
+				},
+			},
+		},
+	}
+	tool := &failingTool{
+		info: &schema.ToolInfo{
+			Name: "extract_order",
+			Desc: "extract order",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"title": {Type: schema.String, Desc: "title"},
+			}),
+		},
+		failCount: 1,
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"extract_order": {}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "提取数据"},
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if resp.Content != `{"result":"success"}` {
+		t.Fatalf("unexpected response: got %q want %q", resp.Content, `{"result":"success"}`)
+	}
+	if model.calls != 2 {
+		t.Fatalf("unexpected model call count: got %d want 2", model.calls)
+	}
+	if model.withTools != 1 {
+		t.Fatalf("unexpected WithTools count: got %d want 1", model.withTools)
+	}
+	if tool.calls != 2 {
+		t.Fatalf("unexpected tool call count: got %d want 2", tool.calls)
 	}
 }
 

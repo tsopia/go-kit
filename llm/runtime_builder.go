@@ -18,11 +18,16 @@ type runtimeBuilderResult struct {
 
 func buildPromptAndTools(ctx context.Context, spec RuntimeSpec) (runtimeBuilderResult, error) {
 	tools := make([]tool.BaseTool, 0, len(spec.Tools.Standard)+len(spec.Tools.Invokable))
-	tools = append(tools, spec.Tools.Standard...)
-	tools = appendInvokableTools(tools, spec.Tools.Invokable)
+	if !spec.Execution.DisableTools {
+		tools = append(tools, spec.Tools.Standard...)
+		tools = appendInvokableTools(tools, spec.Tools.Invokable)
+	}
 
 	cleanups := make([]func() error, 0, len(spec.Tools.MCPServers))
 	for _, server := range spec.Tools.MCPServers {
+		if spec.Execution.DisableTools {
+			break
+		}
 		loaded, cleanup, err := mcpToolLoader(ctx, server)
 		if err != nil {
 			if cleanupErr := runCleanups(cleanups); cleanupErr != nil {

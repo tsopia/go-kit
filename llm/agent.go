@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
@@ -21,6 +20,7 @@ type Agent struct {
 	inner   *react.Agent
 	cfg     AgentConfig
 	tracker *toolCallTracker // 用于 ToolChoiceForced + ToolReturnDirectly 场景
+	cleanup func() error
 }
 
 // NewAgent 创建一个 Agent。
@@ -49,55 +49,46 @@ type Agent struct {
 //	    },
 //	})
 func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
+	spec, err := compileRuntimeSpec(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("compile runtime spec: %w", err)
+	}
+
+	built, err := buildPromptAndTools(ctx, spec)
+	if err != nil {
+		return nil, fmt.Errorf("build prompt and tools: %w", err)
+	}
+
 	// 1. 创建或使用已有模型
-	chatModel := cfg.Model.Instance
+	chatModel := spec.Model.Instance
 	if chatModel == nil {
-		var err error
-		chatModel, err = NewModel(ctx, cfg.Model.Config)
+		chatModel, err = NewModel(ctx, spec.Model.Config)
 		if err != nil {
+			_ = built.Cleanup()
 			return nil, fmt.Errorf("create model: %w", err)
 		}
 	}
 
 	// 2. 合并工具列表：Eino 标准工具 + 适配后的简化工具
-	allTools := make([]tool.BaseTool, 0, len(cfg.Tools.Standard)+len(cfg.Tools.Invokable))
-	allTools = append(allTools, cfg.Tools.Standard...)
-	allTools = append(allTools, adaptTools(cfg.Tools.Invokable)...)
-
-	// 3. 构建 ToolsNodeConfig
 	toolsConfig := compose.ToolsNodeConfig{
-		Tools: allTools,
+		Tools: built.Tools,
 	}
 
 	// 4. 处理 ToolChoice + 重试机制
 	var tracker *toolCallTracker
 	// ReactAgent 的 ToolReturnDirectly 配置
 	// 如果开启了 ToolChoiceForced，我们需要接管 ToolReturnDirectly 逻辑，所以传给 ReactAgent 的要清空
-	reactToolReturnDirectly := cfg.Execution.DirectReturnTools
+	reactToolReturnDirectly := spec.Execution.DirectReturnTools
 
-	if cfg.Execution.ToolChoice != nil && *cfg.Execution.ToolChoice == schema.ToolChoiceForced {
-		maxRetries := cfg.Execution.MaxRetries
-		if maxRetries <= 0 {
-			maxRetries = 3
-		}
+	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
+		maxRetries := spec.Execution.RepairMaxAttempts
 		tracker = &toolCallTracker{maxRetries: maxRetries}
 		chatModel = &forcedToolChoiceModel{inner: chatModel, tracker: tracker}
 		toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newRetryMiddleware(tracker))
 
 		// 如果有 tracker，我们在 Agent 层处理 direct return
-		if len(cfg.Execution.DirectReturnTools) > 0 {
+		if len(spec.Execution.DirectReturnTools) > 0 {
 			reactToolReturnDirectly = nil
-		}
-	}
-
-	// 5. 确定 MessageModifier
-	modifier := cfg.Prompt.PrepareMessages
-	if modifier == nil && cfg.Prompt.System != "" {
-		modifier = func(_ context.Context, input []*schema.Message) []*schema.Message {
-			res := make([]*schema.Message, 0, len(input)+1)
-			res = append(res, schema.SystemMessage(cfg.Prompt.System))
-			res = append(res, input...)
-			return res
 		}
 	}
 
@@ -105,19 +96,20 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 	reactCfg := &react.AgentConfig{
 		ToolCallingModel:      chatModel,
 		ToolsConfig:           toolsConfig,
-		MessageModifier:       modifier,
-		MessageRewriter:       cfg.Prompt.RewriteHistory,
-		MaxStep:               cfg.Execution.MaxStep,
+		MessageModifier:       built.MessageModifier,
+		MessageRewriter:       built.MessageRewriter,
+		MaxStep:               spec.Execution.MaxStep,
 		ToolReturnDirectly:    reactToolReturnDirectly,
-		StreamToolCallChecker: cfg.Streaming.ToolCallChecker,
+		StreamToolCallChecker: spec.Streaming.ToolCallChecker,
 	}
 
 	// 7. 创建 ReactAgent
 	inner, err := react.NewAgent(ctx, reactCfg)
 	if err != nil {
+		_ = built.Cleanup()
 		return nil, fmt.Errorf("create react agent: %w", err)
 	}
-	return &Agent{inner: inner, cfg: cfg, tracker: tracker}, nil
+	return &Agent{inner: inner, cfg: cfg, tracker: tracker, cleanup: built.Cleanup}, nil
 }
 
 // Generate 非流式调用 Agent。
@@ -206,6 +198,13 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	}
 
 	return sr, nil
+}
+
+func (a *Agent) Close() error {
+	if a.cleanup == nil {
+		return nil
+	}
+	return a.cleanup()
 }
 
 // ExportGraph 导出底层 Graph，用于嵌入更大的编排图。
