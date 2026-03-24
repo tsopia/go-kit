@@ -19,8 +19,8 @@ func TestLogHandler_Integration(t *testing.T) {
 
 	ctx := context.Background()
 	agent, err := NewAgent(ctx, AgentConfig{
-		Model:     &mockCallbackModel{},
-		Callbacks: []callbacks.Handler{handler},
+		Model:         AgentModelConfig{Instance: &mockCallbackModel{}},
+		Observability: ObservabilityConfig{Callbacks: []callbacks.Handler{handler}},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)

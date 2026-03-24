@@ -118,7 +118,7 @@ func (f *fakeToolCallingModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallin
 
 func TestNewAgent_WithExternalModel_NoTools(t *testing.T) {
 	fm := &fakeToolCallingModel{responses: []*schema.Message{{Content: "hello"}}}
-	agent, err := NewAgent(context.Background(), AgentConfig{Model: fm})
+	agent, err := NewAgent(context.Background(), AgentConfig{Model: AgentModelConfig{Instance: fm}})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
 	}
@@ -141,9 +141,9 @@ func TestNewAgent_WithInvokableTools(t *testing.T) {
 	}
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		SystemPrompt:   "你是一个助手",
+		Model:  AgentModelConfig{Instance: fm},
+		Tools:  ToolsConfig{Invokable: []InvokableTool{st}},
+		Prompt: PromptConfig{System: "你是一个助手"},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
@@ -158,7 +158,7 @@ func TestNewAgent_Generate_SimpleChat(t *testing.T) {
 		responses: []*schema.Message{{Role: schema.Assistant, Content: "I'm fine"}},
 	}
 
-	agent, err := NewAgent(context.Background(), AgentConfig{Model: fm})
+	agent, err := NewAgent(context.Background(), AgentConfig{Model: AgentModelConfig{Instance: fm}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,8 +199,8 @@ func TestNewAgent_Generate_WithToolCall(t *testing.T) {
 	}
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{priceTool},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{priceTool}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -228,9 +228,9 @@ func TestExecutionModeContracts(t *testing.T) {
 		{
 			name: "conversation_no_tools",
 			cfg: AgentConfig{
-				Model: &fakeToolCallingModel{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
 					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
-				},
+				}},
 			},
 			wantContent:    "plain answer",
 			wantModelCalls: 1,
@@ -238,7 +238,7 @@ func TestExecutionModeContracts(t *testing.T) {
 		{
 			name: "assistant_optional_tools",
 			cfg: AgentConfig{
-				Model: &fakeToolCallingModel{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
 					responses: []*schema.Message{
 						{
 							Role: schema.Assistant,
@@ -248,8 +248,8 @@ func TestExecutionModeContracts(t *testing.T) {
 						},
 						{Role: schema.Assistant, Content: "lookup done"},
 					},
-				},
-				InvokableTools: []InvokableTool{
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
 					&simpleTool{
 						info: &schema.ToolInfo{
 							Name: "lookup_user",
@@ -260,7 +260,7 @@ func TestExecutionModeContracts(t *testing.T) {
 						},
 						ret: `{"name":"Alice","age":18}`,
 					},
-				},
+				}},
 			},
 			wantContent:    "lookup done",
 			wantModelCalls: 2,
@@ -269,7 +269,7 @@ func TestExecutionModeContracts(t *testing.T) {
 		{
 			name: "forced_retry_direct_return",
 			cfg: AgentConfig{
-				Model: &fakeToolCallingModel{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
 					responses: []*schema.Message{
 						{
 							Role: schema.Assistant,
@@ -284,8 +284,8 @@ func TestExecutionModeContracts(t *testing.T) {
 							},
 						},
 					},
-				},
-				InvokableTools: []InvokableTool{
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
 					&failingTool{
 						info: &schema.ToolInfo{
 							Name: "extract_order",
@@ -299,10 +299,12 @@ func TestExecutionModeContracts(t *testing.T) {
 						},
 						failCount: 1,
 					},
+				}},
+				Execution: ExecutionConfig{
+					ToolChoice:        func() *schema.ToolChoice { v := schema.ToolChoiceForced; return &v }(),
+					MaxRetries:        2,
+					DirectReturnTools: map[string]struct{}{"extract_order": {}},
 				},
-				ToolChoice:         func() *schema.ToolChoice { v := schema.ToolChoiceForced; return &v }(),
-				MaxRetries:         2,
-				ToolReturnDirectly: map[string]struct{}{"extract_order": {}},
 			},
 			wantContent:    `{"result":"success"}`,
 			wantModelCalls: 2,
@@ -327,14 +329,14 @@ func TestExecutionModeContracts(t *testing.T) {
 				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
 			}
 
-			if model, ok := tt.cfg.Model.(*fakeToolCallingModel); ok {
+			if model, ok := tt.cfg.Model.Instance.(*fakeToolCallingModel); ok {
 				if model.calls != tt.wantModelCalls {
 					t.Fatalf("unexpected model call count: got %d want %d", model.calls, tt.wantModelCalls)
 				}
 			}
 
 			if tt.wantToolCalls > 0 {
-				switch tool := tt.cfg.InvokableTools[0].(type) {
+				switch tool := tt.cfg.Tools.Invokable[0].(type) {
 				case *simpleTool:
 					if tool.calls != tt.wantToolCalls {
 						t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
@@ -368,10 +370,12 @@ func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
 
 	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		ToolChoice:     &forced,
-		MaxRetries:     2,
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{st}},
+		Execution: ExecutionConfig{
+			ToolChoice: &forced,
+			MaxRetries: 2,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent with ToolChoiceForced failed: %v", err)
@@ -486,10 +490,12 @@ func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
 
 	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{ft},
-		ToolChoice:     &forced,
-		MaxRetries:     3,
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{ft}},
+		Execution: ExecutionConfig{
+			ToolChoice: &forced,
+			MaxRetries: 3,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -531,11 +537,11 @@ func TestNewAgent_ToolReturnDirectly(t *testing.T) {
 
 	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{jdTool},
-		ToolChoice:     &forced,
-		ToolReturnDirectly: map[string]struct{}{
-			"generate_jd": {},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{jdTool}},
+		Execution: ExecutionConfig{
+			ToolChoice:        &forced,
+			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},
 	})
 	if err != nil {
@@ -639,14 +645,14 @@ func TestStructTool_RetryAndDirectReturn(t *testing.T) {
 
 	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		ToolChoice:     &forced,
-		MaxRetries:     3,
-		ToolReturnDirectly: map[string]struct{}{
-			"generate_jd": {},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{st}},
+		Execution: ExecutionConfig{
+			ToolChoice:        &forced,
+			MaxRetries:        3,
+			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},
-		SystemPrompt: "根据用户需求生成职位描述，输出必须是合法的 JSON。",
+		Prompt: PromptConfig{System: "根据用户需求生成职位描述，输出必须是合法的 JSON。"},
 	})
 	if err != nil {
 		t.Fatal(err)

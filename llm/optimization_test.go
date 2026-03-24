@@ -40,10 +40,12 @@ func TestOptimization_RealAgent(t *testing.T) {
 			}
 
 			agent, err := NewAgent(context.Background(), AgentConfig{
-				Model:              mock,
-				InvokableTools:     []InvokableTool{tool},
-				ToolChoice:         &forced,
-				ToolReturnDirectly: tt.toolReturnDirectly,
+				Model: AgentModelConfig{Instance: mock},
+				Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+				Execution: ExecutionConfig{
+					ToolChoice:        &forced,
+					DirectReturnTools: tt.toolReturnDirectly,
+				},
 			})
 			if err != nil {
 				t.Fatal(err)

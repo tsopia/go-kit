@@ -59,9 +59,9 @@ func TestReal_Agent_ToolCall(t *testing.T) {
 	tool := &StockTool{}
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		ModelConfig:    IntegrationTestConfig,
-		InvokableTools: []InvokableTool{tool},
-		SystemPrompt:   "你是一个股票助手。用户会询问股票信息，请使用工具查询后回复。",
+		Model:  AgentModelConfig{Config: IntegrationTestConfig},
+		Tools:  ToolsConfig{Invokable: []InvokableTool{tool}},
+		Prompt: PromptConfig{System: "你是一个股票助手。用户会询问股票信息，请使用工具查询后回复。"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestReal_Agent_SimpleChat(t *testing.T) {
 	ensureConfig(t)
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		ModelConfig: IntegrationTestConfig,
+		Model: AgentModelConfig{Config: IntegrationTestConfig},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestReal_Agent_Stream(t *testing.T) {
 	ensureConfig(t)
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		ModelConfig: IntegrationTestConfig,
+		Model: AgentModelConfig{Config: IntegrationTestConfig},
 	})
 	if err != nil {
 		t.Fatal(err)
