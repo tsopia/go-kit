@@ -17,10 +17,10 @@ type MessageModifier = react.MessageModifier
 
 // Agent 封装 Eino ReactAgent，提供简化的高层 API。
 type Agent struct {
-	inner   *react.Agent
-	cfg     AgentConfig
-	tracker *toolCallTracker // 用于 ToolChoiceForced + ToolReturnDirectly 场景
-	cleanup func() error
+	inner      *react.Agent
+	cfg        AgentConfig
+	extraction *extractionRuntime
+	cleanup    func() error
 }
 
 // NewAgent 创建一个 Agent。
@@ -73,19 +73,19 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		Tools: built.Tools,
 	}
 
-	// 4. 处理 ToolChoice + 重试机制
-	var tracker *toolCallTracker
+	// 4. 处理 Extraction 模式下的强制工具调用和修复机制
+	var extraction *extractionRuntime
 	// ReactAgent 的 ToolReturnDirectly 配置
 	// 如果开启了 ToolChoiceForced，我们需要接管 ToolReturnDirectly 逻辑，所以传给 ReactAgent 的要清空
 	reactToolReturnDirectly := spec.Execution.DirectReturnTools
 
 	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
 		maxRetries := spec.Execution.RepairMaxAttempts
-		tracker = &toolCallTracker{maxRetries: maxRetries}
-		chatModel = &forcedToolChoiceModel{inner: chatModel, tracker: tracker}
-		toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newRetryMiddleware(tracker))
+		extraction = newExtractionRuntime(maxRetries)
+		chatModel = extraction.wrapModel(chatModel)
+		toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, extraction.middleware())
 
-		// 如果有 tracker，我们在 Agent 层处理 direct return
+		// 如果有 extraction runtime，我们在 Agent 层处理 direct return
 		if len(spec.Execution.DirectReturnTools) > 0 {
 			reactToolReturnDirectly = nil
 		}
@@ -108,7 +108,7 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		_ = built.Cleanup()
 		return nil, fmt.Errorf("create react agent: %w", err)
 	}
-	return &Agent{inner: inner, cfg: cfg, tracker: tracker, cleanup: built.Cleanup}, nil
+	return &Agent{inner: inner, cfg: cfg, extraction: extraction, cleanup: built.Cleanup}, nil
 }
 
 // Generate 非流式调用 Agent。
@@ -121,7 +121,7 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 
 	// 优化：注入 Context Cancel 控制器，以便在工具执行成功后立即中断模型生成（节省 Token）
 	var cancel context.CancelFunc
-	if a.tracker != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
+	if a.extraction != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
 		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()
 
@@ -137,36 +137,32 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 
 	msg, err := a.inner.Generate(ctx, messages, opts...)
 	if err != nil {
-		// 如果是因为我们主动 Cancel 导致的错误，且 Tracker 有成功结果，则视为成功
-		if errors.Is(err, context.Canceled) && a.tracker != nil {
-			if name, result, ok := a.tracker.getLastSuccess(); ok {
-				if _, direct := a.cfg.Execution.DirectReturnTools[name]; direct {
-					return &schema.Message{
-						Role:    schema.Assistant,
-						Content: result,
-					}, nil
-				}
+		// 如果是因为我们主动 Cancel 导致的错误，且 Extraction 有成功结果，则视为成功
+		if errors.Is(err, context.Canceled) && a.extraction != nil {
+			if msg, ok := a.directReturnMessage(); ok {
+				return msg, nil
 			}
 		}
 		return nil, err
 	}
 
-	// 处理 ToolChoiceForced 下的 ToolReturnDirectly (如果在中间件没能及时 Cancel，这里作为兜底)
+	// 处理 Extraction 模式下的 ToolReturnDirectly (如果在中间件没能及时 Cancel，这里作为兜底)
 	// 因为我们禁用了 ReactAgent 的原生支持（为了支持重试），所以需要在这里手动替换结果
-	if a.tracker != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
-		if name, result, ok := a.tracker.getLastSuccess(); ok {
-			if _, direct := a.cfg.Execution.DirectReturnTools[name]; direct {
-				// 将工具结果作为最终回复返回
-				// 注意：这里我们构造一个 Assistant 消息，内容是工具结果
-				return &schema.Message{
-					Role:    schema.Assistant,
-					Content: result,
-				}, nil
-			}
-		}
+	if msg, ok := a.directReturnMessage(); ok {
+		return msg, nil
 	}
 
 	return msg, nil
+}
+
+func (a *Agent) directReturnMessage() (*schema.Message, bool) {
+	if a.extraction == nil {
+		return nil, false
+	}
+	if len(a.cfg.Execution.DirectReturnTools) == 0 {
+		return nil, false
+	}
+	return a.extraction.directReturnMessage(a.cfg.Execution.DirectReturnTools)
 }
 
 type ctxKeyAgentControl struct{}
@@ -190,7 +186,7 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	}
 
 	// 对于 Stream 模式，如果需要 direct return，我们需要包装 StreamReader
-	if a.tracker != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
+	if a.extraction != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
 		// Stream 模式下暂时不介入 ToolReturnDirectly，让模型总结照常输出。
 		// 如果用户真的需要 direct return，推荐使用 Generate 方法。
 		return sr, nil

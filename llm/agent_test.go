@@ -552,62 +552,82 @@ func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
 	}
 }
 
-// ── toolCallTracker 单元测试 ──────────────────────────────────────
+// ── Extraction 内部状态单元测试 ───────────────────────────────────
 
-func TestToolCallTracker_ShouldForce(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+func TestExtractionState_ShouldForceToolCall(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
 	// 初始状态：应该强制
-	if !tracker.shouldForce() {
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force initially")
 	}
 
 	// 失败1次：仍然强制
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 1 failure")
 	}
 
 	// 失败2次：仍然强制
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 2 failures")
 	}
 
 	// 失败3次：超限，不再强制
-	tracker.recordFailure()
-	if tracker.shouldForce() {
+	state.recordFailure()
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after 3 failures (maxRetries reached)")
 	}
-	if !tracker.retriesExhausted() {
+	if !state.retriesExhausted() {
 		t.Fatal("retries should be exhausted")
 	}
 }
 
-func TestToolCallTracker_Success(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+func TestExtractionState_Success(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
 	// 成功后不再强制
-	tracker.recordSuccess("tool", "result")
-	if tracker.shouldForce() {
+	state.recordSuccess("tool", "result")
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after success")
 	}
-	if tracker.retriesExhausted() {
+	if state.retriesExhausted() {
 		t.Fatal("retries should NOT be exhausted after success")
 	}
 }
 
-func TestToolCallTracker_FailThenSuccess(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+func TestExtractionState_FailThenSuccess(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 1 failure")
 	}
 
-	tracker.recordSuccess("tool", "result")
-	if tracker.shouldForce() {
+	state.recordSuccess("tool", "result")
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after success")
+	}
+}
+
+func TestExtractionRuntime_DirectReturnMessage(t *testing.T) {
+	runtime := newExtractionRuntime(3)
+	runtime.state.recordSuccess("extract", `{"result":"ok"}`)
+
+	msg, ok := runtime.directReturnMessage(map[string]struct{}{"extract": {}})
+	if !ok {
+		t.Fatal("expected direct return message")
+	}
+	if msg.Role != schema.Assistant {
+		t.Fatalf("unexpected role: %v", msg.Role)
+	}
+	if msg.Content != `{"result":"ok"}` {
+		t.Fatalf("unexpected content: %q", msg.Content)
+	}
+
+	if _, ok := runtime.directReturnMessage(map[string]struct{}{"other": {}}); ok {
+		t.Fatal("did not expect direct return for other tool")
 	}
 }
 
