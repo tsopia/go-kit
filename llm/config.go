@@ -60,7 +60,10 @@ type ObservabilityConfig struct {
 }
 
 type StructuredLogConfig struct {
-	Logger *slog.Logger
+	Logger           *slog.Logger
+	LogToolArguments bool
+	LogToolResults   bool
+	MaxFieldLength   int
 }
 
 type AgentConfig struct {

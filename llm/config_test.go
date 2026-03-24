@@ -56,4 +56,21 @@ func TestAgentConfigDefaults(t *testing.T) {
 	if cfg.Observability.Callbacks != nil {
 		t.Fatalf("expected nil callbacks, got %#v", cfg.Observability.Callbacks)
 	}
+	if cfg.Observability.StructuredLogs != nil {
+		t.Fatalf("expected nil structured logs, got %#v", cfg.Observability.StructuredLogs)
+	}
+
+	sl := StructuredLogConfig{}
+	if sl.Logger != nil {
+		t.Fatalf("expected nil structured log logger, got %#v", sl.Logger)
+	}
+	if sl.LogToolArguments {
+		t.Fatal("expected false log tool arguments by default")
+	}
+	if sl.LogToolResults {
+		t.Fatal("expected false log tool results by default")
+	}
+	if sl.MaxFieldLength != 0 {
+		t.Fatalf("expected zero max field length, got %d", sl.MaxFieldLength)
+	}
 }
