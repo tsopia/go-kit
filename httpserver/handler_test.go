@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -721,65 +722,73 @@ func TestHandleNoContentCustomSuccessStatus(t *testing.T) {
 	}
 }
 
-func TestHandleUpload(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	type UploadReq struct {
-		File string `json:"file"`
-	}
-	type UploadResp struct {
-		URL string `json:"url"`
+func TestHandleFormMultipartUpload(t *testing.T) {
+	type uploadReq struct {
+		Name string                `form:"name"`
+		File *multipart.FileHeader `form:"file"`
 	}
 
-	handler := HandleUpload(func(ctx context.Context, req UploadReq) (UploadResp, error) {
-		return UploadResp{URL: "https://example.com/" + req.File}, nil
-	}, 1024)
+	srv := NewServer(nil)
+	srv.POST("/upload", HandleForm(func(ctx context.Context, req uploadReq) (gin.H, error) {
+		if req.File == nil {
+			return nil, fmt.Errorf("missing file")
+		}
+
+		return gin.H{
+			"name":     req.Name,
+			"filename": req.File.Filename,
+		}, nil
+	}, WithMaxBodyBytes(1024)))
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("name", "avatar"); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	fileWriter, err := writer.CreateFormFile("file", "avatar.png")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fileWriter.Write([]byte("png-bytes")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
 
 	w := httptest.NewRecorder()
-	body := `{"file":"test.txt"}`
-	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
-
-	handler(c)
+	req := httptest.NewRequest(http.MethodPost, "/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	srv.Engine().ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-
-	if !strings.Contains(w.Body.String(), "test.txt") {
-		t.Errorf("response should contain filename")
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"name":"avatar"`)) {
+		t.Fatalf("body = %q, want name=avatar", w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"filename":"avatar.png"`)) {
+		t.Fatalf("body = %q, want filename=avatar.png", w.Body.String())
 	}
 }
 
-func TestHandleUpload_BodyTooLarge(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	type UploadReq struct {
-		Data string `json:"data"`
-	}
-	type UploadResp struct {
-		Success bool `json:"success"`
+func TestHandleFormBodyTooLarge(t *testing.T) {
+	type uploadReq struct {
+		Data string `json:"data" form:"data"`
 	}
 
-	handler := HandleUpload(func(ctx context.Context, req UploadReq) (UploadResp, error) {
-		return UploadResp{Success: true}, nil
-	}, 10) // 只允许 10 bytes
+	srv := NewServer(nil)
+	srv.POST("/upload", HandleForm(func(ctx context.Context, req uploadReq) (gin.H, error) {
+		return gin.H{"data": req.Data}, nil
+	}, WithMaxBodyBytes(10)))
 
 	w := httptest.NewRecorder()
 	body := `{"data":"this is a long string that exceeds the limit"}`
 	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
-
-	handler(c)
+	srv.Engine().ServeHTTP(w, req)
 
 	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Errorf("status = %d, want %d (413)", w.Code, http.StatusRequestEntityTooLarge)
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
 	}
 }
-
