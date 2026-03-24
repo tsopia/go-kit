@@ -86,3 +86,77 @@ func TestStructTool_FullScenario(t *testing.T) {
 		t.Fatalf("unexpected tags: %#v", got.Tags)
 	}
 }
+
+func TestStructTool_ExtractionModeScenario(t *testing.T) {
+	tool := NewStructTool[ComplexStruct]("extract_order", "从自然语言中提取订单和用户信息")
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{
+						ID: "tc1",
+						Function: schema.FunctionCall{
+							Name:      "extract_order",
+							Arguments: `{request_type:"CREATE"}`,
+						},
+					},
+				},
+			},
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{
+						ID: "tc2",
+						Function: schema.FunctionCall{
+							Name:      "extract_order",
+							Arguments: `{"user_info":{"name":"李四","age":31},"order":{"order_id":"B002","amount":88.8},"request_type":"CREATE","tags":["回头客"]}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"extract_order": {}},
+		},
+		Prompt: PromptConfig{
+			System: "把用户请求提取为合法 JSON；如果工具报错，修正参数后重试。",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "帮我创建订单，用户李四，31岁，订单 B002，金额 88.8 元，标签回头客"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.calls != 2 {
+		t.Fatalf("unexpected model call count: got %d want 2", model.calls)
+	}
+
+	var got ComplexStruct
+	if err := json.Unmarshal([]byte(msg.Content), &got); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if got.UserInfo.Name != "李四" {
+		t.Fatalf("unexpected user name: %q", got.UserInfo.Name)
+	}
+	if got.Order.OrderID != "B002" {
+		t.Fatalf("unexpected order id: %q", got.Order.OrderID)
+	}
+	if got.Order.Amount != 88.8 {
+		t.Fatalf("unexpected order amount: %v", got.Order.Amount)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "回头客" {
+		t.Fatalf("unexpected tags: %#v", got.Tags)
+	}
+}

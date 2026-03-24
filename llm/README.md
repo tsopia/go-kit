@@ -26,32 +26,35 @@ cfg := llm.ModelConfig{
 
 ### 2. 定义工具 (推荐 StructTool)
 
-使用 `struct` 定义参数，自动生成 Schema：
+使用 `struct` 定义目标结构，自动生成 Schema：
 
 ```go
-type WeatherArgs struct {
-    City string `json:"city" desc:"查询城市" required:"true"`
-    Unit string `json:"unit" desc:"温度单位" enum:"celsius,fahrenheit"`
+type WeatherResult struct {
+    City        string `json:"city" desc:"城市" required:"true"`
+    Condition   string `json:"condition" desc:"天气情况" required:"true"`
+    Temperature string `json:"temperature" desc:"温度" required:"true"`
 }
 
-// 创建工具
-weatherTool := llm.NewStructTool("get_weather", "查询天气", func(ctx context.Context, args *WeatherArgs) (string, error) {
-    return fmt.Sprintf("%s 的天气是 晴, 25%s", args.City, args.Unit), nil
-})
+weatherTool := llm.NewStructTool[WeatherResult]("extract_weather", "提取天气结果")
 ```
 
 ### 3. 创建 Agent 并运行
 
 ```go
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
-    ModelConfig:    cfg,
-    InvokableTools: []llm.InvokableTool{weatherTool}, // 自动适配
-    SystemPrompt:   "你是一个有用的助手。",
+    Model: llm.AgentModelConfig{Config: cfg},
+    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{weatherTool}},
+    Prompt: llm.PromptConfig{
+        System: "从用户请求中提取天气结果，输出必须是合法 JSON。",
+    },
+    Execution: llm.ExecutionConfig{
+        Mode:              llm.Extraction,
+        DirectReturnTools: map[string]struct{}{"extract_weather": {}},
+    },
 })
 
-// 运行 (Generate)
 msg, _ := agent.Generate(ctx, []*schema.Message{
-    schema.UserMessage("海淀区天气如何？"),
+    schema.UserMessage("北京天气晴，25摄氏度。请提取结构化结果。"),
 })
 fmt.Println(msg.Content)
 ```
@@ -73,18 +76,21 @@ logHandler := llm.NewLogHandler(slog.Default())
 // 注入 Agent
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    Callbacks: []callbacks.Handler{lfHandler, logHandler},
+    Observability: llm.ObservabilityConfig{
+        Callbacks: []callbacks.Handler{lfHandler, logHandler},
+    },
 })
 ```
 
-### 2. 强制工具调用与重试 (ToolChoice & Retry)
+### 2. Extraction 模式与失败修复
 
 ```go
-forced := schema.ToolChoiceForced
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    ToolChoice: &forced, // 强制模型必须调用工具
-    MaxRetries: 3,       // 如果工具报错，自动重试 3 次
+    Execution: llm.ExecutionConfig{
+        Mode:       llm.Extraction, // 强制模型先完成工具任务
+        MaxRetries: 3,              // 工具报错后反馈给模型修正再试
+    },
 })
 ```
 
@@ -95,8 +101,11 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 ```go
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    ToolReturnDirectly: map[string]struct{}{
-        "search_tool": {}, // 执行完 search_tool 后立即结束对话并返回结果
+    Execution: llm.ExecutionConfig{
+        Mode: llm.Assistant,
+        DirectReturnTools: map[string]struct{}{
+            "search_tool": {}, // 执行完 search_tool 后立即结束对话并返回结果
+        },
     },
 })
 ```

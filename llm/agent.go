@@ -32,11 +32,10 @@ type Agent struct {
 //	msg, _ := agent.Generate(ctx, messages)
 //
 //	// 场景 2: 强制调工具 → 结果回模型 → 模型决策
-//	forced := schema.ToolChoiceForced
 //	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 //	    Model: llm.AgentModelConfig{Config: cfg},
 //	    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
-//	    Execution: llm.ExecutionConfig{ToolChoice: &forced},
+//	    Execution: llm.ExecutionConfig{Mode: llm.Extraction},
 //	})
 //
 //	// 场景 3: 强制调工具 → 直接拿结果
@@ -44,7 +43,7 @@ type Agent struct {
 //	    Model: llm.AgentModelConfig{Config: cfg},
 //	    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
 //	    Execution: llm.ExecutionConfig{
-//	        ToolChoice:        &forced,
+//	        Mode:              llm.Extraction,
 //	        DirectReturnTools: map[string]struct{}{"my_tool": {}},
 //	    },
 //	})

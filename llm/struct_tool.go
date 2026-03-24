@@ -18,7 +18,7 @@ import (
 //   - 成功 → 返回合法 JSON
 //   - 失败 → 返回 error，触发自动重试
 //
-// 配合 ToolChoiceForced + ToolReturnDirectly 使用，实现「结构化输出提取」：
+// 配合 Extraction 模式和 DirectReturnTools 使用，实现「结构化输出提取」：
 //
 //	type JD struct {
 //	    Title        string   `json:"title"`
@@ -27,13 +27,16 @@ import (
 //
 //	tool := llm.NewStructTool[JD]("generate_jd", "生成职位描述")
 //
-//	forced := schema.ToolChoiceForced
 //	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
-//	    ModelConfig:        cfg,
-//	    InvokableTools:     []llm.InvokableTool{tool},
-//	    ToolChoice:         &forced,
-//	    ToolReturnDirectly: map[string]struct{}{"generate_jd": {}},
-//	    SystemPrompt:       "根据用户需求生成职位描述。",
+//	    Model: llm.AgentModelConfig{Config: cfg},
+//	    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{tool}},
+//	    Execution: llm.ExecutionConfig{
+//	        Mode:              llm.Extraction,
+//	        DirectReturnTools: map[string]struct{}{"generate_jd": {}},
+//	    },
+//	    Prompt: llm.PromptConfig{
+//	        System: "根据用户需求生成职位描述。",
+//	    },
 //	})
 //
 //	msg, _ := agent.Generate(ctx, messages)
