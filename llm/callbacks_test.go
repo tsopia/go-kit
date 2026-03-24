@@ -26,8 +26,12 @@ func TestLogHandler_Integration(t *testing.T) {
 		t.Fatalf("NewAgent failed: %v", err)
 	}
 
-	if _, err = agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello")}); err != nil {
+	resp, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello")})
+	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
+	}
+	if resp.Content != "mock response" {
+		t.Fatalf("unexpected response: %q", resp.Content)
 	}
 
 	logs := buf.String()

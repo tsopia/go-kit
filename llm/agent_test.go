@@ -14,12 +14,16 @@ import (
 // ── ToolAdapter 测试 ───────────────────────────────────────────────
 
 type simpleTool struct {
-	info *schema.ToolInfo
-	ret  string
+	info  *schema.ToolInfo
+	ret   string
+	calls int
 }
 
-func (s *simpleTool) Info() *schema.ToolInfo                             { return s.info }
-func (s *simpleTool) Invoke(_ context.Context, _ string) (string, error) { return s.ret, nil }
+func (s *simpleTool) Info() *schema.ToolInfo { return s.info }
+func (s *simpleTool) Invoke(_ context.Context, _ string) (string, error) {
+	s.calls++
+	return s.ret, nil
+}
 
 func TestToolAdapter_ImplementsInterface(t *testing.T) {
 	st := &simpleTool{
@@ -80,9 +84,11 @@ func TestNewAgent_MissingModel(t *testing.T) {
 type fakeToolCallingModel struct {
 	responses []*schema.Message
 	idx       int
+	calls     int
 }
 
 func (f *fakeToolCallingModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	f.calls++
 	if f.idx < len(f.responses) {
 		resp := f.responses[f.idx]
 		f.idx++
@@ -92,6 +98,7 @@ func (f *fakeToolCallingModel) Generate(_ context.Context, _ []*schema.Message, 
 }
 
 func (f *fakeToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	f.calls++
 	msg := &schema.Message{Content: "stream done"}
 	if f.idx < len(f.responses) {
 		msg = f.responses[f.idx]
@@ -212,8 +219,11 @@ func TestNewAgent_Generate_WithToolCall(t *testing.T) {
 
 func TestExecutionModeContracts(t *testing.T) {
 	tests := []struct {
-		name string
-		cfg  AgentConfig
+		name           string
+		cfg            AgentConfig
+		wantContent    string
+		wantModelCalls int
+		wantToolCalls  int
 	}{
 		{
 			name: "conversation_no_tools",
@@ -221,37 +231,120 @@ func TestExecutionModeContracts(t *testing.T) {
 				Model: &fakeToolCallingModel{
 					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
 				},
-				Execution: ExecutionConfig{Mode: Conversation},
 			},
+			wantContent:    "plain answer",
+			wantModelCalls: 1,
 		},
 		{
 			name: "assistant_optional_tools",
 			cfg: AgentConfig{
 				Model: &fakeToolCallingModel{
-					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
-				},
-				Execution: ExecutionConfig{Mode: Assistant},
-			},
-		},
-		{
-			name: "extraction_forced_tool_repair_direct_return",
-			cfg: AgentConfig{
-				Model: &fakeToolCallingModel{
 					responses: []*schema.Message{
-						{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"user_name":"张三"}`}}}},
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "lookup_user", Arguments: `{"name":"Alice"}`}},
+							},
+						},
+						{Role: schema.Assistant, Content: "lookup done"},
 					},
 				},
 				InvokableTools: []InvokableTool{
-					NewStructTool[JobPosting]("extract_order", "从自然语言中提取订单信息"),
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice","age":18}`,
+					},
 				},
-				Execution: ExecutionConfig{Mode: Extraction},
 			},
+			wantContent:    "lookup done",
+			wantModelCalls: 2,
+			wantToolCalls:  1,
+		},
+		{
+			name: "forced_retry_direct_return",
+			cfg: AgentConfig{
+				Model: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"bad"}`}},
+							},
+						},
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc2", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"Go 后端工程师","company":"Acme","requirements":["Go","K8s"],"salary":"30-50K"}`}},
+							},
+						},
+					},
+				},
+				InvokableTools: []InvokableTool{
+					&failingTool{
+						info: &schema.ToolInfo{
+							Name: "extract_order",
+							Desc: "extract order",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"title": {
+									Type: schema.String,
+									Desc: "title",
+								},
+							}),
+						},
+						failCount: 1,
+					},
+				},
+				ToolChoice:         func() *schema.ToolChoice { v := schema.ToolChoiceForced; return &v }(),
+				MaxRetries:         2,
+				ToolReturnDirectly: map[string]struct{}{"extract_order": {}},
+			},
+			wantContent:    `{"result":"success"}`,
+			wantModelCalls: 2,
+			wantToolCalls:  2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _ = NewAgent(context.Background(), tt.cfg)
+			agent, err := NewAgent(context.Background(), tt.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+
+			if model, ok := tt.cfg.Model.(*fakeToolCallingModel); ok {
+				if model.calls != tt.wantModelCalls {
+					t.Fatalf("unexpected model call count: got %d want %d", model.calls, tt.wantModelCalls)
+				}
+			}
+
+			if tt.wantToolCalls > 0 {
+				switch tool := tt.cfg.InvokableTools[0].(type) {
+				case *simpleTool:
+					if tool.calls != tt.wantToolCalls {
+						t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+					}
+				case *failingTool:
+					if tool.calls != tt.wantToolCalls {
+						t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+					}
+				}
+			}
 		})
 	}
 }
@@ -515,14 +608,14 @@ func TestStructTool_Invoke_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestStructTool_FullScenario 完整模拟用户场景：
+// TestStructTool_RetryAndDirectReturn 完整模拟用户场景：
 //
 //	用户：「生成 Go 后端工程师 JD」
 //	→ 模型被迫调 generate_jd 工具（ToolChoiceForced）
 //	→ 第1次：模型生成了非法 JSON → 工具 json.Unmarshal 失败 → 自动重试
 //	→ 第2次：模型生成了合法 JSON → 工具成功 → 直接返回（ToolReturnDirectly）
 //	→ 用户拿到 JobPosting 结构体
-func TestStructTool_FullScenario(t *testing.T) {
+func TestStructTool_RetryAndDirectReturn(t *testing.T) {
 	st := NewStructTool[JobPosting]("generate_jd", "根据需求生成职位描述")
 
 	fm := &fakeToolCallingModel{

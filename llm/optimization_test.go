@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
