@@ -15,6 +15,12 @@
 // Typed handler：
 //
 //	srv.POST("/login", httpserver.HandleJSON(login))
+//	srv.POST("/upload", httpserver.HandleForm(upload, httpserver.WithMaxBodyBytes(100<<20)))
+//
+// 流式接口：
+//
+//	srv.SSE("/events", func(stream httpserver.SSEStream) {})
+//	srv.WS("/chat", func(session httpserver.WSSession) {})
 //
 // 生命周期管理：
 //

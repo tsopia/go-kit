@@ -349,7 +349,10 @@ r.GET("/users", httpserver.Handle(
 支持 JSON/Form/Multipart 自动识别：
 
 ```go
-r.POST("/upload", httpserver.HandleForm(uploadHandler))
+r.POST("/upload", httpserver.HandleForm(
+    uploadHandler,
+    httpserver.WithMaxBodyBytes(100<<20),
+))
 ```
 
 ### `HandleNoContent`
