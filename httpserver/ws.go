@@ -30,6 +30,13 @@ type WSConfig struct {
 	PongTimeout    time.Duration
 }
 
+// WSRouteConfig 是 WebSocket 路由级配置
+type WSRouteConfig struct {
+	WSConfig
+	ReadTimeout  time.Duration // 读取消息超时，0 = 无超时
+	WriteTimeout time.Duration // 发送消息超时，0 = 无超时
+}
+
 func defaultWSConfig() WSConfig {
 	return WSConfig{
 		RecvBufferSize: 100,
@@ -38,6 +45,14 @@ func defaultWSConfig() WSConfig {
 		SendPolicy:     DropOldest,
 		PingPeriod:     30 * time.Second,
 		PongTimeout:    60 * time.Second,
+	}
+}
+
+func defaultWSRouteConfig() WSRouteConfig {
+	return WSRouteConfig{
+		WSConfig:     defaultWSConfig(),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 }
 
@@ -70,8 +85,37 @@ func (f wsOptionFunc) apply(cfg *WSConfig) {
 	f(cfg)
 }
 
+func (f wsOptionFunc) applyRoute(cfg *WSRouteConfig) {
+	f(&cfg.WSConfig)
+}
+
+// WSRouteOption 是 WebSocket 路由级配置选项
+type WSRouteOption interface {
+	applyRoute(*WSRouteConfig)
+}
+
+type wsRouteOptionFunc func(*WSRouteConfig)
+
+func (f wsRouteOptionFunc) applyRoute(cfg *WSRouteConfig) {
+	f(cfg)
+}
+
+// WithReadTimeout 设置读取消息超时
+func WithReadTimeout(d time.Duration) WSRouteOption {
+	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
+		cfg.ReadTimeout = d
+	})
+}
+
+// WithWriteTimeout 设置发送消息超时
+func WithWriteTimeout(d time.Duration) WSRouteOption {
+	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
+		cfg.WriteTimeout = d
+	})
+}
+
 // WithRecvBuffer 设置接收缓冲大小和策略
-func WithRecvBuffer(size int, policy WSBufferPolicy) WSOption {
+func WithRecvBuffer(size int, policy WSBufferPolicy) wsOptionFunc {
 	return wsOptionFunc(func(cfg *WSConfig) {
 		cfg.RecvBufferSize = size
 		cfg.RecvPolicy = policy
@@ -79,7 +123,7 @@ func WithRecvBuffer(size int, policy WSBufferPolicy) WSOption {
 }
 
 // WithSendBuffer 设置发送缓冲大小和策略
-func WithSendBuffer(size int, policy WSBufferPolicy) WSOption {
+func WithSendBuffer(size int, policy WSBufferPolicy) wsOptionFunc {
 	return wsOptionFunc(func(cfg *WSConfig) {
 		cfg.SendBufferSize = size
 		cfg.SendPolicy = policy
@@ -87,14 +131,14 @@ func WithSendBuffer(size int, policy WSBufferPolicy) WSOption {
 }
 
 // WithWSPingPeriod 设置 ping 发送周期
-func WithWSPingPeriod(period time.Duration) WSOption {
+func WithWSPingPeriod(period time.Duration) wsOptionFunc {
 	return wsOptionFunc(func(cfg *WSConfig) {
 		cfg.PingPeriod = period
 	})
 }
 
 // WithWSPongTimeout 设置 pong 超时时间
-func WithWSPongTimeout(timeout time.Duration) WSOption {
+func WithWSPongTimeout(timeout time.Duration) wsOptionFunc {
 	return wsOptionFunc(func(cfg *WSConfig) {
 		cfg.PongTimeout = timeout
 	})

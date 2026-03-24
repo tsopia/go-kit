@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -166,5 +167,50 @@ func TestWS_UpgradeError(t *testing.T) {
 	}
 	if !found {
 		t.Error("WS route not registered")
+	}
+}
+
+func TestWS_ReadTimeout(t *testing.T) {
+	server := NewServer(&Config{Port: 0})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	timeoutCalled := make(chan bool, 1)
+
+	server.WS("/timeout", func(ctx context.Context, recv <-chan WSMessage, send chan<- WSMessage) {
+		select {
+		case <-recv:
+			// 不应该收到，因为客户端不发消息
+		case <-ctx.Done():
+			timeoutCalled <- true
+		}
+	}, WithReadTimeout(100*time.Millisecond))
+
+	// 使用 net.Listen 获取随机端口
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go server.Serve(ln)
+	time.Sleep(100 * time.Millisecond) // 等待服务器启动
+
+	// WebSocket 连接
+	wsURL := "ws://" + ln.Addr().String() + "/stream/timeout"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	// 等待超时触发
+	select {
+	case <-timeoutCalled:
+		// 成功：读超时触发了 ctx 取消
+	case <-time.After(2 * time.Second):
+		t.Error("read timeout did not trigger")
 	}
 }

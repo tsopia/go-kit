@@ -168,10 +168,10 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 
 // WS 注册一个 WebSocket 路由。
 // 自动处理 Upgrade、ping/pong、缓冲策略和断开日志。
-func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption) {
-	cfg := defaultWSConfig()
+func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteOption) {
+	cfg := defaultWSRouteConfig()
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt.applyRoute(&cfg)
 	}
 
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
@@ -187,7 +187,25 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 		}
 		defer conn.Close()
 
-		// 2. 配置 pong handler，跟踪最后收到 pong 的时间
+		// 2. 创建带超时的 context
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+
+		// 3. 启动读超时监控（如果配置了）
+		if cfg.ReadTimeout > 0 {
+			go func() {
+				timer := time.NewTimer(cfg.ReadTimeout)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+					cancel() // 读超时触发关闭
+				case <-ctx.Done():
+					// 正常关闭
+				}
+			}()
+		}
+
+		// 4. 配置 pong handler，跟踪最后收到 pong 的时间
 		var (
 			lastPong   = time.Now()
 			lastPongMu sync.Mutex
@@ -199,15 +217,11 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSOption
 			return nil
 		})
 
-		// 3. 创建缓冲 channel
+		// 5. 创建缓冲 channel
 		recv := make(chan WSMessage, cfg.RecvBufferSize)
 		send := make(chan WSMessage, cfg.SendBufferSize)
 
-		// 4. 启动上下文
-		ctx, cancel := context.WithCancel(c.Request.Context())
-		defer cancel()
-
-		// 5. 启动读 goroutine（客户端 → recv）
+		// 6. 启动读 goroutine（客户端 → recv）
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
