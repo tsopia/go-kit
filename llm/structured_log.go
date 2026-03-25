@@ -14,7 +14,7 @@ func newStructuredLogger(cfg *StructuredLogConfig) *structuredLogger {
 }
 
 func (l *structuredLogger) enabled() bool {
-	return l != nil && l.cfg != nil && l.cfg.Client != nil
+	return l != nil && l.cfg != nil && !isNilLogClient(l.cfg.Client)
 }
 
 func (l *structuredLogger) logInfo(ctx context.Context, event string, attrs ...any) {

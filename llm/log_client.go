@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/tsopia/go-kit/utils"
 )
@@ -16,9 +17,6 @@ type ctxKeyInvocationID struct{}
 func withInvocationID(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if invocationIDFromContext(ctx) != "" {
-		return ctx
 	}
 	return context.WithValue(ctx, ctxKeyInvocationID{}, utils.GenerateID())
 }
@@ -36,4 +34,17 @@ func appendInvocationIDField(ctx context.Context, fields []any) []any {
 		fields = append(fields, "invocation_id", invocationID)
 	}
 	return fields
+}
+
+func isNilLogClient(client LogClient) bool {
+	if client == nil {
+		return true
+	}
+	value := reflect.ValueOf(client)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

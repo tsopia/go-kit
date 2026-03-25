@@ -32,7 +32,7 @@ func NewLangfuseHandler(cfg *LangfuseConfig) (callbacks.Handler, func(), error) 
 // NewLogHandler 创建一个基于 LogClient 的日志回调处理器。
 // 它会记录组件的输入、输出和 Token 消耗（如果有），并沿用调用时的 ctx。
 func NewLogHandler(client LogClient) callbacks.Handler {
-	if client == nil {
+	if isNilLogClient(client) {
 		client = &noopLogClient{}
 	}
 
