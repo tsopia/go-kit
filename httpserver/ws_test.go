@@ -74,6 +74,42 @@ func TestDefaultWSOriginCheck(t *testing.T) {
 	}
 }
 
+func TestWSUpgrader_DefaultCheckOrigin(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{
+			name: "non browser client without origin is allowed",
+			want: true,
+		},
+		{
+			name:   "browser client with origin is denied by default",
+			origin: "https://app.example.com",
+			want:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+
+			if got := WSUpgrader.CheckOrigin(req); got != tc.want {
+				t.Fatalf("WSUpgrader.CheckOrigin() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWSMessage(t *testing.T) {
 	msg := WSMessage{
 		Type: websocket.TextMessage,

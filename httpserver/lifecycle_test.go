@@ -265,8 +265,8 @@ func TestStartInternalValidatesStartState(t *testing.T) {
 	}
 }
 
-// TestIsRunningAfterShutdown 验证 IsRunning() 在 Shutdown() 后应返回 false
-// 当前实现问题：IsRunning() 只检查 s.server != nil，Shutdown() 后 server 未被置 nil
+// TestIsRunning 验证 IsRunning() 基于状态机语义工作。
+// 当前实现通过 State() 判断，因此 Shutdown() 后应返回 false。
 func TestIsRunning(t *testing.T) {
 	t.Parallel()
 
