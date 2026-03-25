@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	httpmiddleware "github.com/tsopia/go-kit/httpserver/middleware"
 )
 
 func TestSSESender_Event(t *testing.T) {
@@ -151,17 +153,59 @@ func TestSSESender_startHeartbeat_noConfig(t *testing.T) {
 }
 
 func TestSSESender_logDisconnect(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	req := httptest.NewRequest("GET", "/events", nil)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = req
+	t.Parallel()
 
-	sender := &sseSender{ginCtx: c}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // 立即取消，模拟断开
-	// 仅验证不 panic
-	sender.logDisconnect(ctx)
+	testCases := []struct {
+		name      string
+		ctx       func() context.Context
+		wantError bool
+	}{
+		{
+			name: "nil context omits error field",
+			ctx: func() context.Context {
+				return nil
+			},
+			wantError: false,
+		},
+		{
+			name: "cancelled context includes error field",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			gin.SetMode(gin.TestMode)
+			logger := &capturedServerLogger{}
+			req := httptest.NewRequest(http.MethodGet, "/events", nil)
+			req = req.WithContext(httpmiddleware.WithStreamLogConfig(req.Context(), httpmiddleware.StreamLogConfig{
+				Logger: logger.log,
+			}))
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = req
+
+			sender := &sseSender{ginCtx: c, startedAt: time.Now()}
+			sender.logDisconnect(tt.ctx())
+
+			logEntry, ok := findServerLogByEvent(logger.snapshot(), "stream_disconnect")
+			if !ok {
+				t.Fatal("stream_disconnect log not found")
+			}
+
+			_, hasError := logEntry.fields["error"]
+			if hasError != tt.wantError {
+				t.Fatalf("has error field = %v, want %v", hasError, tt.wantError)
+			}
+		})
+	}
 }
 
 // TestSSESender_ConcurrentWrite 验证并发写入不会导致 data race

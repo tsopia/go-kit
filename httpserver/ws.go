@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -44,6 +45,18 @@ func defaultWSOriginCheck(r *http.Request) bool {
 		return true
 	}
 	return r.Header.Get("Origin") == ""
+}
+
+func recoverWSPumpPanic(pump string, path string, cancel context.CancelFunc) {
+	if r := recover(); r != nil {
+		slog.Error("websocket "+pump+" goroutine panic",
+			"path", path,
+			"recover", r,
+		)
+		if cancel != nil {
+			cancel()
+		}
+	}
 }
 
 // WSUpgrader 是 WebSocket upgrader，可由用户自定义

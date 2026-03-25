@@ -298,34 +298,54 @@ func TestServer_WS(t *testing.T) {
 }
 
 func TestWS_PanicRecovery(t *testing.T) {
-	server := NewServer(&Config{Port: 8080})
-	server.SetGroups(
-		server.Engine().Group("/api"),
-		server.Engine().Group("/stream"),
-	)
+	t.Parallel()
 
-	// panic 的 handler
-	server.WS("/panic", func(session WSSession) {
-		panic("intentional panic in handler")
-	})
-
-	server.WS("/panic-in-read", func(session WSSession) {
-		// 等待一条消息然后 panic
-		<-session.Recv()
-		panic("panic after receiving message")
-	})
-
-	// 验证路由注册成功（即使 handler 会 panic）
-	routes := server.Engine().Routes()
-	found := false
-	for _, r := range routes {
-		if r.Path == "/stream/panic" && r.Method == "GET" {
-			found = true
-			break
-		}
+	testCases := []struct {
+		name       string
+		panicValue any
+		wantCancel bool
+	}{
+		{
+			name:       "panic triggers cancel",
+			panicValue: "boom",
+			wantCancel: true,
+		},
+		{
+			name:       "no panic leaves cancel untouched",
+			wantCancel: false,
+		},
 	}
-	if !found {
-		t.Error("WS route not registered")
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cancelCh := make(chan struct{}, 1)
+			cancel := func() {
+				select {
+				case cancelCh <- struct{}{}:
+				default:
+				}
+			}
+
+			func() {
+				defer recoverWSPumpPanic("read", "/stream/panic", cancel)
+				if tt.panicValue != nil {
+					panic(tt.panicValue)
+				}
+			}()
+
+			select {
+			case <-cancelCh:
+				if !tt.wantCancel {
+					t.Fatal("cancel called unexpectedly")
+				}
+			default:
+				if tt.wantCancel {
+					t.Fatal("cancel was not called")
+				}
+			}
+		})
 	}
 }
 

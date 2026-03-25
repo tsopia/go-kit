@@ -184,7 +184,8 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
 		startedAt := time.Now()
 
-		// 清除 WriteDeadline
+		// 清除 WriteDeadline。SSE 是长连接，deadline 只做 best effort，
+		// 不支持 deadline 的 writer 会返回错误，但不影响流式响应继续工作。
 		rc := http.NewResponseController(c.Writer)
 		_ = rc.SetWriteDeadline(time.Time{})
 
@@ -326,6 +327,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		pumps.Add(1)
 		go func() {
+			defer recoverWSPumpPanic("read", c.Request.URL.Path, cancel)
 			defer pumps.Done()
 			defer close(recv)
 			defer cancel()
@@ -347,6 +349,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		pumps.Add(1)
 		go func() {
+			defer recoverWSPumpPanic("write", c.Request.URL.Path, cancel)
 			defer pumps.Done()
 			defer cancel()
 			defer close(writeDone)
@@ -359,12 +362,14 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 						return
 					}
 					if cfg.WriteTimeout > 0 {
+						// Best effort: closed/broken connections会在后续 WriteMessage 暴露错误。
 						_ = conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
 					}
 					if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
 						return
 					}
 					if cfg.WriteTimeout > 0 {
+						// Best effort: 重置 deadline 失败不影响后续连接关闭与错误传播。
 						_ = conn.SetWriteDeadline(time.Time{})
 					}
 				}
@@ -374,6 +379,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 		if cfg.PingPeriod > 0 {
 			pumps.Add(1)
 			go func() {
+				defer recoverWSPumpPanic("ping", c.Request.URL.Path, cancel)
 				defer pumps.Done()
 				ticker := time.NewTicker(cfg.PingPeriod)
 				defer ticker.Stop()
