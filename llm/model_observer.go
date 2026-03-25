@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"io"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -30,7 +29,7 @@ func newObservedToolCallingModel(inner model.ToolCallingChatModel, logs *structu
 func (m *observedToolCallingModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	msg, err := m.inner.Generate(ctx, input, opts...)
 	if err != nil {
-		m.logs.logError("model.decision", "execution_mode", string(m.mode), "tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
+		m.logs.logError("model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
 		return nil, err
 	}
 	m.logDecision(msg)
@@ -40,15 +39,9 @@ func (m *observedToolCallingModel) Generate(ctx context.Context, input []*schema
 func (m *observedToolCallingModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	sr, err := m.inner.Stream(ctx, input, opts...)
 	if err != nil {
-		m.logs.logError("model.decision", "execution_mode", string(m.mode), "tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
+		m.logs.logError("model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
 		return nil, err
 	}
-
-	copies := sr.Copy(2)
-	observer := copies[1]
-	sr = copies[0]
-
-	go m.observeStream(observer)
 	return sr, nil
 }
 
@@ -70,7 +63,7 @@ func (m *observedToolCallingModel) logDecision(msg *schema.Message) {
 	finishReason, reasoningTokens := decisionMeta(msg)
 	attrs := []any{
 		"execution_mode", string(m.mode),
-		"tool_choice", string(m.toolChoice),
+		"configured_tool_choice", string(m.toolChoice),
 		"tool_call_count", toolCallCount,
 		"tool_names", toolNames,
 		"finish_reason", finishReason,
@@ -79,29 +72,6 @@ func (m *observedToolCallingModel) logDecision(msg *schema.Message) {
 		attrs = append(attrs, "reasoning_tokens", reasoningTokens)
 	}
 	m.logs.logInfo("model.decision", attrs...)
-}
-
-func (m *observedToolCallingModel) observeStream(sr *schema.StreamReader[*schema.Message]) {
-	defer sr.Close()
-
-	var chunks []*schema.Message
-	for {
-		msg, err := sr.Recv()
-		if err == io.EOF {
-			merged, mergeErr := schema.ConcatMessages(chunks)
-			if mergeErr != nil {
-				m.logs.logError("model.decision", "execution_mode", string(m.mode), "tool_choice", string(m.toolChoice), "tool_call_count", len(chunks), "tool_names", []string{}, "finish_reason", "", "error", mergeErr.Error())
-				return
-			}
-			m.logDecision(merged)
-			return
-		}
-		if err != nil {
-			m.logs.logError("model.decision", "execution_mode", string(m.mode), "tool_choice", string(m.toolChoice), "tool_call_count", len(chunks), "tool_names", []string{}, "finish_reason", "", "error", err.Error())
-			return
-		}
-		chunks = append(chunks, msg)
-	}
 }
 
 func decisionToolNames(msg *schema.Message) ([]string, int) {

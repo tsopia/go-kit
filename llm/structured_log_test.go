@@ -136,6 +136,7 @@ func TestStructuredLogs_ModelDecision(t *testing.T) {
 		name string
 		cfg  AgentConfig
 		want []string
+		forbid []string
 	}{
 		{
 			name: "assistant_logs_plain_text_decision",
@@ -146,7 +147,8 @@ func TestStructuredLogs_ModelDecision(t *testing.T) {
 				Execution:     ExecutionConfig{Mode: Assistant},
 				Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{}},
 			},
-			want: []string{`"event":"model.decision"`, `"tool_call_count":0`},
+			want:   []string{`"event":"model.decision"`, `"configured_tool_choice":"allowed"`, `"tool_call_count":0`},
+			forbid: []string{`"tool_choice":"allowed"`},
 		},
 		{
 			name: "assistant_logs_tool_call_decision",
@@ -174,7 +176,8 @@ func TestStructuredLogs_ModelDecision(t *testing.T) {
 				Execution:     ExecutionConfig{Mode: Assistant},
 				Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{}},
 			},
-			want: []string{`"event":"model.decision"`, `"tool_call_count":1`, `"lookup_user"`},
+			want:   []string{`"event":"model.decision"`, `"configured_tool_choice":"allowed"`, `"tool_call_count":1`, `"lookup_user"`},
+			forbid: []string{`"tool_choice":"allowed"`},
 		},
 	}
 
@@ -199,6 +202,11 @@ func TestStructuredLogs_ModelDecision(t *testing.T) {
 			for _, want := range tt.want {
 				if !strings.Contains(logs, want) {
 					t.Fatalf("missing log fragment %q\nlogs=%s", want, logs)
+				}
+			}
+			for _, forbid := range tt.forbid {
+				if strings.Contains(logs, forbid) {
+					t.Fatalf("unexpected log fragment %q\nlogs=%s", forbid, logs)
 				}
 			}
 		})
