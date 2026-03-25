@@ -171,6 +171,38 @@ func TestWSSessionContract(t *testing.T) {
 	}
 }
 
+func TestWSSessionCloseRejectsFurtherSends(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	session := &wsSession{
+		ctx:  ctx,
+		send: make(chan WSMessage),
+		recv: make(chan WSMessage),
+		closeFn: func(code int, reason string) error {
+			if code != websocket.CloseNormalClosure {
+				t.Fatalf("code = %d, want %d", code, websocket.CloseNormalClosure)
+			}
+			if reason != "bye" {
+				t.Fatalf("reason = %q, want %q", reason, "bye")
+			}
+			cancel()
+			return nil
+		},
+	}
+
+	if err := session.Close(websocket.CloseNormalClosure, "bye"); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	err := session.Send(WSMessage{Type: websocket.TextMessage, Data: []byte("late")})
+	if !errors.Is(err, ErrWSSessionClosed) {
+		t.Fatalf("send err = %v, want %v", err, ErrWSSessionClosed)
+	}
+	if session.TrySend(WSMessage{Type: websocket.TextMessage, Data: []byte("late")}) {
+		t.Fatal("expected TrySend to fail after Close")
+	}
+}
+
 func TestServer_WS(t *testing.T) {
 	server := NewServer(&Config{Port: 8080})
 	server.SetGroups(

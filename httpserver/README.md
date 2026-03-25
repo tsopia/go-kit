@@ -655,6 +655,7 @@ srv.WS("/chat", handler,
 ```
 
 `session.Send` 表示“阻塞直到消息进入内部发送队列或连接结束”，`session.TrySend` 表示“仅在队列有空位时非阻塞入队”。
+`session.Close` 会立即关闭连接并拒绝后续发送；`session.CloseGracefully` 会先排空已入队消息，再发送 close frame。
 
 ### 使用 Hub 实现聊天室
 
