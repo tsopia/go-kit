@@ -233,23 +233,42 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		send := make(chan WSMessage, cfg.SendBufferSize)
 		recv := make(chan WSMessage, 1)
+		writeDone := make(chan struct{})
+
+		closeConn := func(code int, reason string) error {
+			cancel()
+			err := conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, reason),
+				controlDeadline(),
+			)
+			if closeErr := conn.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+			return err
+		}
+
 		session := &wsSession{
 			ctx:     ctx,
 			request: c.Request,
 			params:  c.Params,
 			recv:    recv,
 			send:    send,
-			closeFn: func(code int, reason string) error {
-				cancel()
-				err := conn.WriteControl(
-					websocket.CloseMessage,
-					websocket.FormatCloseMessage(code, reason),
-					controlDeadline(),
-				)
-				if closeErr := conn.Close(); err == nil && closeErr != nil {
-					err = closeErr
+			closeFn: closeConn,
+			gracefulCloseFn: func(closeCtx context.Context, code int, reason string) error {
+				if closeCtx == nil {
+					closeCtx = context.Background()
 				}
-				return err
+				close(send)
+				select {
+				case <-writeDone:
+					return closeConn(code, reason)
+				case <-closeCtx.Done():
+					if err := closeConn(code, reason); err != nil {
+						return err
+					}
+					return closeCtx.Err()
+				}
 			},
 		}
 
@@ -280,6 +299,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 		go func() {
 			defer pumps.Done()
 			defer cancel()
+			defer close(writeDone)
 			for {
 				select {
 				case <-ctx.Done():

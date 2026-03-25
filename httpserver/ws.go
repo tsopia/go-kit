@@ -61,6 +61,7 @@ type WSSession interface {
 	Send(msg WSMessage) error
 	TrySend(msg WSMessage) bool
 	Close(code int, reason string) error
+	CloseGracefully(ctx context.Context, code int, reason string) error
 }
 
 // WSHandlerFunc 是 WebSocket handler 的函数签名

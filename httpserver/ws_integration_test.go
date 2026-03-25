@@ -1,6 +1,8 @@
 package httpserver_test
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/url"
 	"testing"
@@ -239,5 +241,76 @@ func TestWS_Integration_Echo(t *testing.T) {
 	}
 	if string(data) != "hello" {
 		t.Errorf("expected 'hello', got '%s'", string(data))
+	}
+}
+
+func TestWS_CloseGracefullyDrainsQueuedMessages(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	srv.WS("/graceful", func(session httpserver.WSSession) {
+		if err := session.Send(httpserver.WSMessage{Type: websocket.TextMessage, Data: []byte("msg1")}); err != nil {
+			t.Fatalf("send msg1: %v", err)
+		}
+		if err := session.Send(httpserver.WSMessage{Type: websocket.TextMessage, Data: []byte("msg2")}); err != nil {
+			t.Fatalf("send msg2: %v", err)
+		}
+		if err := session.CloseGracefully(context.Background(), websocket.CloseNormalClosure, "bye"); err != nil {
+			t.Fatalf("close gracefully: %v", err)
+		}
+	}, httpserver.WithWSSendBuffer(2), httpserver.WithWSPingPeriod(0))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = ln.Close()
+	}()
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/graceful"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	for _, want := range []string{"msg1", "msg2"} {
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		msgType, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read message: %v", err)
+		}
+		if msgType != websocket.TextMessage {
+			t.Fatalf("msg type = %d, want %d", msgType, websocket.TextMessage)
+		}
+		if string(data) != want {
+			t.Fatalf("message = %q, want %q", string(data), want)
+		}
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	_, _, err = conn.ReadMessage()
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("read close frame err = %v, want close error", err)
+	}
+	if closeErr.Code != websocket.CloseNormalClosure {
+		t.Fatalf("close code = %d, want %d", closeErr.Code, websocket.CloseNormalClosure)
 	}
 }
