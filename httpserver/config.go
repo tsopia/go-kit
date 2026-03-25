@@ -6,13 +6,14 @@ import (
 )
 
 const (
-	defaultReadTimeout       = 30 * time.Second
-	defaultReadHeaderTimeout = 5 * time.Second
-	defaultWriteTimeout      = 60 * time.Second
-	defaultIdleTimeout       = 60 * time.Second
-	defaultShutdownTimeout   = 10 * time.Second
-	defaultDrainTimeout      = 5 * time.Second
-	defaultMaxHeaderBytes    = 1 << 20
+	DisableTimeout           time.Duration = -1
+	defaultReadTimeout                     = 30 * time.Second
+	defaultReadHeaderTimeout               = 5 * time.Second
+	defaultWriteTimeout                    = 60 * time.Second
+	defaultIdleTimeout                     = 60 * time.Second
+	defaultShutdownTimeout                 = 10 * time.Second
+	defaultDrainTimeout                    = 5 * time.Second
+	defaultMaxHeaderBytes                  = 1 << 20
 )
 
 // Config 服务器配置。
@@ -59,6 +60,22 @@ func DefaultConfig() *Config {
 	}
 }
 
+func normalizeTimeoutValue(v *time.Duration, def time.Duration) {
+	switch *v {
+	case DisableTimeout:
+		*v = 0
+	case 0:
+		*v = def
+	}
+}
+
+func validateTimeoutValue(name string, v time.Duration) error {
+	if v < DisableTimeout {
+		return fmt.Errorf("%w: %s must be >= %v", ErrInvalidConfig, name, DisableTimeout)
+	}
+	return nil
+}
+
 // Normalize 为零值填充默认配置。
 func (c *Config) Normalize() {
 	if c == nil {
@@ -71,27 +88,15 @@ func (c *Config) Normalize() {
 	if c.Port == 0 {
 		c.Port = 8080
 	}
-	if c.ReadTimeout <= 0 {
-		c.ReadTimeout = defaultReadTimeout
-	}
-	if c.ReadHeaderTimeout <= 0 {
-		c.ReadHeaderTimeout = defaultReadHeaderTimeout
-	}
-	if c.WriteTimeout <= 0 {
-		c.WriteTimeout = defaultWriteTimeout
-	}
-	if c.IdleTimeout <= 0 {
-		c.IdleTimeout = defaultIdleTimeout
-	}
+	normalizeTimeoutValue(&c.ReadTimeout, defaultReadTimeout)
+	normalizeTimeoutValue(&c.ReadHeaderTimeout, defaultReadHeaderTimeout)
+	normalizeTimeoutValue(&c.WriteTimeout, defaultWriteTimeout)
+	normalizeTimeoutValue(&c.IdleTimeout, defaultIdleTimeout)
 	if c.MaxHeaderBytes <= 0 {
 		c.MaxHeaderBytes = defaultMaxHeaderBytes
 	}
-	if c.ShutdownTimeout <= 0 {
-		c.ShutdownTimeout = defaultShutdownTimeout
-	}
-	if c.DrainTimeout <= 0 {
-		c.DrainTimeout = defaultDrainTimeout
-	}
+	normalizeTimeoutValue(&c.ShutdownTimeout, defaultShutdownTimeout)
+	normalizeTimeoutValue(&c.DrainTimeout, defaultDrainTimeout)
 	if c.HealthCheckPath == "" {
 		c.HealthCheckPath = "/health"
 	}
@@ -118,23 +123,29 @@ func (c *Config) Validate() error {
 	if c.HealthCheckPort != 0 && c.HealthCheckPort == c.Port {
 		return fmt.Errorf("%w: health check port conflicts with port %d", ErrInvalidConfig, c.Port)
 	}
-	if c.ReadTimeout < 0 {
-		return fmt.Errorf("%w: read timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("read timeout", c.ReadTimeout); err != nil {
+		return err
 	}
-	if c.ReadHeaderTimeout < 0 {
-		return fmt.Errorf("%w: read header timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("read header timeout", c.ReadHeaderTimeout); err != nil {
+		return err
 	}
-	if c.WriteTimeout < 0 {
-		return fmt.Errorf("%w: write timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("write timeout", c.WriteTimeout); err != nil {
+		return err
 	}
-	if c.IdleTimeout < 0 {
-		return fmt.Errorf("%w: idle timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("idle timeout", c.IdleTimeout); err != nil {
+		return err
 	}
-	if c.ShutdownTimeout < 0 {
-		return fmt.Errorf("%w: shutdown timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("shutdown timeout", c.ShutdownTimeout); err != nil {
+		return err
 	}
-	if c.DrainTimeout < 0 {
-		return fmt.Errorf("%w: drain timeout must be >= 0", ErrInvalidConfig)
+	if err := validateTimeoutValue("drain timeout", c.DrainTimeout); err != nil {
+		return err
+	}
+	if c.HandlerTimeout < 0 {
+		return fmt.Errorf("%w: handler timeout must be >= 0", ErrInvalidConfig)
+	}
+	if c.HandlerTimeout > 0 && c.WriteTimeout > 0 && c.HandlerTimeout >= c.WriteTimeout {
+		return fmt.Errorf("%w: handler timeout must be < write timeout", ErrInvalidConfig)
 	}
 	if c.HealthCheckPath == "" {
 		return fmt.Errorf("%w: health check path is required", ErrInvalidConfig)

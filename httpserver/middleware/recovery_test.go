@@ -178,3 +178,32 @@ func TestRecoveryDefaultConfigDoesNotPanic(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 }
+
+func TestRecoveryWithConfigResponder(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(RecoveryWithConfig(RecoveryConfig{
+		Responder: func(c *gin.Context, recovered any) {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "internal_error",
+			})
+		},
+	}))
+	engine.GET("/panic", func(c *gin.Context) {
+		panic("boom")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	if !strings.Contains(w.Body.String(), "internal_error") {
+		t.Fatalf("body = %q, want internal_error", w.Body.String())
+	}
+}

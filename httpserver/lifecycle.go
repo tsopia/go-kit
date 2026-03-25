@@ -40,6 +40,13 @@ func (s *Server) buildHTTPServer(addr string, handler http.Handler) *http.Server
 	}
 }
 
+func (s *Server) shutdownContext() (context.Context, context.CancelFunc) {
+	if s.config.ShutdownTimeout <= 0 {
+		return context.Background(), func() {}
+	}
+	return context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
+}
+
 func (s *Server) emitHook(fn func(context.Context, LifecycleEvent), event LifecycleEvent) {
 	if fn == nil {
 		return

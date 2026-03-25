@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -20,6 +21,7 @@ type WSRouteConfig struct {
 	WSConfig
 	ReadIdleTimeout time.Duration // 0 = 使用 PongTimeout
 	WriteTimeout    time.Duration // 发送消息超时，0 = 无超时
+	CheckOrigin     func(*http.Request) bool
 }
 
 func defaultWSConfig() WSConfig {
@@ -34,6 +36,26 @@ func defaultWSRouteConfig() WSRouteConfig {
 	return WSRouteConfig{
 		WSConfig:     defaultWSConfig(),
 		WriteTimeout: 10 * time.Second,
+		CheckOrigin:  defaultWSOriginCheck,
+	}
+}
+
+func defaultWSOriginCheck(r *http.Request) bool {
+	if r == nil {
+		return true
+	}
+	return r.Header.Get("Origin") == ""
+}
+
+func recoverWSPumpPanic(pump string, path string, cancel context.CancelFunc) {
+	if r := recover(); r != nil {
+		slog.Error("websocket "+pump+" goroutine panic",
+			"path", path,
+			"recover", r,
+		)
+		if cancel != nil {
+			cancel()
+		}
 	}
 }
 
@@ -41,9 +63,7 @@ func defaultWSRouteConfig() WSRouteConfig {
 var WSUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许所有来源，生产环境应配置
-	},
+	CheckOrigin:     defaultWSOriginCheck,
 }
 
 // WSMessage 是 WebSocket 消息
@@ -104,6 +124,39 @@ func WithReadIdleTimeout(d time.Duration) WSRouteOption {
 func WithWriteTimeout(d time.Duration) WSRouteOption {
 	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
 		cfg.WriteTimeout = d
+	})
+}
+
+// WithWSAllowedOrigins 显式允许指定浏览器 Origin。
+// 不带 Origin 的请求仍会放行，便于非浏览器客户端使用。
+func WithWSAllowedOrigins(origins ...string) WSRouteOption {
+	allowed := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		if origin == "" {
+			continue
+		}
+		allowed[origin] = struct{}{}
+	}
+
+	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
+		cfg.CheckOrigin = func(r *http.Request) bool {
+			if r == nil {
+				return true
+			}
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true
+			}
+			_, ok := allowed[origin]
+			return ok
+		}
+	})
+}
+
+// WithWSOriginChecker 自定义 WebSocket Origin 校验逻辑。
+func WithWSOriginChecker(fn func(*http.Request) bool) WSRouteOption {
+	return wsRouteOptionFunc(func(cfg *WSRouteConfig) {
+		cfg.CheckOrigin = fn
 	})
 }
 

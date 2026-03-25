@@ -265,8 +265,8 @@ func TestStartInternalValidatesStartState(t *testing.T) {
 	}
 }
 
-// TestIsRunningAfterShutdown 验证 IsRunning() 在 Shutdown() 后应返回 false
-// 当前实现问题：IsRunning() 只检查 s.server != nil，Shutdown() 后 server 未被置 nil
+// TestIsRunning 验证 IsRunning() 基于状态机语义工作。
+// 当前实现通过 State() 判断，因此 Shutdown() 后应返回 false。
 func TestIsRunning(t *testing.T) {
 	t.Parallel()
 
@@ -376,6 +376,66 @@ func TestDrainTimeout(t *testing.T) {
 
 			t.Logf("DrainTimeout respected: waited %v (configured: %v)", elapsed, srv.config.DrainTimeout)
 		})
+	}
+}
+
+func TestRunWithContextUsesGracefulShutdownPipeline(t *testing.T) {
+	t.Parallel()
+
+	hooks := make([]string, 0, 2)
+	srv := NewServer(&Config{
+		Host:            "127.0.0.1",
+		Port:            0,
+		DrainTimeout:    50 * time.Millisecond,
+		ShutdownTimeout: time.Second,
+	}, WithHooks(Hooks{
+		OnShuttingDown: func(_ context.Context, _ LifecycleEvent) {
+			hooks = append(hooks, "shutting_down")
+		},
+		OnShutdownComplete: func(_ context.Context, _ LifecycleEvent) {
+			hooks = append(hooks, "shutdown_complete")
+		},
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := srv.RunWithContext(ctx)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunWithContext() error = %v", err)
+	}
+	if elapsed < srv.config.DrainTimeout {
+		t.Fatalf("elapsed = %v, want >= %v", elapsed, srv.config.DrainTimeout)
+	}
+	if got := srv.State(); got != StateStopped {
+		t.Fatalf("State() = %q, want %q", got, StateStopped)
+	}
+	if len(hooks) != 2 || hooks[0] != "shutting_down" || hooks[1] != "shutdown_complete" {
+		t.Fatalf("hooks = %v, want [shutting_down shutdown_complete]", hooks)
+	}
+}
+
+func TestShutdownContextDisablesDeadlineWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(&Config{
+		ShutdownTimeout: DisableTimeout,
+	})
+
+	ctx, cancel := srv.shutdownContext()
+	defer cancel()
+
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("shutdown context unexpectedly has deadline")
+	}
+	if srv.config.ShutdownTimeout != 0 {
+		t.Fatalf("ShutdownTimeout = %v, want 0", srv.config.ShutdownTimeout)
 	}
 }
 

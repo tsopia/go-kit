@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"sync"
 	"syscall"
 	"time"
@@ -37,8 +38,50 @@ type Server struct {
 	state                    State
 	serverMutators           []HTTPServerMutator
 	// 路由分组
-	regularGroup   *gin.RouterGroup // 有 Timeout 中间件
-	streamingGroup *gin.RouterGroup // 无 Timeout 中间件，用于 SSE/WS
+	regularGroupSpec   *routeGroupSpec // 有 Timeout 中间件
+	streamingGroupSpec *routeGroupSpec // 无 Timeout 中间件，用于 SSE/WS
+}
+
+type routeGroupSpec struct {
+	basePath      string
+	localHandlers gin.HandlersChain
+	frozen        *gin.RouterGroup
+}
+
+func newRouteGroupSpec(root gin.HandlersChain, group *gin.RouterGroup) *routeGroupSpec {
+	if group == nil {
+		return nil
+	}
+
+	if len(group.Handlers) < len(root) {
+		return &routeGroupSpec{frozen: group}
+	}
+
+	for i := range root {
+		if reflect.ValueOf(root[i]).Pointer() != reflect.ValueOf(group.Handlers[i]).Pointer() {
+			return &routeGroupSpec{frozen: group}
+		}
+	}
+
+	return &routeGroupSpec{
+		basePath:      group.BasePath(),
+		localHandlers: append(gin.HandlersChain(nil), group.Handlers[len(root):]...),
+	}
+}
+
+func (s *Server) buildGroup(spec *routeGroupSpec) *gin.RouterGroup {
+	if spec == nil {
+		return &s.engine.RouterGroup
+	}
+	if spec.frozen != nil {
+		return spec.frozen
+	}
+
+	group := s.engine.Group(spec.basePath)
+	if len(spec.localHandlers) > 0 {
+		group.Use(spec.localHandlers...)
+	}
+	return group
 }
 
 // NewServer 创建新的HTTP服务器
@@ -139,7 +182,10 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 	}
 
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
-		// 清除 WriteDeadline
+		startedAt := time.Now()
+
+		// 清除 WriteDeadline。SSE 是长连接，deadline 只做 best effort，
+		// 不支持 deadline 的 writer 会返回错误，但不影响流式响应继续工作。
 		rc := http.NewResponseController(c.Writer)
 		_ = rc.SetWriteDeadline(time.Time{})
 
@@ -157,7 +203,8 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 		defer cancel()
 
 		// 创建 stream
-		stream := &sseSender{ginCtx: c, ctx: ctx, config: cfg}
+		stream := &sseSender{ginCtx: c, ctx: ctx, config: cfg, startedAt: startedAt}
+		stream.logConnect()
 
 		// 启动心跳（如果配置了）
 		stopHeartbeat := stream.startHeartbeat(ctx)
@@ -169,7 +216,7 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 		stopHeartbeat()
 
 		// 连接断开时打印日志
-		stream.logDisconnect(c.Request.Context())
+		stream.logDisconnect(ctx)
 	})
 }
 
@@ -182,16 +229,20 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 	}
 
 	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
+		startedAt := time.Now()
+
 		// 1. Upgrade 连接
-		conn, err := WSUpgrader.Upgrade(c.Writer, c.Request, nil)
+		upgrader := WSUpgrader
+		if cfg.CheckOrigin != nil {
+			upgrader.CheckOrigin = cfg.CheckOrigin
+		}
+
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			slog.Debug("websocket upgrade failed",
-				"path", c.Request.URL.Path,
-				"error", err,
-				"remote_addr", c.Request.RemoteAddr,
-			)
+			logStreamEvent(c, "warn", "ws_upgrade_failed", "ws", time.Time{}, err)
 			return
 		}
+		logStreamEvent(c, "info", "stream_connect", "ws", time.Time{}, nil)
 		defer func() {
 			if err := conn.Close(); err != nil {
 				slog.Debug("websocket close failed",
@@ -276,6 +327,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		pumps.Add(1)
 		go func() {
+			defer recoverWSPumpPanic("read", c.Request.URL.Path, cancel)
 			defer pumps.Done()
 			defer close(recv)
 			defer cancel()
@@ -297,6 +349,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		pumps.Add(1)
 		go func() {
+			defer recoverWSPumpPanic("write", c.Request.URL.Path, cancel)
 			defer pumps.Done()
 			defer cancel()
 			defer close(writeDone)
@@ -309,12 +362,14 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 						return
 					}
 					if cfg.WriteTimeout > 0 {
+						// Best effort: closed/broken connections会在后续 WriteMessage 暴露错误。
 						_ = conn.SetWriteDeadline(time.Now().Add(cfg.WriteTimeout))
 					}
 					if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {
 						return
 					}
 					if cfg.WriteTimeout > 0 {
+						// Best effort: 重置 deadline 失败不影响后续连接关闭与错误传播。
 						_ = conn.SetWriteDeadline(time.Time{})
 					}
 				}
@@ -324,6 +379,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 		if cfg.PingPeriod > 0 {
 			pumps.Add(1)
 			go func() {
+				defer recoverWSPumpPanic("ping", c.Request.URL.Path, cancel)
 				defer pumps.Done()
 				ticker := time.NewTicker(cfg.PingPeriod)
 				defer ticker.Stop()
@@ -345,13 +401,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 
 		_ = session.Close(websocket.CloseNormalClosure, "")
 		pumps.Wait()
-
-		if err := ctx.Err(); err != nil {
-			slog.Info("websocket client disconnected",
-				"path", c.Request.URL.Path,
-				"error", err,
-			)
-		}
+		logStreamEvent(c, "info", "stream_disconnect", "ws", startedAt, ctx.Err())
 	})
 }
 
@@ -363,24 +413,19 @@ func (s *Server) StreamingGroup(relativePath string, handlers ...gin.HandlerFunc
 
 // SetGroups 设置普通和流式路由组，由 preset 调用。
 func (s *Server) SetGroups(regular, streaming *gin.RouterGroup) {
-	s.regularGroup = regular
-	s.streamingGroup = streaming
+	rootHandlers := append(gin.HandlersChain(nil), s.engine.Handlers...)
+	s.regularGroupSpec = newRouteGroupSpec(rootHandlers, regular)
+	s.streamingGroupSpec = newRouteGroupSpec(rootHandlers, streaming)
 }
 
 // getRegularGroup 返回普通路由组。
 func (s *Server) getRegularGroup() *gin.RouterGroup {
-	if s.regularGroup != nil {
-		return s.regularGroup
-	}
-	return &s.engine.RouterGroup
+	return s.buildGroup(s.regularGroupSpec)
 }
 
 // getStreamingGroup 返回流式路由组。
 func (s *Server) getStreamingGroup() *gin.RouterGroup {
-	if s.streamingGroup != nil {
-		return s.streamingGroup
-	}
-	return &s.engine.RouterGroup
+	return s.buildGroup(s.streamingGroupSpec)
 }
 
 // Errors 返回服务器运行期错误通道。
@@ -434,11 +479,7 @@ func (s *Server) RunWithContext(ctx context.Context) error {
 	}
 
 	<-ctx.Done()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
-	defer cancel()
-
-	return s.Shutdown(shutdownCtx)
+	return s.gracefulShutdownSequence()
 }
 
 // WaitForShutdown 等待关闭信号并执行优雅关闭
@@ -451,6 +492,10 @@ func (s *Server) WaitForShutdown() error {
 	// 阻塞等待信号
 	<-quit
 
+	return s.gracefulShutdownSequence()
+}
+
+func (s *Server) gracefulShutdownSequence() error {
 	// 先标记为 draining，让 readiness 立即返回 503
 	if err := s.MarkDraining(); err != nil {
 		return fmt.Errorf("mark draining: %w", err)
@@ -463,7 +508,7 @@ func (s *Server) WaitForShutdown() error {
 	}
 
 	// 创建关闭 context（ShutdownTimeout 用于 http.Server.Shutdown 的超时）
-	ctx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
+	ctx, cancel := s.shutdownContext()
 	defer cancel()
 
 	// 优雅关闭
@@ -489,7 +534,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	if ctx == nil {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
+		ctx, cancel = s.shutdownContext()
 		defer cancel()
 	}
 

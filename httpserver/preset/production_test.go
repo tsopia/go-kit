@@ -83,3 +83,86 @@ func TestNewProductionServerAppliesExpectedMiddlewareBehavior(t *testing.T) {
 		})
 	}
 }
+
+func TestNewProductionServerLateUseAppliesToFutureHelperRoutes(t *testing.T) {
+	t.Parallel()
+
+	srv := NewProductionServer(&httpserver.Config{
+		EnableHealthCheck: false,
+		HandlerTimeout:    5 * time.Millisecond,
+		WriteTimeout:      50 * time.Millisecond,
+	})
+
+	srv.Use(func(c *gin.Context) {
+		c.Header("X-Late-Use", "1")
+		c.Next()
+	})
+
+	srv.GET("/late", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	srv.SSE("/events", func(stream httpserver.SSEStream) {
+		_ = stream.Event("ok", "1")
+	})
+
+	regularResp := httptest.NewRecorder()
+	regularReq := httptest.NewRequest(http.MethodGet, "/late", nil)
+	srv.Engine().ServeHTTP(regularResp, regularReq)
+
+	if regularResp.Code != http.StatusNoContent {
+		t.Fatalf("regular status = %d, want %d", regularResp.Code, http.StatusNoContent)
+	}
+	if got := regularResp.Header().Get("X-Late-Use"); got != "1" {
+		t.Fatalf("regular X-Late-Use = %q, want %q", got, "1")
+	}
+
+	streamingResp := httptest.NewRecorder()
+	streamingReq := httptest.NewRequest(http.MethodGet, "/events", nil)
+	srv.Engine().ServeHTTP(streamingResp, streamingReq)
+
+	if streamingResp.Code != http.StatusOK {
+		t.Fatalf("streaming status = %d, want %d", streamingResp.Code, http.StatusOK)
+	}
+	if got := streamingResp.Header().Get("X-Late-Use"); got != "1" {
+		t.Fatalf("streaming X-Late-Use = %q, want %q", got, "1")
+	}
+	if got := streamingResp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("streaming X-Content-Type-Options = %q, want %q", got, "nosniff")
+	}
+	if got := streamingResp.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("streaming Access-Control-Allow-Origin = %q, want empty", got)
+	}
+}
+
+func TestNewProductionServerStreamingRoutesBypassHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
+	srv := NewProductionServer(&httpserver.Config{
+		EnableHealthCheck: false,
+		HandlerTimeout:    5 * time.Millisecond,
+		WriteTimeout:      100 * time.Millisecond,
+	})
+
+	srv.SSE("/slow-events", func(stream httpserver.SSEStream) {
+		time.Sleep(20 * time.Millisecond)
+		_ = stream.Event("ok", "1")
+	})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/slow-events", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	srv.Engine().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.Code, http.StatusOK)
+	}
+	if got := resp.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+	if got := resp.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want %q", got, "nosniff")
+	}
+	if body := resp.Body.String(); body == "" {
+		t.Fatal("expected SSE body to be written")
+	}
+}

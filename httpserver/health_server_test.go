@@ -164,6 +164,36 @@ func TestServeStartsDedicatedHealthServer(t *testing.T) {
 	}
 }
 
+func TestRunWithContextMarksServerUnreadyBeforeShutdown(t *testing.T) {
+	appPort := freeTCPPort(t)
+	srv := NewServer(&Config{
+		Host:              "127.0.0.1",
+		Port:              appPort,
+		EnableHealthCheck: true,
+		HealthCheckPath:   "/healthz",
+		ReadinessPath:     "/readyz",
+		LivenessPath:      "/livez",
+		DrainTimeout:      150 * time.Millisecond,
+		ShutdownTimeout:   time.Second,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.RunWithContext(ctx)
+	}()
+
+	readyURL := fmt.Sprintf("http://127.0.0.1:%d/readyz", appPort)
+	waitForHTTPStatus(t, readyURL, http.StatusOK)
+
+	cancel()
+	waitForHTTPStatusBeforeShutdown(t, readyURL, done, http.StatusServiceUnavailable)
+
+	if err := <-done; err != nil {
+		t.Fatalf("RunWithContext() error = %v", err)
+	}
+}
+
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
 
@@ -210,4 +240,36 @@ func waitForHTTPStatus(t *testing.T, url string, wantStatus int) {
 	}
 
 	t.Fatalf("request %s: got status %d, want %d", url, lastStatus, wantStatus)
+}
+
+func waitForHTTPStatusBeforeShutdown(t *testing.T, url string, done <-chan error, wantStatus int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("server exited before status %d was observed: %v", wantStatus, err)
+			}
+			t.Fatalf("server exited before status %d was observed", wantStatus)
+		default:
+		}
+
+		resp, err := client.Get(url)
+		if err == nil {
+			if err := resp.Body.Close(); err != nil {
+				t.Fatalf("close response body: %v", err)
+			}
+			if resp.StatusCode == wantStatus {
+				return
+			}
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatalf("request %s: status %d was not observed before shutdown", url, wantStatus)
 }

@@ -19,8 +19,10 @@ go get github.com/tsopia/go-kit/httpserver
 ## 核心能力
 
 - `NewServer` 创建 HTTP 服务
-- `Start` / `Serve` / `Run` / `Shutdown` 生命周期管理
+- `Start` / `Serve` / `Run` / `RunTLS` / `Shutdown` 生命周期管理
+- `RunWithGracefulShutdown` / `RunWithContext` / `WaitForShutdown` 优雅关闭入口
 - `HealthCheckPort` 支持独立健康检查端口
+- `HealthAddr` / `SetHealthCheckPath` 支持健康检查地址与路径管理
 - `Hooks` 支持生命周期事件观测
 - `RouteModule` 支持按模块注册路由
 - `Handle` / `HandleJSON` 支持 typed handler
@@ -140,6 +142,7 @@ type Config struct {
 	MaxHeaderBytes    int
 	ShutdownTimeout time.Duration
 	DrainTimeout      time.Duration
+	HandlerTimeout    time.Duration
 
 	EnableHealthCheck bool
 	HealthCheckPath   string
@@ -151,6 +154,21 @@ type Config struct {
 
 默认值可以通过 `httpserver.DefaultConfig()` 获取。
 如果需要对传入配置补默认值或做启动前校验，可使用 `(*Config).Normalize()` 和 `(*Config).Validate()`。
+
+- `ReadTimeout` / `ReadHeaderTimeout` / `WriteTimeout` / `IdleTimeout` / `ShutdownTimeout` / `DrainTimeout` 传 `0` 表示使用框架默认值
+- 如果你需要显式关闭这些 timeout，传 `httpserver.DisableTimeout`；`Normalize()` 会把它转换成最终的 `0` 语义
+- `HandlerTimeout` 只在 `preset.NewProductionServer(...)` 中使用；`0` 表示不挂该 middleware
+- 当 `WriteTimeout > 0` 且 `HandlerTimeout > 0` 时，必须满足 `HandlerTimeout < WriteTimeout`
+
+例如：
+
+```go
+cfg := &httpserver.Config{
+	WriteTimeout:    httpserver.DisableTimeout,
+	ShutdownTimeout: httpserver.DisableTimeout,
+	DrainTimeout:    httpserver.DisableTimeout,
+}
+```
 
 ## 生命周期与 hooks
 
@@ -188,6 +206,8 @@ srv.Use(middleware.Timeout(2 * time.Second))
 srv.Use(middleware.TraceID())
 ```
 
+`middleware.RecoveryWithConfig(...)` 支持 `Responder`，可以显式定义 panic 后的响应格式；默认仍然返回裸 `500`。
+
 如果你需要限制单进程内的全局并发并在超限时立即返回 `503`，可以使用 `ConcurrencyLimit`：
 
 ```go
@@ -205,6 +225,25 @@ srv.Use(middleware.CORS(middleware.CORSConfig{
     MaxAge:           3600 * time.Second,
 }))
 ```
+
+- `middleware.CORS(middleware.CORSConfig{})` 表示**不启用 CORS**
+- 请求没有 `Origin` 头时，middleware 不介入
+- 请求带 `Origin` 头但未配置 CORS 时，不返回任何 `Access-Control-*` 头，让浏览器自然阻止
+- 如果你确实需要全开放，必须显式声明 `AllowOrigins: []string{"*"}`
+
+### RealIP
+
+部署在 Ingress、SLB、Nginx 或其他反向代理后面时，必须显式配置可信代理网段：
+
+```go
+srv.Use(middleware.RealIPWithConfig(middleware.RealIPConfig{
+    TrustedCIDRs: []string{"10.0.0.0/8", "192.168.0.0/16"},
+}))
+```
+
+- `middleware.RealIP()` 的默认行为是不信任任何代理，直接使用 `RemoteAddr`
+- 这是一条保守默认值，不会自动相信 `X-Forwarded-For` / `X-Real-IP`
+- 如果你依赖真实客户端 IP 做日志、审计、限流或风控，生产部署时必须补这项配置
 
 ### Rate Limit
 
@@ -234,6 +273,14 @@ srv.Use(middleware.AccessLog(middleware.AccessLogConfig{
 }))
 ```
 
+如果你挂了 `middleware.AccessLog(...)`，同一个 `LoggerFunc` 也会收到流式连接事件：
+
+- `stream_connect`
+- `stream_disconnect`
+- `ws_upgrade_failed`
+
+这些事件会复用同一条请求链上的 `trace_id`、`request_id`、`client_ip`；如果配置了 `AllowedRequestHeaders`，流式事件也会带上同一批 allowlist 请求头。
+
 如果需要响应压缩，可以显式挂载：
 
 ```go
@@ -262,6 +309,31 @@ prometheus.Register(public, prometheus.Config{
 ```go
 srv := preset.NewProductionServer(cfg)
 ```
+
+`preset.NewProductionServer(...)` 当前会自动挂载这些共享 middleware：
+
+- `middleware.Recovery()`
+- `middleware.RequestID()`
+- `middleware.TraceID()`
+- `middleware.SecurityHeaders()`
+
+此外：
+
+- 通过 `srv.GET(...)` / `srv.POST(...)` / `srv.Group(...)` 注册的普通 helper 路由，会走 regular helper group
+- 如果 `cfg.HandlerTimeout > 0`，regular helper group 会额外挂 `middleware.Timeout(cfg.HandlerTimeout)`
+- `srv.SSE(...)` / `srv.WS(...)` 以及 `srv.StreamingGroup(...)` 走 streaming helper group，不会自动挂 `HandlerTimeout`
+- 如果你直接使用 `srv.Engine().GET(...)` 或自己持有的原生 `*gin.RouterGroup`，就回到 Gin 原生语义，不享受 `preset` 的 helper 分流
+
+后续再调用 `srv.Use(...)` 时，未来通过 `srv.GET(...)`、`srv.Group(...)`、`srv.SSE(...)`、`srv.WS(...)` 注册的 helper 路由会继承这些新增 middleware。
+如果你提前持有了原生 `*gin.RouterGroup`，它仍然遵循 Gin 自身的快照语义，不会被后续 `srv.Use(...)` 追溯补链。
+
+`preset.NewProductionServer(...)` 的定位是 **transport baseline**，不是完整的生产框架。它不会自动帮你配置：
+
+- `AccessLog`
+- `RealIP`
+- `CORS`
+- 认证鉴权
+- 限流
 
 ## 健康检查
 
@@ -552,9 +624,7 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 - 日志、指标、审计统一通过 `Hooks` 接入
 - Swagger 建议通过 `httpserver/swagger` 注册在公共路由组
 
-## 设计约束与已知问题
-
-以下问题将在 Server Core 重构中解决：
+## 设计约束与当前契约
 
 ### IsRunning() 语义
 
@@ -564,17 +634,19 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 
 ### DrainTimeout 配置
 
-**已实现**：`WaitForShutdown()` 收到信号后：
+**已实现**：`WaitForShutdown()` 和 `RunWithContext()` 都会走同一条优雅关闭流程：
 1. 先调用 `MarkDraining()`，readiness 立即返回 503
 2. 等待 `DrainTimeout` 时间
 3. 然后进入 `Shutdown()`
+
+如果你需要显式关闭 `DrainTimeout` 或 `ShutdownTimeout`，可将它们设置为 `httpserver.DisableTimeout`。
 
 ### HealthAddr() 方法
 
 **已实现**：`HealthAddr()` 方法返回健康检查地址：
 - 健康检查禁用时返回空字符串
 - 共享端口时返回主服务器地址
-- 独立端口时返回独立地址
+- 独立端口时，在健康检查 listener 启动后返回实际独立地址
 
 ### http.Server Mutator
 
@@ -616,11 +688,7 @@ srv.SSE("/price", handlePrice) // 无心跳
 - 带时间戳便于 Network 面板调试
 - Nginx/代理看到数据流动，不会关闭连接
 
-**断开日志**：
-框架自动在连接断开时打印日志：
-```
-INFO sse client disconnected path=/ai/stream error=context canceled
-```
+如果挂了 `middleware.AccessLog(...)`，SSE 会额外输出 `stream_connect` / `stream_disconnect` 事件；否则会退回默认结构化日志实现。
 
 ## WebSocket 支持
 
@@ -651,11 +719,19 @@ srv.WS("/chat", handler,
     httpserver.WithWSPingPeriod(30*time.Second),
     httpserver.WithWSPongTimeout(60*time.Second),
     httpserver.WithWriteTimeout(10*time.Second),
+    httpserver.WithWSAllowedOrigins("https://app.example.com"),
 )
 ```
 
 `session.Send` 表示“阻塞直到消息进入内部发送队列或连接结束”，`session.TrySend` 表示“仅在队列有空位时非阻塞入队”。
 `session.Close` 会立即关闭连接并拒绝后续发送；`session.CloseGracefully` 会先排空已入队消息，再发送 close frame。
+
+### Origin 策略
+
+- 默认只允许**没有 `Origin` 头**的客户端连接，适合 CLI、服务间调用和测试客户端
+- 带 `Origin` 头的浏览器握手默认拒绝
+- 浏览器场景必须显式配置 `WithWSAllowedOrigins(...)` 或 `WithWSOriginChecker(...)`
+- `WSUpgrader` 仍可用于低层握手参数，但浏览器来源授权应该优先通过路由级 option 显式声明
 
 ### 使用 Hub 实现聊天室
 
@@ -677,7 +753,7 @@ srv.WS("/room/:id", func(session httpserver.WSSession) {
 
 - **单 writer**：data frame 由独立写泵串行发送，ping 使用 `WriteControl`
 - **读空闲超时**：每次收到消息或 pong 都会刷新 `ReadIdleTimeout`
-- **断开日志**：自动记录客户端断开
+- **流式日志**：如果挂了 `AccessLog`，会额外输出 `stream_connect` / `stream_disconnect` / `ws_upgrade_failed`
 - **请求访问**：handler 可直接读取 `session.Request()` 和 `session.Param(...)`
 
 ## 文件上传

@@ -16,6 +16,10 @@ type RecoveryConfig struct {
 	// OnPanic 允许业务自定义 panic 后处理（如上报 Sentry）。
 	// 在日志输出之后调用。
 	OnPanic func(c *gin.Context, recovered any, stack []byte)
+
+	// Responder 允许业务自定义 panic 后响应格式。
+	// 为 nil 时默认返回裸 500。
+	Responder func(c *gin.Context, recovered any)
 }
 
 // Recovery 在请求处理 panic 时返回 500。
@@ -53,11 +57,15 @@ func RecoveryWithConfig(config RecoveryConfig) gin.HandlerFunc {
 				config.OnPanic(c, recovered, stack)
 			}
 
+			if config.Responder != nil {
+				config.Responder(c, recovered)
+				return
+			}
+
 			c.AbortWithStatus(http.StatusInternalServerError)
 		}()
 
 		c.Next()
 	}
 }
-
 

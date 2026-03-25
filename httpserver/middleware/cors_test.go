@@ -26,12 +26,12 @@ func TestCORS(t *testing.T) {
 		wantNoOrigin  bool
 	}{
 		{
-			name:       "default allows all origins",
+			name:       "default config is no-op",
 			config:     CORSConfig{},
 			origin:     "https://example.com",
 			method:     http.MethodGet,
 			wantStatus: http.StatusOK,
-			wantOrigin: "*",
+			wantNoOrigin: true,
 		},
 		{
 			name:       "single allowed origin",
@@ -201,5 +201,55 @@ func TestCORS(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCORS_DefaultConfigIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(CORS(CORSConfig{}))
+	engine.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+}
+
+func TestCORS_WildcardMustBeExplicit(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	engine := gin.New()
+	engine.Use(CORS(CORSConfig{
+		AllowOrigins: []string{"*"},
+	}))
+	engine.GET("/test", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("Origin", "https://example.com")
+	engine.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "*")
 	}
 }

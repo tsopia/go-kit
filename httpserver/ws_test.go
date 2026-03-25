@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -31,6 +32,81 @@ func TestWSConfig_Defaults(t *testing.T) {
 	}
 	if routeCfg.WriteTimeout != 10*time.Second {
 		t.Errorf("expected WriteTimeout=10s, got %v", routeCfg.WriteTimeout)
+	}
+	if routeCfg.CheckOrigin == nil {
+		t.Fatal("expected default CheckOrigin to be configured")
+	}
+}
+
+func TestDefaultWSOriginCheck(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{
+			name: "no origin allowed",
+			want: true,
+		},
+		{
+			name:   "browser origin denied by default",
+			origin: "https://app.example.com",
+			want:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+
+			if got := defaultWSOriginCheck(req); got != tc.want {
+				t.Fatalf("defaultWSOriginCheck() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWSUpgrader_DefaultCheckOrigin(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{
+			name: "non browser client without origin is allowed",
+			want: true,
+		},
+		{
+			name:   "browser client with origin is denied by default",
+			origin: "https://app.example.com",
+			want:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+
+			if got := WSUpgrader.CheckOrigin(req); got != tc.want {
+				t.Fatalf("WSUpgrader.CheckOrigin() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -97,6 +173,35 @@ func TestWSOptions(t *testing.T) {
 			check: func(t *testing.T, cfg WSRouteConfig) {
 				if cfg.WriteTimeout != 5*time.Second {
 					t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 5*time.Second)
+				}
+			},
+		},
+		{
+			name:  "allowed origins",
+			apply: WithWSAllowedOrigins("https://app.example.com"),
+			check: func(t *testing.T, cfg WSRouteConfig) {
+				req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+				req.Header.Set("Origin", "https://app.example.com")
+				if !cfg.CheckOrigin(req) {
+					t.Fatal("expected configured origin to be allowed")
+				}
+
+				req.Header.Set("Origin", "https://evil.example.com")
+				if cfg.CheckOrigin(req) {
+					t.Fatal("expected unconfigured origin to be denied")
+				}
+			},
+		},
+		{
+			name: "origin checker",
+			apply: WithWSOriginChecker(func(r *http.Request) bool {
+				return r.Header.Get("Origin") == "https://checker.example.com"
+			}),
+			check: func(t *testing.T, cfg WSRouteConfig) {
+				req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+				req.Header.Set("Origin", "https://checker.example.com")
+				if !cfg.CheckOrigin(req) {
+					t.Fatal("expected custom checker to allow origin")
 				}
 			},
 		},
@@ -229,34 +334,54 @@ func TestServer_WS(t *testing.T) {
 }
 
 func TestWS_PanicRecovery(t *testing.T) {
-	server := NewServer(&Config{Port: 8080})
-	server.SetGroups(
-		server.Engine().Group("/api"),
-		server.Engine().Group("/stream"),
-	)
+	t.Parallel()
 
-	// panic 的 handler
-	server.WS("/panic", func(session WSSession) {
-		panic("intentional panic in handler")
-	})
-
-	server.WS("/panic-in-read", func(session WSSession) {
-		// 等待一条消息然后 panic
-		<-session.Recv()
-		panic("panic after receiving message")
-	})
-
-	// 验证路由注册成功（即使 handler 会 panic）
-	routes := server.Engine().Routes()
-	found := false
-	for _, r := range routes {
-		if r.Path == "/stream/panic" && r.Method == "GET" {
-			found = true
-			break
-		}
+	testCases := []struct {
+		name       string
+		panicValue any
+		wantCancel bool
+	}{
+		{
+			name:       "panic triggers cancel",
+			panicValue: "boom",
+			wantCancel: true,
+		},
+		{
+			name:       "no panic leaves cancel untouched",
+			wantCancel: false,
+		},
 	}
-	if !found {
-		t.Error("WS route not registered")
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cancelCh := make(chan struct{}, 1)
+			cancel := func() {
+				select {
+				case cancelCh <- struct{}{}:
+				default:
+				}
+			}
+
+			func() {
+				defer recoverWSPumpPanic("read", "/stream/panic", cancel)
+				if tt.panicValue != nil {
+					panic(tt.panicValue)
+				}
+			}()
+
+			select {
+			case <-cancelCh:
+				if !tt.wantCancel {
+					t.Fatal("cancel called unexpectedly")
+				}
+			default:
+				if tt.wantCancel {
+					t.Fatal("cancel was not called")
+				}
+			}
+		})
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -180,6 +181,81 @@ func TestWSSessionContract_Integration(t *testing.T) {
 	case <-ready:
 	case <-time.After(2 * time.Second):
 		t.Fatal("session handler did not complete setup")
+	}
+}
+
+func TestWS_OriginPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    []httpserver.WSRouteOption
+		origin  string
+		wantErr bool
+	}{
+		{
+			name:    "browser origin denied by default",
+			origin:  "https://app.example.com",
+			wantErr: true,
+		},
+		{
+			name: "explicitly allowed origin succeeds",
+			opts: []httpserver.WSRouteOption{
+				httpserver.WithWSAllowedOrigins("https://app.example.com"),
+			},
+			origin:  "https://app.example.com",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &httpserver.Config{Port: 0}
+			srv := httpserver.NewServer(cfg)
+			srv.SetGroups(
+				srv.Engine().Group("/api"),
+				srv.Engine().Group("/stream"),
+			)
+
+			srv.WS("/origin", func(session httpserver.WSSession) {
+				<-session.Context().Done()
+			}, tt.opts...)
+
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_ = ln.Close()
+			}()
+
+			go func() {
+				_ = srv.Serve(ln)
+			}()
+			time.Sleep(100 * time.Millisecond)
+			defer func() {
+				_ = srv.Shutdown(context.Background())
+			}()
+
+			u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/origin"}
+			header := http.Header{}
+			if tt.origin != "" {
+				header.Set("Origin", tt.origin)
+			}
+
+			conn, _, err := websocket.DefaultDialer.Dial(u.String(), header)
+			if tt.wantErr {
+				if err == nil {
+					_ = conn.Close()
+					t.Fatal("expected dial to fail")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("dial failed: %v", err)
+			}
+			defer func() {
+				_ = conn.Close()
+			}()
+		})
 	}
 }
 
