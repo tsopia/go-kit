@@ -87,9 +87,6 @@ func CORS(config CORSConfig) gin.HandlerFunc {
 }
 
 func normalizeCORSConfig(config CORSConfig) CORSConfig {
-	if len(config.AllowOrigins) == 0 && config.AllowOriginFunc == nil {
-		config.AllowOrigins = []string{"*"}
-	}
 	if config.AllowMethods == "" {
 		config.AllowMethods = "GET, POST, PUT, DELETE, OPTIONS"
 	}

@@ -121,6 +121,12 @@ func AccessLog(configs ...AccessLogConfig) gin.HandlerFunc {
 		requestBodyCapture := prepareRequestBodyCapture(c, requestContentType, config)
 		c.Request.Body = requestBodyCapture
 
+		ctx := WithStreamLogConfig(c.Request.Context(), StreamLogConfig{
+			Logger:                config.Logger,
+			AllowedRequestHeaders: config.AllowedRequestHeaders,
+		})
+		c.Request = c.Request.WithContext(ctx)
+
 		responseBodyCapture := newCaptureResponseWriter(c.Writer, config.MaxBodyBytes)
 		c.Writer = responseBodyCapture
 

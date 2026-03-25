@@ -18,6 +18,51 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type capturedServerLog struct {
+	level  string
+	event  string
+	fields map[string]any
+}
+
+type capturedServerLogger struct {
+	mu     sync.Mutex
+	events []capturedServerLog
+}
+
+func (l *capturedServerLogger) log(_ context.Context, level string, event string, fields map[string]any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cloned := make(map[string]any, len(fields))
+	for key, value := range fields {
+		cloned[key] = value
+	}
+
+	l.events = append(l.events, capturedServerLog{
+		level:  level,
+		event:  event,
+		fields: cloned,
+	})
+}
+
+func (l *capturedServerLogger) snapshot() []capturedServerLog {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	out := make([]capturedServerLog, len(l.events))
+	copy(out, l.events)
+	return out
+}
+
+func findServerLogByEvent(logs []capturedServerLog, event string) (capturedServerLog, bool) {
+	for _, logEntry := range logs {
+		if logEntry.event == event {
+			return logEntry, true
+		}
+	}
+	return capturedServerLog{}, false
+}
+
 func TestNewServer(t *testing.T) {
 	server := NewServer(nil) // 使用默认配置
 	if server == nil {
@@ -126,6 +171,42 @@ func TestConfigNormalizeAndValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "reject handler timeout >= write timeout",
+			cfg: Config{
+				Host:              "127.0.0.1",
+				Port:              8080,
+				HealthCheckPath:   "/health",
+				ReadinessPath:     "/readyz",
+				LivenessPath:      "/livez",
+				ReadTimeout:       time.Second,
+				ReadHeaderTimeout: time.Second,
+				WriteTimeout:      5 * time.Second,
+				IdleTimeout:       time.Second,
+				ShutdownTimeout:   time.Second,
+				DrainTimeout:      time.Second,
+				HandlerTimeout:    5 * time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "reject negative handler timeout",
+			cfg: Config{
+				Host:              "127.0.0.1",
+				Port:              8080,
+				HealthCheckPath:   "/health",
+				ReadinessPath:     "/readyz",
+				LivenessPath:      "/livez",
+				ReadTimeout:       time.Second,
+				ReadHeaderTimeout: time.Second,
+				WriteTimeout:      6 * time.Second,
+				IdleTimeout:       time.Second,
+				ShutdownTimeout:   time.Second,
+				DrainTimeout:      time.Second,
+				HandlerTimeout:    -time.Second,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -179,6 +260,40 @@ func TestConfigNormalizeAndValidate(t *testing.T) {
 				t.Fatalf("LivenessPath = %q, want %q", cfg.LivenessPath, tt.wantCfg.LivenessPath)
 			}
 		})
+	}
+}
+
+func TestConfigNormalizePreservesExplicitDisableTimeout(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		ReadTimeout:       DisableTimeout,
+		ReadHeaderTimeout: DisableTimeout,
+		WriteTimeout:      DisableTimeout,
+		IdleTimeout:       DisableTimeout,
+		ShutdownTimeout:   DisableTimeout,
+		DrainTimeout:      DisableTimeout,
+	}
+
+	cfg.Normalize()
+
+	if cfg.ReadTimeout != 0 {
+		t.Fatalf("ReadTimeout = %v, want 0", cfg.ReadTimeout)
+	}
+	if cfg.ReadHeaderTimeout != 0 {
+		t.Fatalf("ReadHeaderTimeout = %v, want 0", cfg.ReadHeaderTimeout)
+	}
+	if cfg.WriteTimeout != 0 {
+		t.Fatalf("WriteTimeout = %v, want 0", cfg.WriteTimeout)
+	}
+	if cfg.IdleTimeout != 0 {
+		t.Fatalf("IdleTimeout = %v, want 0", cfg.IdleTimeout)
+	}
+	if cfg.ShutdownTimeout != 0 {
+		t.Fatalf("ShutdownTimeout = %v, want 0", cfg.ShutdownTimeout)
+	}
+	if cfg.DrainTimeout != 0 {
+		t.Fatalf("DrainTimeout = %v, want 0", cfg.DrainTimeout)
 	}
 }
 
@@ -725,13 +840,12 @@ func TestCORSMiddleware(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d", http.StatusOK, w.Code)
 	}
 
-	// 检查 CORS 头
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Errorf("Expected Access-Control-Allow-Origin header to be '*', got %q", w.Header().Get("Access-Control-Allow-Origin"))
+	// 零值 CORS 配置是 no-op，不返回任何 CORS 头
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Expected Access-Control-Allow-Origin header to be empty, got %q", got)
 	}
-
-	if w.Header().Get("Access-Control-Allow-Methods") == "" {
-		t.Error("Expected Access-Control-Allow-Methods header to be set")
+	if got := w.Header().Get("Access-Control-Allow-Methods"); got != "" {
+		t.Errorf("Expected Access-Control-Allow-Methods header to be empty, got %q", got)
 	}
 }
 
@@ -850,6 +964,150 @@ func TestServer_SetGroups(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Errorf("expected route to be registered, got status %d", w.Code)
+	}
+}
+
+func TestServer_SetGroupsLateUseAppliesToFutureHelperRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	srv := NewServer(DefaultConfig())
+
+	regularGroup := srv.Engine().Group("/regular")
+	streamingGroup := srv.Engine().Group("/streaming")
+	srv.SetGroups(regularGroup, streamingGroup)
+
+	srv.Use(func(c *gin.Context) {
+		c.Header("X-Late-Use", "1")
+		c.Next()
+	})
+
+	srv.GET("/late", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/regular/late", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
+	}
+	if got := w.Header().Get("X-Late-Use"); got != "1" {
+		t.Fatalf("X-Late-Use = %q, want %q", got, "1")
+	}
+}
+
+func TestSSEUsesAccessLogLoggerForStreamEvents(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	logger := &capturedServerLogger{}
+	srv := NewServer(DefaultConfig())
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+	srv.Use(httpmiddleware.RequestID())
+	srv.Use(httpmiddleware.TraceID())
+	srv.Use(httpmiddleware.AccessLog(httpmiddleware.AccessLogConfig{
+		Logger:                logger.log,
+		AllowedRequestHeaders: []string{"X-Test-Header"},
+	}))
+
+	srv.SSE("/events", func(stream SSEStream) {
+		_ = stream.Event("update", "ok")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/stream/events", nil)
+	req.Header.Set("X-Test-Header", "1")
+	req.Header.Set(utils.TraceIDHeader, "trace-123")
+	req.RemoteAddr = "127.0.0.1:2345"
+	w := httptest.NewRecorder()
+
+	srv.Engine().ServeHTTP(w, req)
+
+	logs := logger.snapshot()
+
+	connectLog, ok := findServerLogByEvent(logs, "stream_connect")
+	if !ok {
+		t.Fatal("stream_connect log not found")
+	}
+	if connectLog.fields["trace_id"] != "trace-123" {
+		t.Fatalf("trace_id = %#v, want %#v", connectLog.fields["trace_id"], "trace-123")
+	}
+	requestID, _ := connectLog.fields["request_id"].(string)
+	if requestID == "" {
+		t.Fatal("request_id is empty")
+	}
+	if connectLog.fields["path"] != "/stream/events" {
+		t.Fatalf("path = %#v, want %#v", connectLog.fields["path"], "/stream/events")
+	}
+	requestHeaders, ok := connectLog.fields["request_headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("request_headers type = %T, want map[string]any", connectLog.fields["request_headers"])
+	}
+	if requestHeaders["X-Test-Header"] != "1" {
+		t.Fatalf("X-Test-Header = %#v, want %#v", requestHeaders["X-Test-Header"], "1")
+	}
+
+	disconnectLog, ok := findServerLogByEvent(logs, "stream_disconnect")
+	if !ok {
+		t.Fatal("stream_disconnect log not found")
+	}
+	if _, ok := disconnectLog.fields["duration_ms"]; !ok {
+		t.Fatal("duration_ms missing from stream_disconnect log")
+	}
+}
+
+func TestWSUpgradeFailureUsesAccessLogLogger(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+
+	logger := &capturedServerLogger{}
+	srv := NewServer(DefaultConfig())
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+	srv.Use(httpmiddleware.RequestID())
+	srv.Use(httpmiddleware.TraceID())
+	srv.Use(httpmiddleware.AccessLog(httpmiddleware.AccessLogConfig{
+		Logger:                logger.log,
+		AllowedRequestHeaders: []string{"X-Test-Header"},
+	}))
+
+	srv.WS("/ws", func(session WSSession) {
+		<-session.Context().Done()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/stream/ws", nil)
+	req.Header.Set("X-Test-Header", "1")
+	req.Header.Set(utils.TraceIDHeader, "trace-123")
+	req.RemoteAddr = "127.0.0.1:2345"
+	w := httptest.NewRecorder()
+
+	srv.Engine().ServeHTTP(w, req)
+
+	logs := logger.snapshot()
+	upgradeLog, ok := findServerLogByEvent(logs, "ws_upgrade_failed")
+	if !ok {
+		t.Fatal("ws_upgrade_failed log not found")
+	}
+	if upgradeLog.fields["trace_id"] != "trace-123" {
+		t.Fatalf("trace_id = %#v, want %#v", upgradeLog.fields["trace_id"], "trace-123")
+	}
+	requestID, _ := upgradeLog.fields["request_id"].(string)
+	if requestID == "" {
+		t.Fatal("request_id is empty")
+	}
+	requestHeaders, ok := upgradeLog.fields["request_headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("request_headers type = %T, want map[string]any", upgradeLog.fields["request_headers"])
+	}
+	if requestHeaders["X-Test-Header"] != "1" {
+		t.Fatalf("X-Test-Header = %#v, want %#v", requestHeaders["X-Test-Header"], "1")
 	}
 }
 

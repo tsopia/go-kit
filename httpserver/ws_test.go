@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -31,6 +32,45 @@ func TestWSConfig_Defaults(t *testing.T) {
 	}
 	if routeCfg.WriteTimeout != 10*time.Second {
 		t.Errorf("expected WriteTimeout=10s, got %v", routeCfg.WriteTimeout)
+	}
+	if routeCfg.CheckOrigin == nil {
+		t.Fatal("expected default CheckOrigin to be configured")
+	}
+}
+
+func TestDefaultWSOriginCheck(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name   string
+		origin string
+		want   bool
+	}{
+		{
+			name: "no origin allowed",
+			want: true,
+		},
+		{
+			name:   "browser origin denied by default",
+			origin: "https://app.example.com",
+			want:   false,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+
+			if got := defaultWSOriginCheck(req); got != tc.want {
+				t.Fatalf("defaultWSOriginCheck() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -97,6 +137,35 @@ func TestWSOptions(t *testing.T) {
 			check: func(t *testing.T, cfg WSRouteConfig) {
 				if cfg.WriteTimeout != 5*time.Second {
 					t.Fatalf("WriteTimeout = %v, want %v", cfg.WriteTimeout, 5*time.Second)
+				}
+			},
+		},
+		{
+			name:  "allowed origins",
+			apply: WithWSAllowedOrigins("https://app.example.com"),
+			check: func(t *testing.T, cfg WSRouteConfig) {
+				req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+				req.Header.Set("Origin", "https://app.example.com")
+				if !cfg.CheckOrigin(req) {
+					t.Fatal("expected configured origin to be allowed")
+				}
+
+				req.Header.Set("Origin", "https://evil.example.com")
+				if cfg.CheckOrigin(req) {
+					t.Fatal("expected unconfigured origin to be denied")
+				}
+			},
+		},
+		{
+			name: "origin checker",
+			apply: WithWSOriginChecker(func(r *http.Request) bool {
+				return r.Header.Get("Origin") == "https://checker.example.com"
+			}),
+			check: func(t *testing.T, cfg WSRouteConfig) {
+				req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+				req.Header.Set("Origin", "https://checker.example.com")
+				if !cfg.CheckOrigin(req) {
+					t.Fatal("expected custom checker to allow origin")
 				}
 			},
 		},

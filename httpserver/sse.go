@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -56,10 +55,11 @@ type SSEStream interface {
 type SSEHandlerFunc func(stream SSEStream)
 
 type sseSender struct {
-	ginCtx *gin.Context
-	ctx    context.Context
-	config *sseConfig
-	mu     sync.Mutex // 保护 Writer 并发访问
+	ginCtx    *gin.Context
+	ctx       context.Context
+	config    *sseConfig
+	startedAt time.Time
+	mu        sync.Mutex // 保护 Writer 并发访问
 }
 
 func (s *sseSender) Context() context.Context {
@@ -182,14 +182,17 @@ func (s *sseSender) startHeartbeat(ctx context.Context) func() {
 	}
 }
 
+func (s *sseSender) logConnect() {
+	logStreamEvent(s.ginCtx, "info", "stream_connect", "sse", time.Time{}, nil)
+}
+
 // logDisconnect 在连接断开时打印日志。
 func (s *sseSender) logDisconnect(ctx context.Context) {
-	if err := ctx.Err(); err != nil {
-		slog.Info("sse client disconnected",
-			"path", s.ginCtx.Request.URL.Path,
-			"error", err,
-		)
+	var err error
+	if ctx != nil {
+		err = ctx.Err()
 	}
+	logStreamEvent(s.ginCtx, "info", "stream_disconnect", "sse", s.startedAt, err)
 }
 
 func splitLines(s string) []string {

@@ -379,6 +379,66 @@ func TestDrainTimeout(t *testing.T) {
 	}
 }
 
+func TestRunWithContextUsesGracefulShutdownPipeline(t *testing.T) {
+	t.Parallel()
+
+	hooks := make([]string, 0, 2)
+	srv := NewServer(&Config{
+		Host:            "127.0.0.1",
+		Port:            0,
+		DrainTimeout:    50 * time.Millisecond,
+		ShutdownTimeout: time.Second,
+	}, WithHooks(Hooks{
+		OnShuttingDown: func(_ context.Context, _ LifecycleEvent) {
+			hooks = append(hooks, "shutting_down")
+		},
+		OnShutdownComplete: func(_ context.Context, _ LifecycleEvent) {
+			hooks = append(hooks, "shutdown_complete")
+		},
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	err := srv.RunWithContext(ctx)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunWithContext() error = %v", err)
+	}
+	if elapsed < srv.config.DrainTimeout {
+		t.Fatalf("elapsed = %v, want >= %v", elapsed, srv.config.DrainTimeout)
+	}
+	if got := srv.State(); got != StateStopped {
+		t.Fatalf("State() = %q, want %q", got, StateStopped)
+	}
+	if len(hooks) != 2 || hooks[0] != "shutting_down" || hooks[1] != "shutdown_complete" {
+		t.Fatalf("hooks = %v, want [shutting_down shutdown_complete]", hooks)
+	}
+}
+
+func TestShutdownContextDisablesDeadlineWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(&Config{
+		ShutdownTimeout: DisableTimeout,
+	})
+
+	ctx, cancel := srv.shutdownContext()
+	defer cancel()
+
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("shutdown context unexpectedly has deadline")
+	}
+	if srv.config.ShutdownTimeout != 0 {
+		t.Fatalf("ShutdownTimeout = %v, want 0", srv.config.ShutdownTimeout)
+	}
+}
+
 // TestReadinessDuringDraining 验证 draining 状态 readiness 返回 503
 func TestReadinessDuringDraining(t *testing.T) {
 	t.Parallel()

@@ -20,12 +20,14 @@
 // 流式接口：
 //
 //	srv.SSE("/events", func(stream httpserver.SSEStream) {})
-//	srv.WS("/chat", func(session httpserver.WSSession) {})
+//	srv.WS("/chat", func(session httpserver.WSSession) {}, httpserver.WithWSAllowedOrigins("https://app.example.com"))
 //
 // 生命周期管理：
 //
 //	srv.Run()                              // 阻塞启动
 //	srv.Start()                            // 非阻塞启动
+//	srv.RunWithContext(ctx)                // ctx 取消时执行优雅关闭
+//	srv.RunWithGracefulShutdown()          // 监听系统信号并优雅关闭
 //	srv.WaitForShutdown()                  // 等待信号并优雅关闭
 //
 // 服务器状态：
@@ -40,8 +42,10 @@
 // 优雅关闭配置：
 //
 //	srv := httpserver.NewServer(&httpserver.Config{
-//	    DrainTimeout:    5 * time.Second,  // 收到关闭信号后等待时间，让负载均衡器切走流量
-//	    ShutdownTimeout: 10 * time.Second, // http.Server.Shutdown 的超时时间
+//	    DrainTimeout:    5 * time.Second,          // 收到关闭信号后等待时间，让负载均衡器切走流量
+//	    ShutdownTimeout: 10 * time.Second,         // http.Server.Shutdown 的超时时间
+//	    // DrainTimeout:    httpserver.DisableTimeout, // 显式关闭 drain 等待
+//	    // ShutdownTimeout: httpserver.DisableTimeout, // 显式关闭 shutdown deadline
 //	})
 //
 // 自定义 http.Server 配置：
@@ -54,6 +58,15 @@
 //
 //	srv.Use(middleware.Recovery())
 //	srv.Use(middleware.Timeout(2 * time.Second))
+//	srv.Use(middleware.CORS(middleware.CORSConfig{
+//	    AllowOrigins: []string{"https://app.example.com"},
+//	}))
+//
+// 注意：
+//
+//   - `middleware.CORS(middleware.CORSConfig{})` 表示不启用 CORS
+//   - 浏览器 WebSocket 握手默认拒绝，必须显式配置 `WithWSAllowedOrigins(...)` 或 `WithWSOriginChecker(...)`
+//   - 如果挂了 `middleware.AccessLog(...)`，SSE/WS 会额外输出 `stream_connect` / `stream_disconnect` / `ws_upgrade_failed`
 //
 // 可观测性扩展：
 //
@@ -63,6 +76,10 @@
 // 官方默认装配：
 //
 //	srv := preset.NewProductionServer(nil)
+//	srv.Use(middleware.AccessLog()) // 后续 helper 路由会继承新增 middleware
+//	// srv.GET(...) 会走 regular helper group
+//	// srv.SSE(...) / srv.WS(...) 会走 streaming helper group（不自动挂 HandlerTimeout）
+//	// preset 是 transport baseline，不会自动配置 CORS、RealIP、AccessLog、认证或限流
 //
 // Swagger 集成：
 //
