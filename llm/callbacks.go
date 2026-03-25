@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/callbacks"
@@ -30,50 +29,60 @@ func NewLangfuseHandler(cfg *LangfuseConfig) (callbacks.Handler, func(), error) 
 	return handler, flush, nil
 }
 
-// NewLogHandler 创建一个基于 slog 的日志回调处理器。
-// 它会记录组件的输入、输出、耗时和 Token 消耗（如果有）。
-func NewLogHandler(logger *slog.Logger) callbacks.Handler {
-	if logger == nil {
-		logger = slog.Default()
+// NewLogHandler 创建一个基于 LogClient 的日志回调处理器。
+// 它会记录组件的输入、输出和 Token 消耗（如果有），并沿用调用时的 ctx。
+func NewLogHandler(client LogClient) callbacks.Handler {
+	if client == nil {
+		client = &noopLogClient{}
 	}
 
 	return callbacks.NewHandlerBuilder().
 		OnStartFn(func(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
-			logger.Info("Component Start",
+			fields := []any{
 				"component", info.Component,
 				"name", info.Name,
 				"type", info.Type,
 				"input", fmt.Sprintf("%.100v", input), // 简单截断防止日志过大
-			)
+			}
+			fields = appendInvocationIDField(ctx, fields)
+			client.Info(ctx, "Component Start", fields...)
 			return ctx
 		}).
 		OnEndFn(func(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
 			attrs := []any{
-				slog.String("component", string(info.Component)),
-				slog.String("name", info.Name),
-				slog.String("type", info.Type),
+				"component", string(info.Component),
+				"name", info.Name,
+				"type", info.Type,
 			}
 
 			// 尝试提取 Token Usage
 			if cbOut, ok := output.(*model.CallbackOutput); ok && cbOut.TokenUsage != nil {
-				attrs = append(attrs, slog.Any("token_usage", cbOut.TokenUsage))
+				attrs = append(attrs, "token_usage", cbOut.TokenUsage)
 			} else if cbOut, ok := output.(*schema.Message); ok {
 				// 有些 Output 直接就是 Message
-				attrs = append(attrs, slog.String("content", fmt.Sprintf("%.100s", cbOut.Content)))
+				attrs = append(attrs, "content", fmt.Sprintf("%.100s", cbOut.Content))
 			} else {
-				attrs = append(attrs, slog.String("output", fmt.Sprintf("%.100v", output)))
+				attrs = append(attrs, "output", fmt.Sprintf("%.100v", output))
 			}
 
-			logger.Info("Component End", attrs...)
+			attrs = appendInvocationIDField(ctx, attrs)
+			client.Info(ctx, "Component End", attrs...)
 			return ctx
 		}).
 		OnErrorFn(func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
-			logger.Error("Component Error",
+			fields := []any{
 				"component", info.Component,
 				"name", info.Name,
 				"error", err,
-			)
+			}
+			fields = appendInvocationIDField(ctx, fields)
+			client.Error(ctx, "Component Error", fields...)
 			return ctx
 		}).
 		Build()
 }
+
+type noopLogClient struct{}
+
+func (n *noopLogClient) Info(context.Context, string, ...any)  {}
+func (n *noopLogClient) Error(context.Context, string, ...any) {}

@@ -1,9 +1,7 @@
 package llm
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -45,8 +43,7 @@ func TestObservedToolCallingModel_StreamBehavior(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			model := &blockingStreamModel{sent: make(chan struct{})}
-			logger := slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil))
-			observed := newObservedToolCallingModel(model, newStructuredLogger(&StructuredLogConfig{Logger: logger}), Assistant, schema.ToolChoiceAllowed)
+			observed := newObservedToolCallingModel(model, newStructuredLogger(&StructuredLogConfig{Client: &recordingLogClient{}}), Assistant, schema.ToolChoiceAllowed)
 
 			sr, err := observed.Stream(context.Background(), []*schema.Message{schema.UserMessage("hello")})
 			if err != nil {

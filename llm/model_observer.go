@@ -29,17 +29,17 @@ func newObservedToolCallingModel(inner model.ToolCallingChatModel, logs *structu
 func (m *observedToolCallingModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	msg, err := m.inner.Generate(ctx, input, opts...)
 	if err != nil {
-		m.logs.logError("model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
+		m.logs.logError(ctx, "model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
 		return nil, err
 	}
-	m.logDecision(msg)
+	m.logDecision(ctx, msg)
 	return msg, nil
 }
 
 func (m *observedToolCallingModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	sr, err := m.inner.Stream(ctx, input, opts...)
 	if err != nil {
-		m.logs.logError("model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
+		m.logs.logError(ctx, "model.decision", "execution_mode", string(m.mode), "configured_tool_choice", string(m.toolChoice), "tool_call_count", 0, "tool_names", []string{}, "finish_reason", "", "error", err.Error())
 		return nil, err
 	}
 	return sr, nil
@@ -58,7 +58,7 @@ func (m *observedToolCallingModel) WithTools(tools []*schema.ToolInfo) (model.To
 	}, nil
 }
 
-func (m *observedToolCallingModel) logDecision(msg *schema.Message) {
+func (m *observedToolCallingModel) logDecision(ctx context.Context, msg *schema.Message) {
 	toolNames, toolCallCount := decisionToolNames(msg)
 	finishReason, reasoningTokens := decisionMeta(msg)
 	attrs := []any{
@@ -71,7 +71,7 @@ func (m *observedToolCallingModel) logDecision(msg *schema.Message) {
 	if reasoningTokens >= 0 {
 		attrs = append(attrs, "reasoning_tokens", reasoningTokens)
 	}
-	m.logs.logInfo("model.decision", attrs...)
+	m.logs.logInfo(ctx, "model.decision", attrs...)
 }
 
 func decisionToolNames(msg *schema.Message) ([]string, int) {

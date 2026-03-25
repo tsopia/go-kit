@@ -7,7 +7,7 @@
 - **多协议统一路由**：一键切换 OpenAI / Claude / DeepSeek / Gemini / Ollama / Moonshot(Kimi) 等模型协议。
 - **React Agent 增强**：内置工具调用循环、自动重试、死循环检测。
 - **StructTool**：基于 Go 结构体标签（tag）自动生成 JSON Schema，支持嵌套结构、枚举值。
-- **可观测性**：开箱即用的 Langfuse 和 Slog 集成。
+- **可观测性**：开箱即用的 Langfuse 和自定义 `LogClient` 集成。
 - **运行时动态控制**：支持请求级别的模型替换、工具替换、参数调整。
 - **流式完整支持**：从推理到工具调用再到最终回答的全链路流式。
 
@@ -90,8 +90,9 @@ fmt.Println(msg.Content)
 lfHandler, flush, _ := llm.NewLangfuseHandler(&llm.LangfuseConfig{...})
 defer flush()
 
-// 初始化日志 (slog)
-logHandler := llm.NewLogHandler(slog.Default())
+// 初始化日志客户端（示例：go-kit/kit）
+logger := kit.New(kit.Options{Format: kit.FormatJSON})
+logHandler := llm.NewLogHandler(logger)
 
 // 注入 Agent
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
@@ -99,7 +100,7 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     Observability: llm.ObservabilityConfig{
         Callbacks: []callbacks.Handler{lfHandler, logHandler},
         StructuredLogs: &llm.StructuredLogConfig{
-            Logger:           slog.Default(),
+            Client:           logger,
             LogToolArguments: true,
             LogToolResults:   true,
             MaxFieldLength:   256,
@@ -110,13 +111,18 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 
 说明：
 
-- `NewLogHandler` 的既有输出语义没有改，仍然只输出 `Component Start` / `Component End` / `Component Error`
+- `NewLogHandler` 的输出语义没有改，仍然只输出 `Component Start` / `Component End` / `Component Error`
+- `NewLogHandler` 和 `StructuredLogs` 现在都依赖 `LogClient` 接口，而不是 `*slog.Logger`
+- `LogClient` 只要求实现 `Info(ctx, msg, fields...)` 和 `Error(ctx, msg, fields...)`
 - `StructuredLogs` 会输出 `agent.start` / `model.decision` / `tool.start` / `tool.success` / `tool.error` / `agent.end`
 - 当前没有为 `RuntimeSpec` 做缓存；构造成本不在热路径，不值得为此引入额外状态
 - 当前不承诺公开 `ParentMessageID` 一类字段；上游 `schema.Message` 没有稳定的顶层 message id
+- 结构化日志和 callback 日志都会继承调用时的 `ctx`；如果你的 `LogClient` 会从 ctx 提取 `trace_id/request_id`，这些字段会自然出现在日志里
+- 每次 `Generate` / `Stream` 都会生成一个 `invocation_id`，用于区分并发链路
 
 常用字段：
 
+- `invocation_id`：单次 `Generate` / `Stream` 的链路标识
 - `agent.start`：`execution_mode`、`tool_count`、`direct_return_enabled`、`message_count`
 - `model.decision`：`configured_tool_choice`、`tool_call_count`、`tool_names`、`finish_reason`、`reasoning_tokens`
 - `tool.start`：`tool_name`、`tool_call_id`、`attempt`、`arguments`
@@ -127,24 +133,24 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 `Assistant` 场景日志示例：
 
 ```json
-{"level":"INFO","msg":"agent.start","event":"agent.start","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"message_count":1}
-{"level":"INFO","msg":"model.decision","event":"model.decision","execution_mode":"assistant","configured_tool_choice":"allowed","tool_call_count":1,"tool_names":["lookup_user"],"finish_reason":"tool_calls"}
-{"level":"INFO","msg":"tool.start","event":"tool.start","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"arguments":"{\"name\":\"Alice\"}"}
-{"level":"INFO","msg":"tool.success","event":"tool.success","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"latency_ms":12,"result":"{\"name\":\"Alice\"}"}
-{"level":"INFO","msg":"agent.end","event":"agent.end","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"latency_ms":38,"status":"success"}
+{"level":"INFO","msg":"agent.start","event":"agent.start","invocation_id":"inv-001","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"message_count":1}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-001","execution_mode":"assistant","configured_tool_choice":"allowed","tool_call_count":1,"tool_names":["lookup_user"],"finish_reason":"tool_calls"}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-001","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"arguments":"{\"name\":\"Alice\"}"}
+{"level":"INFO","msg":"tool.success","event":"tool.success","invocation_id":"inv-001","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"latency_ms":12,"result":"{\"name\":\"Alice\"}"}
+{"level":"INFO","msg":"agent.end","event":"agent.end","invocation_id":"inv-001","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"latency_ms":38,"status":"success"}
 ```
 
 `Extraction` 重试 + direct return 日志示例：
 
 ```json
-{"level":"INFO","msg":"agent.start","event":"agent.start","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"message_count":1}
-{"level":"INFO","msg":"model.decision","event":"model.decision","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
-{"level":"INFO","msg":"tool.start","event":"tool.start","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"arguments":"{\"query\":\"bad\"}"}
-{"level":"ERROR","msg":"tool.error","event":"tool.error","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"latency_ms":4,"retryable":true,"terminal":false,"error":"missing required field"}
-{"level":"INFO","msg":"model.decision","event":"model.decision","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
-{"level":"INFO","msg":"tool.start","event":"tool.start","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"arguments":"{\"query\":\"good\"}"}
-{"level":"INFO","msg":"tool.success","event":"tool.success","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"latency_ms":6,"result":"{\"name\":\"Alice\"}","direct_return":true}
-{"level":"INFO","msg":"agent.end","event":"agent.end","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"latency_ms":29,"status":"success","direct_return":true}
+{"level":"INFO","msg":"agent.start","event":"agent.start","invocation_id":"inv-002","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"message_count":1}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-002","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"arguments":"{\"query\":\"bad\"}"}
+{"level":"ERROR","msg":"tool.error","event":"tool.error","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"latency_ms":4,"retryable":true,"terminal":false,"error":"missing required field"}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-002","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"arguments":"{\"query\":\"good\"}"}
+{"level":"INFO","msg":"tool.success","event":"tool.success","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"latency_ms":6,"result":"{\"name\":\"Alice\"}","direct_return":true}
+{"level":"INFO","msg":"agent.end","event":"agent.end","invocation_id":"inv-002","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"latency_ms":29,"status":"success","direct_return":true}
 ```
 
 排障顺序建议：

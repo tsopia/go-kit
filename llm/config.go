@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
@@ -60,7 +59,8 @@ type ObservabilityConfig struct {
 }
 
 type StructuredLogConfig struct {
-	Logger           *slog.Logger
+	// Client 负责输出 llm 的结构化日志；建议直接传入支持 ctx 的日志客户端。
+	Client           LogClient
 	LogToolArguments bool
 	LogToolResults   bool
 	MaxFieldLength   int

@@ -61,8 +61,8 @@ func TestAgentConfigDefaults(t *testing.T) {
 	}
 
 	sl := StructuredLogConfig{}
-	if sl.Logger != nil {
-		t.Fatalf("expected nil structured log logger, got %#v", sl.Logger)
+	if sl.Client != nil {
+		t.Fatalf("expected nil structured log client, got %#v", sl.Client)
 	}
 	if sl.LogToolArguments {
 		t.Fatal("expected false log tool arguments by default")

@@ -136,6 +136,7 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 // Generate 非流式调用 Agent。
 // 模型会自动处理工具调用循环，直到返回最终答案。
 func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (msg *schema.Message, err error) {
+	ctx = withInvocationID(ctx)
 	if a.cfg.Observability.StructuredLogs != nil {
 		ctx = withToolLogSession(ctx)
 	}
@@ -143,7 +144,7 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 	didDirectReturn := false
 	if a.logs != nil && a.logs.enabled() {
 		started := time.Now()
-		a.logs.logInfo("agent.start",
+		a.logs.logInfo(ctx, "agent.start",
 			"execution_mode", string(a.mode),
 			"tool_count", a.toolCount,
 			"direct_return_enabled", directReturnEnabled,
@@ -164,7 +165,7 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 			if didDirectReturn {
 				attrs = append(attrs, "direct_return", true)
 			}
-			a.logs.logInfo("agent.end", attrs...)
+			a.logs.logInfo(ctx, "agent.end", attrs...)
 		}()
 	}
 
@@ -231,6 +232,7 @@ type agentControl struct {
 // Stream 流式调用 Agent。
 // 完整支持流式 tool call：模型推理 → 工具调用 → 再推理，全程流式。
 func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.StreamReader[*schema.Message], error) {
+	ctx = withInvocationID(ctx)
 	if a.cfg.Observability.StructuredLogs != nil {
 		ctx = withToolLogSession(ctx)
 	}

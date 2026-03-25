@@ -3,11 +3,11 @@ package llm
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/tsopia/go-kit/utils"
 )
 
 func TestStructuredLogs_Contract(t *testing.T) {
@@ -103,7 +103,7 @@ func TestStructuredLogs_Contract(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			if tt.cfg.Observability.StructuredLogs != nil {
-				tt.cfg.Observability.StructuredLogs.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+				tt.cfg.Observability.StructuredLogs.Client = newJSONBufferLogClient(&buf)
 			}
 
 			agent, err := NewAgent(context.Background(), tt.cfg)
@@ -185,7 +185,7 @@ func TestStructuredLogs_ModelDecision(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			if tt.cfg.Observability.StructuredLogs != nil {
-				tt.cfg.Observability.StructuredLogs.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+				tt.cfg.Observability.StructuredLogs.Client = newJSONBufferLogClient(&buf)
 			}
 
 			agent, err := NewAgent(context.Background(), tt.cfg)
@@ -368,7 +368,7 @@ func TestStructuredLogs_ToolLifecycle(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			if tt.cfg.Observability.StructuredLogs != nil {
-				tt.cfg.Observability.StructuredLogs.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+				tt.cfg.Observability.StructuredLogs.Client = newJSONBufferLogClient(&buf)
 			}
 
 			agent, err := NewAgent(context.Background(), tt.cfg)
@@ -468,7 +468,7 @@ func TestStructuredLogs_AgentOutcome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			if tt.cfg.Observability.StructuredLogs != nil {
-				tt.cfg.Observability.StructuredLogs.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+				tt.cfg.Observability.StructuredLogs.Client = newJSONBufferLogClient(&buf)
 			}
 
 			agent, err := NewAgent(context.Background(), tt.cfg)
@@ -488,5 +488,89 @@ func TestStructuredLogs_AgentOutcome(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStructuredLogs_ContextAndInvocationID(t *testing.T) {
+	client := &recordingLogClient{}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+			responses: []*schema.Message{
+				{
+					Role: schema.Assistant,
+					ToolCalls: []schema.ToolCall{
+						{ID: "tc1", Function: schema.FunctionCall{Name: "lookup_user", Arguments: `{"name":"Alice"}`}},
+					},
+				},
+				{Role: schema.Assistant, Content: "lookup done"},
+				{Role: schema.Assistant, Content: "plain answer"},
+			},
+		}},
+		Tools: ToolsConfig{Invokable: []InvokableTool{
+			&simpleTool{
+				info: &schema.ToolInfo{
+					Name: "lookup_user",
+					Desc: "lookup user",
+					ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+						"name": {Type: schema.String, Desc: "name"},
+					}),
+				},
+				ret: `{"name":"Alice"}`,
+			},
+		}},
+		Execution: ExecutionConfig{Mode: Assistant},
+		Observability: ObservabilityConfig{StructuredLogs: &StructuredLogConfig{
+			Client: client,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	ctx := utils.WithTraceAndRequestID(context.Background(), "trace-ctx", "req-ctx")
+
+	if _, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello")}); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	firstEntries := client.snapshot()
+	if len(firstEntries) == 0 {
+		t.Fatal("expected structured logs")
+	}
+
+	firstInvocationID, ok := firstEntries[0].fields["invocation_id"].(string)
+	if !ok || firstInvocationID == "" {
+		t.Fatal("expected invocation_id field in structured logs")
+	}
+
+	for _, entry := range firstEntries {
+		if entry.traceID != "trace-ctx" {
+			t.Fatalf("expected trace id to propagate, got %q", entry.traceID)
+		}
+		if entry.requestID != "req-ctx" {
+			t.Fatalf("expected request id to propagate, got %q", entry.requestID)
+		}
+		if entry.invocationID != firstInvocationID {
+			t.Fatalf("expected invocation id from ctx to match fields, got ctx=%q field=%v", entry.invocationID, entry.fields["invocation_id"])
+		}
+		if entry.fields["invocation_id"] != firstInvocationID {
+			t.Fatalf("expected same invocation id within one generate call, got %#v want %q", entry.fields["invocation_id"], firstInvocationID)
+		}
+	}
+
+	if _, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello again")}); err != nil {
+		t.Fatalf("second Generate failed: %v", err)
+	}
+	allEntries := client.snapshot()
+	if len(allEntries) <= len(firstEntries) {
+		t.Fatal("expected more log entries after second generate")
+	}
+
+	secondInvocationID, ok := allEntries[len(firstEntries)].fields["invocation_id"].(string)
+	if !ok || secondInvocationID == "" {
+		t.Fatal("expected second invocation_id field")
+	}
+	if secondInvocationID == firstInvocationID {
+		t.Fatalf("expected unique invocation id per generate call, got same %q", secondInvocationID)
 	}
 }

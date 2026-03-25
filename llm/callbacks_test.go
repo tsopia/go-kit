@@ -1,23 +1,20 @@
 package llm
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/tsopia/go-kit/utils"
 )
 
 func TestLogHandler_Integration(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	handler := NewLogHandler(logger)
+	client := &recordingLogClient{}
+	handler := NewLogHandler(client)
 
-	ctx := context.Background()
+	ctx := utils.WithTraceAndRequestID(context.Background(), "trace-123", "req-456")
 	agent, err := NewAgent(ctx, AgentConfig{
 		Model:         AgentModelConfig{Instance: &mockCallbackModel{}},
 		Observability: ObservabilityConfig{Callbacks: []callbacks.Handler{handler}},
@@ -34,24 +31,32 @@ func TestLogHandler_Integration(t *testing.T) {
 		t.Fatalf("unexpected response: %q", resp.Content)
 	}
 
-	logs := buf.String()
-	checks := []struct {
-		name string
-		want string
-	}{
-		{name: "start", want: "Component Start"},
-		{name: "end", want: "Component End"},
+	entries := client.snapshot()
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 log entries, got %d", len(entries))
 	}
-	for _, check := range checks {
-		if !strings.Contains(logs, check.want) {
-			t.Errorf("expected log to contain %q", check.want)
+
+	if entries[0].msg != "Component Start" {
+		t.Fatalf("unexpected first message: %q", entries[0].msg)
+	}
+	last := entries[len(entries)-1]
+	if last.msg != "Component End" {
+		t.Fatalf("unexpected last message: %q", last.msg)
+	}
+
+	for _, entry := range entries {
+		if entry.traceID != "trace-123" {
+			t.Fatalf("expected trace id to propagate, got %q", entry.traceID)
 		}
-	}
-	if strings.Contains(logs, "\"event\":") {
-		t.Fatal("did not expect structured event fields in NewLogHandler output")
-	}
-	if !strings.Contains(logs, "\"component\":\"ChatModel\"") {
-		t.Log("JSON Handler 字段格式可能不同，跳过 component 字段断言")
+		if entry.requestID != "req-456" {
+			t.Fatalf("expected request id to propagate, got %q", entry.requestID)
+		}
+		if entry.invocationID == "" {
+			t.Fatal("expected invocation id in callback logs")
+		}
+		if _, ok := entry.fields["event"]; ok {
+			t.Fatal("did not expect structured event fields in NewLogHandler output")
+		}
 	}
 }
 

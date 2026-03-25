@@ -96,7 +96,7 @@ func newToolObserverMiddleware(logs *structuredLogger, directReturnTools map[str
 				if logs.cfg.LogToolArguments {
 					startAttrs = append(startAttrs, "arguments", truncateField(input.Arguments, logs.cfg.MaxFieldLength))
 				}
-				logs.logInfo("tool.start", startAttrs...)
+					logs.logInfo(ctx, "tool.start", startAttrs...)
 
 				state := &toolLogState{}
 				ctx = context.WithValue(ctx, ctxKeyToolLogState{}, state)
@@ -106,7 +106,7 @@ func newToolObserverMiddleware(logs *structuredLogger, directReturnTools map[str
 				latencyMS := time.Since(started).Milliseconds()
 
 				if errText, retryable, terminal, ok := state.snapshot(); ok {
-					logs.logError("tool.error",
+						logs.logError(ctx, "tool.error",
 						"tool_name", input.Name,
 						"tool_call_id", input.CallID,
 						"attempt", attempt,
@@ -119,7 +119,7 @@ func newToolObserverMiddleware(logs *structuredLogger, directReturnTools map[str
 				}
 
 				if err != nil {
-					logs.logError("tool.error",
+					logs.logError(ctx, "tool.error",
 						"tool_name", input.Name,
 						"tool_call_id", input.CallID,
 						"attempt", attempt,
@@ -143,9 +143,9 @@ func newToolObserverMiddleware(logs *structuredLogger, directReturnTools map[str
 				if logs.cfg.LogToolResults && output != nil {
 					successAttrs = append(successAttrs, "result", truncateField(output.Result, logs.cfg.MaxFieldLength))
 				}
-				logs.logInfo("tool.success", successAttrs...)
-				return output, nil
-			}
-		},
+					logs.logInfo(ctx, "tool.success", successAttrs...)
+					return output, nil
+				}
+			},
 	}
 }
