@@ -329,7 +329,10 @@ r.GET("/users/:id", httpserver.HandleURI(getUser))
 r.GET("/users/:id", httpserver.HandleQueryURI(getUserDetail))
 
 // 支持 Form/Multipart 自动识别
-r.POST("/upload", httpserver.HandleForm(uploadHandler))
+r.POST("/upload", httpserver.HandleForm(
+    uploadHandler,
+    httpserver.WithMaxBodyBytes(100<<20),
+))
 
 // 无响应体操作（默认返回 204）
 r.DELETE("/items/:id", httpserver.HandleNoContent(deleteItem))
@@ -580,13 +583,13 @@ func (m *UserModule) listUsers(ctx context.Context, req ListUsersRequest) (ListU
 ## SSE 支持
 
 ```go
-srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
+srv.SSE("/events", func(stream httpserver.SSEStream) {
     for {
         select {
-        case <-ctx.Done():
-            return  // 客户端断开或 server 关闭
+        case <-stream.Context().Done():
+            return
         case data := <-updates:
-            send.Event("update", data)
+            _ = stream.Event("update", data)
         }
     }
 })
@@ -594,7 +597,7 @@ srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
 
 - 自动设置 `text/event-stream` 响应头
 - 自动清除 `WriteDeadline`，支持长时间连接
-- `ctx` 包含客户端断开和 server shutdown 信号
+- `stream` 同时暴露请求上下文、路由参数和事件写入能力
 
 ### SSE 心跳保活
 
@@ -624,17 +627,17 @@ INFO sse client disconnected path=/ai/stream error=context canceled
 ### 基础使用
 
 ```go
-srv.WS("/chat", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+srv.WS("/chat/:id", func(session httpserver.WSSession) {
     // 第1条消息通常是认证
-    auth := <-recv
-    userID := validate(auth.Data)
+    auth := <-session.Recv()
+    roomID := session.Param("id")
+    userID := validate(auth.Data, roomID)
 
-    for msg := range recv {
-        // 处理消息，发送响应
-        send <- httpserver.WSMessage{
+    for msg := range session.Recv() {
+        _ = session.Send(httpserver.WSMessage{
             Type: websocket.TextMessage,
             Data: []byte("收到: " + string(msg.Data)),
-        }
+        })
     }
 })
 ```
@@ -643,38 +646,27 @@ srv.WS("/chat", func(ctx context.Context, recv <-chan httpserver.WSMessage, send
 
 ```go
 srv.WS("/chat", handler,
-    httpserver.WithRecvBuffer(500, httpserver.DropNewest),
-    httpserver.WithSendBuffer(500, httpserver.DropOldest),
+    httpserver.WithWSSendBuffer(500),
+    httpserver.WithReadIdleTimeout(90*time.Second),
     httpserver.WithWSPingPeriod(30*time.Second),
     httpserver.WithWSPongTimeout(60*time.Second),
+    httpserver.WithWriteTimeout(10*time.Second),
 )
 ```
 
-### 缓冲策略
-
-| 策略 | 说明 |
-|------|------|
-| `Block` | 缓冲满时阻塞等待 |
-| `DropNewest` | 丢弃最新消息（默认 recv）|
-| `DropOldest` | 丢弃最旧消息（默认 send）|
-| `Disconnect` | 断开连接 |
-
-**注意**: SendPolicy 当前版本预留未实现，send channel 的写入阻塞由用户 handler 控制。
+`session.Send` 表示“阻塞直到消息进入内部发送队列或连接结束”，`session.TrySend` 表示“仅在队列有空位时非阻塞入队”。
 
 ### 使用 Hub 实现聊天室
 
 ```go
 var chatHub = httpserver.NewWSHub()
 
-srv.WS("/room/:id", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
-    roomID := ctx.Value("params").(gin.Params).ByName("id")
+srv.WS("/room/:id", func(session httpserver.WSSession) {
+    roomID := session.Param("id")
+    chatHub.Join(roomID, session)
+    defer chatHub.Leave(roomID, session)
 
-    // 加入房间
-    chatHub.Join(roomID, send)
-    defer chatHub.Leave(roomID, send)
-
-    for msg := range recv {
-        // 广播给房间所有人
+    for msg := range session.Recv() {
         chatHub.Broadcast(roomID, msg)
     }
 })
@@ -682,17 +674,21 @@ srv.WS("/room/:id", func(ctx context.Context, recv <-chan httpserver.WSMessage, 
 
 ### 自动功能
 
-- **Ping/Pong**：自动发送 ping，检测死连接
+- **单 writer**：data frame 由独立写泵串行发送，ping 使用 `WriteControl`
+- **读空闲超时**：每次收到消息或 pong 都会刷新 `ReadIdleTimeout`
 - **断开日志**：自动记录客户端断开
-- **并发安全**：每个连接独立 handler
+- **请求访问**：handler 可直接读取 `session.Request()` 和 `session.Param(...)`
 
 ## 文件上传
 
 ```go
-srv.POST("/upload", httpserver.HandleUpload(uploadHandler, 100<<20)) // 100MB 限制
+srv.POST("/upload", httpserver.HandleForm(
+    uploadHandler,
+    httpserver.WithMaxBodyBytes(100<<20),
+))
 ```
 
-- 自动清除 `ReadDeadline` 和 `WriteDeadline`
+- `HandleForm` 自动识别 JSON / Form / Multipart
 - 使用 `MaxBytesReader` 限制 body 大小
 - 超出限制返回 413
 

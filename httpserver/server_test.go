@@ -889,8 +889,8 @@ func TestServer_SSE(t *testing.T) {
 	streamingGroup := srv.Engine().Group("/")
 	srv.SetGroups(nil, streamingGroup)
 
-	srv.SSE("/events", func(ctx context.Context, send SSESender) {
-		send.Event("test", "hello")
+	srv.SSE("/events", func(stream SSEStream) {
+		_ = stream.Event("test", "hello")
 	})
 
 	w := httptest.NewRecorder()
@@ -909,5 +909,37 @@ func TestServer_SSE(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "event: test") {
 		t.Errorf("body should contain 'event: test', got: %s", body)
+	}
+}
+
+func TestSSEStreamProvidesRequestAndParams(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	config := DefaultConfig()
+	srv := NewServer(config)
+
+	streamingGroup := srv.Engine().Group("/")
+	srv.SetGroups(nil, streamingGroup)
+
+	var (
+		gotPath string
+		gotID   string
+	)
+
+	srv.SSE("/events/:id", func(stream SSEStream) {
+		gotPath = stream.Request().URL.Path
+		gotID = stream.Param("id")
+		_ = stream.Event("test", "hello")
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/events/42", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if gotPath != "/events/42" {
+		t.Fatalf("path = %q, want %q", gotPath, "/events/42")
+	}
+	if gotID != "42" {
+		t.Fatalf("id = %q, want %q", gotID, "42")
 	}
 }

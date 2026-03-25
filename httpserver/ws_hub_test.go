@@ -5,9 +5,26 @@ import (
 	"time"
 )
 
+type testWSSender struct {
+	ch    chan WSMessage
+	allow bool
+}
+
+func (s *testWSSender) TrySend(msg WSMessage) bool {
+	if !s.allow {
+		return false
+	}
+	select {
+	case s.ch <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestWSHub_JoinLeave(t *testing.T) {
 	hub := NewWSHub()
-	send := make(chan WSMessage, 10)
+	send := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
 
 	hub.Join("room1", send)
 	if hub.RoomCount("room1") != 1 {
@@ -20,10 +37,27 @@ func TestWSHub_JoinLeave(t *testing.T) {
 	}
 }
 
+func TestWSHub_UsesTrySend(t *testing.T) {
+	hub := NewWSHub()
+	sender := &testWSSender{ch: make(chan WSMessage, 1), allow: true}
+
+	hub.Join("room1", sender)
+	hub.Broadcast("room1", WSMessage{Type: 1, Data: []byte("hello")})
+
+	select {
+	case msg := <-sender.ch:
+		if string(msg.Data) != "hello" {
+			t.Fatalf("message = %q, want %q", string(msg.Data), "hello")
+		}
+	default:
+		t.Fatal("expected one broadcast message")
+	}
+}
+
 func TestWSHub_Broadcast(t *testing.T) {
 	hub := NewWSHub()
-	send1 := make(chan WSMessage, 10)
-	send2 := make(chan WSMessage, 10)
+	send1 := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
+	send2 := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
 
 	hub.Join("room1", send1)
 	hub.Join("room1", send2)
@@ -32,7 +66,7 @@ func TestWSHub_Broadcast(t *testing.T) {
 	hub.Broadcast("room1", msg)
 
 	select {
-	case m := <-send1:
+	case m := <-send1.ch:
 		if string(m.Data) != "hello" {
 			t.Error("Broadcast to send1 failed")
 		}
@@ -41,7 +75,7 @@ func TestWSHub_Broadcast(t *testing.T) {
 	}
 
 	select {
-	case m := <-send2:
+	case m := <-send2.ch:
 		if string(m.Data) != "hello" {
 			t.Error("Broadcast to send2 failed")
 		}
@@ -52,8 +86,8 @@ func TestWSHub_Broadcast(t *testing.T) {
 
 func TestWSHub_MultiRoom(t *testing.T) {
 	hub := NewWSHub()
-	send1 := make(chan WSMessage, 10)
-	send2 := make(chan WSMessage, 10)
+	send1 := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
+	send2 := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
 
 	hub.Join("room1", send1)
 	hub.Join("room2", send2)
@@ -61,7 +95,7 @@ func TestWSHub_MultiRoom(t *testing.T) {
 	hub.Broadcast("room1", WSMessage{Data: []byte("room1 msg")})
 
 	select {
-	case m := <-send1:
+	case m := <-send1.ch:
 		if string(m.Data) != "room1 msg" {
 			t.Error("Wrong message in room1")
 		}
@@ -70,7 +104,7 @@ func TestWSHub_MultiRoom(t *testing.T) {
 	}
 
 	select {
-	case <-send2:
+	case <-send2.ch:
 		t.Error("room2 should not receive room1 message")
 	case <-time.After(100 * time.Millisecond):
 		// 正确：没有消息
@@ -79,7 +113,7 @@ func TestWSHub_MultiRoom(t *testing.T) {
 
 func TestWSHub_Broadcast_Concurrent(t *testing.T) {
 	hub := NewWSHub()
-	send := make(chan WSMessage, 10)
+	send := &testWSSender{ch: make(chan WSMessage, 10), allow: true}
 
 	hub.Join("room1", send)
 

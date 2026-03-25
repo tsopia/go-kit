@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,6 +56,7 @@ type HandlerOption func(*handlerConfig)
 
 type handlerConfig struct {
 	successStatus int
+	beforeDecode  []func(*gin.Context) error
 	decoder       func(*gin.Context, any) error
 	validators    []func(context.Context, any) error
 	encoder       func(*gin.Context, int, any)
@@ -111,6 +111,20 @@ func WithErrorMapper(mapper ErrorMapper) HandlerOption {
 func WithEncoder(encoder func(*gin.Context, int, any)) HandlerOption {
 	return func(cfg *handlerConfig) {
 		cfg.encoder = encoder
+	}
+}
+
+// WithMaxBodyBytes 限制请求体大小。
+func WithMaxBodyBytes(limit int64) HandlerOption {
+	return func(cfg *handlerConfig) {
+		if limit <= 0 {
+			return
+		}
+
+		cfg.beforeDecode = append(cfg.beforeDecode, func(c *gin.Context) error {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+			return nil
+		})
 	}
 }
 
@@ -172,6 +186,18 @@ func Handle[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...HandlerOption)
 
 	return func(c *gin.Context) {
 		var req Req
+		for _, beforeDecode := range cfg.beforeDecode {
+			if beforeDecode == nil {
+				continue
+			}
+			if err := beforeDecode(c); err != nil {
+				renderHandlerError(c, cfg, &handlerRequestError{
+					kind: handlerErrorKindDecode,
+					err:  fmt.Errorf("prepare request: %w", err),
+				})
+				return
+			}
+		}
 		if err := cfg.decoder(c, &req); err != nil {
 			renderHandlerError(c, cfg, &handlerRequestError{
 				kind: handlerErrorKindDecode,
@@ -243,28 +269,6 @@ func HandleQueryURI[Req any, Resp any](fn HandlerFunc[Req, Resp], opts ...Handle
 	combined = append(combined, opts...)
 
 	return Handle(fn, combined...)
-}
-
-// HandleUpload 将强类型业务函数适配成上传 handler。
-// 自动清除 ReadDeadline 和 WriteDeadline，限制请求体大小。
-func HandleUpload[Req any, Resp any](
-	fn HandlerFunc[Req, Resp],
-	maxBytes int64,
-	opts ...HandlerOption,
-) gin.HandlerFunc {
-	innerHandler := Handle(fn, opts...)
-	return func(c *gin.Context) {
-		// 1. 清除 deadline
-		rc := http.NewResponseController(c.Writer)
-		_ = rc.SetReadDeadline(time.Time{})
-		_ = rc.SetWriteDeadline(time.Time{})
-
-		// 2. 限制 body 大小
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
-
-		// 3. 走正常的 Handle 逻辑
-		innerHandler(c)
-	}
 }
 
 // HandleForm 将强类型业务函数适配成 form handler。

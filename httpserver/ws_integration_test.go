@@ -1,7 +1,6 @@
 package httpserver_test
 
 import (
-	"context"
 	"net"
 	"net/url"
 	"testing"
@@ -22,7 +21,7 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	// 追踪 handler 完成
 	handlerDone := make(chan bool, 1)
 
-	srv.WS("/test", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
+	srv.WS("/test", func(session httpserver.WSSession) {
 		// 简单 handler，立即返回
 		handlerDone <- true
 	})
@@ -32,9 +31,13 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// 连接 WebSocket
@@ -56,7 +59,9 @@ func TestWS_GoroutineCleanup(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// 关闭连接
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
 
 	// 如果没有 goroutine 泄漏，测试可以正常结束
 	// 实际生产环境可以使用 runtime.NumGoroutine() 检测
@@ -73,8 +78,8 @@ func TestWS_PongTimeout(t *testing.T) {
 	ctxCancelled := make(chan bool, 1)
 
 	// 使用非常短的 ping/pong 超时用于测试
-	srv.WS("/pongtest", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
-		<-ctx.Done()
+	srv.WS("/pongtest", func(session httpserver.WSSession) {
+		<-session.Context().Done()
 		ctxCancelled <- true
 	},
 		httpserver.WithWSPingPeriod(100*time.Millisecond),
@@ -86,9 +91,13 @@ func TestWS_PongTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// 使用自定义 dialer，禁用自动 pong 响应来模拟假死客户端
@@ -101,7 +110,9 @@ func TestWS_PongTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	// 禁用自动 pong 响应（模拟假死）
 	conn.SetPongHandler(func(string) error {
@@ -117,6 +128,59 @@ func TestWS_PongTimeout(t *testing.T) {
 	}
 }
 
+func TestWSSessionContract_Integration(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	ready := make(chan struct{}, 1)
+
+	srv.WS("/session/:id", func(session httpserver.WSSession) {
+		if session.Param("id") != "42" {
+			t.Fatalf("id = %q, want %q", session.Param("id"), "42")
+		}
+		if session.Request().URL.Path != "/stream/session/42" {
+			t.Fatalf("path = %q, want %q", session.Request().URL.Path, "/stream/session/42")
+		}
+		if err := session.Send(httpserver.WSMessage{Type: websocket.TextMessage, Data: []byte("hello")}); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		ready <- struct{}{}
+		<-session.Context().Done()
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = ln.Close()
+	}()
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	u := url.URL{Scheme: "ws", Host: ln.Addr().String(), Path: "/stream/session/42"}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session handler did not complete setup")
+	}
+}
+
 func TestWS_Integration_Echo(t *testing.T) {
 	cfg := &httpserver.Config{Port: 0}
 	srv := httpserver.NewServer(cfg)
@@ -126,9 +190,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	)
 
 	// Echo 服务
-	srv.WS("/echo", func(ctx context.Context, recv <-chan httpserver.WSMessage, send chan<- httpserver.WSMessage) {
-		for msg := range recv {
-			send <- msg
+	srv.WS("/echo", func(session httpserver.WSSession) {
+		for msg := range session.Recv() {
+			_ = session.Send(msg)
 		}
 	})
 
@@ -137,9 +201,13 @@ func TestWS_Integration_Echo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
-	go srv.Serve(ln)
+	go func() {
+		_ = srv.Serve(ln)
+	}()
 	time.Sleep(100 * time.Millisecond)
 
 	// WebSocket 连接
@@ -148,7 +216,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial failed: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	// 发送消息
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
@@ -156,7 +226,9 @@ func TestWS_Integration_Echo(t *testing.T) {
 	}
 
 	// 接收回显
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
 	msgType, data, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read failed: %v", err)

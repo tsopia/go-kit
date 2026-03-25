@@ -1,7 +1,7 @@
 package httpserver_test
 
 import (
-	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -31,8 +31,8 @@ func TestPreset_StreamingSupport(t *testing.T) {
 	})
 
 	// 注册 SSE 路由
-	srv.SSE("/events", func(ctx context.Context, send httpserver.SSESender) {
-		send.Event("test", "data")
+	srv.SSE("/events", func(stream httpserver.SSEStream) {
+		_ = stream.Event("test", "data")
 	})
 
 	// 测试普通路由
@@ -63,10 +63,10 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 		srv.Engine().Group("/stream"),
 	)
 
-	srv.SSE("/heartbeat-test", func(ctx context.Context, send httpserver.SSESender) {
+	srv.SSE("/heartbeat-test", func(stream httpserver.SSEStream) {
 		// 等待一段时间让心跳发送
 		select {
-		case <-ctx.Done():
+		case <-stream.Context().Done():
 			return
 		case <-time.After(300 * time.Millisecond):
 		}
@@ -77,10 +77,12 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	go func() {
-		srv.Serve(ln)
+		_ = srv.Serve(ln)
 	}()
 	time.Sleep(100 * time.Millisecond)
 
@@ -90,13 +92,15 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to connect: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// 读取响应内容
 	var body strings.Builder
 	buf := make([]byte, 1024)
 	deadline := time.AfterFunc(400*time.Millisecond, func() {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	})
 	defer deadline.Stop()
 
@@ -114,5 +118,54 @@ func TestSSE_Integration_WithHeartbeat(t *testing.T) {
 	content := body.String()
 	if !strings.Contains(content, ": ping") {
 		t.Errorf("expected ping in response, got: %s", content)
+	}
+}
+
+func TestSSEHeartbeatDoesNotBlockFiniteStream(t *testing.T) {
+	cfg := &httpserver.Config{Port: 0}
+	srv := httpserver.NewServer(cfg)
+	srv.SetGroups(
+		srv.Engine().Group("/api"),
+		srv.Engine().Group("/stream"),
+	)
+
+	srv.SSE("/finite", func(stream httpserver.SSEStream) {
+		_ = stream.Event("done", "ok")
+	}, httpserver.WithHeartbeat(50*time.Millisecond))
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer func() {
+		_ = ln.Close()
+	}()
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/stream/finite")
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(resp.Body)
+		done <- readErr
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("response did not finish after handler returned")
 	}
 }
