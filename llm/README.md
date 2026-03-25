@@ -7,7 +7,7 @@
 - **多协议统一路由**：一键切换 OpenAI / Claude / DeepSeek / Gemini / Ollama / Moonshot(Kimi) 等模型协议。
 - **React Agent 增强**：内置工具调用循环、自动重试、死循环检测。
 - **StructTool**：基于 Go 结构体标签（tag）自动生成 JSON Schema，支持嵌套结构、枚举值。
-- **可观测性**：开箱即用的 Langfuse 和 Slog 集成。
+- **可观测性**：开箱即用的 Langfuse 和自定义 `LogClient` 集成。
 - **运行时动态控制**：支持请求级别的模型替换、工具替换、参数调整。
 - **流式完整支持**：从推理到工具调用再到最终回答的全链路流式。
 
@@ -26,67 +26,153 @@ cfg := llm.ModelConfig{
 
 ### 2. 定义工具 (推荐 StructTool)
 
-使用 `struct` 定义参数，自动生成 Schema：
+使用 `struct` 定义目标结构，自动生成 Schema：
 
 ```go
-type WeatherArgs struct {
-    City string `json:"city" desc:"查询城市" required:"true"`
-    Unit string `json:"unit" desc:"温度单位" enum:"celsius,fahrenheit"`
+type WeatherResult struct {
+    City        string `json:"city" desc:"城市" required:"true"`
+    Condition   string `json:"condition" desc:"天气情况" required:"true"`
+    Temperature string `json:"temperature" desc:"温度" required:"true"`
 }
 
-// 创建工具
-weatherTool := llm.NewStructTool("get_weather", "查询天气", func(ctx context.Context, args *WeatherArgs) (string, error) {
-    return fmt.Sprintf("%s 的天气是 晴, 25%s", args.City, args.Unit), nil
-})
+weatherTool := llm.NewStructTool[WeatherResult]("extract_weather", "提取天气结果")
 ```
 
 ### 3. 创建 Agent 并运行
 
 ```go
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
-    ModelConfig:    cfg,
-    InvokableTools: []llm.InvokableTool{weatherTool}, // 自动适配
-    SystemPrompt:   "你是一个有用的助手。",
+    Model: llm.AgentModelConfig{Config: cfg},
+    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{weatherTool}},
+    Prompt: llm.PromptConfig{
+        System: "从用户请求中提取天气结果，输出必须是合法 JSON。",
+    },
+    Execution: llm.ExecutionConfig{
+        Mode:              llm.Extraction,
+        DirectReturnTools: map[string]struct{}{"extract_weather": {}},
+    },
 })
 
-// 运行 (Generate)
 msg, _ := agent.Generate(ctx, []*schema.Message{
-    schema.UserMessage("海淀区天气如何？"),
+    schema.UserMessage("北京天气晴，25摄氏度。请提取结构化结果。"),
 })
 fmt.Println(msg.Content)
 ```
 
 ## 🛠 高级功能
 
+### 0. 执行模式与配置约束
+
+推荐优先使用 `Execution.Mode` 描述 Agent 行为：
+
+- `Conversation`：纯对话，不启用工具
+- `Assistant`：工具可用，由模型自行决定是否调用
+- `Extraction`：先完成工具任务，再决定是否总结
+
+配置约束：
+
+- `Mode` 和 `ToolChoice` 同时传入时，以 `Mode` 为准；`ToolChoice` 仅保留兼容路径
+- `Conversation` 不允许同时配置工具、`MaxRetries` 或 `DirectReturnTools`
+- `Assistant` 不允许配置 `MaxRetries`
+- `DirectReturnTools` 中的工具名必须真实存在，否则 `NewAgent` 会直接返回错误
+
 ### 1. 可观测性 (Observability)
 
-支持 Langfuse 链路追踪和标准日志记录。
+`llm` 现在有两条互补的观测链路：
+
+- `Callbacks` / `NewLogHandler`：保留现有组件级日志语义，适合看底层 `ChatModel` / `Tool` 组件有没有被调用
+- `StructuredLogs`：新增的 Agent 语义日志，适合排查“为什么没调工具 / 为什么重试 / 为什么 direct return”
+
+两者可以同时开启：
 
 ```go
 // 初始化 Langfuse
 lfHandler, flush, _ := llm.NewLangfuseHandler(&llm.LangfuseConfig{...})
 defer flush()
 
-// 初始化日志 (slog)
-logHandler := llm.NewLogHandler(slog.Default())
+// 初始化日志客户端（示例：go-kit/kit）
+logger := kit.New(kit.Options{Format: kit.FormatJSON})
+logHandler := llm.NewLogHandler(logger)
 
 // 注入 Agent
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    Callbacks: []callbacks.Handler{lfHandler, logHandler},
+    Observability: llm.ObservabilityConfig{
+        Callbacks: []callbacks.Handler{lfHandler, logHandler},
+        StructuredLogs: &llm.StructuredLogConfig{
+            Client:           logger,
+            LogToolArguments: true,
+            LogToolResults:   true,
+            MaxFieldLength:   256,
+        },
+    },
 })
 ```
 
-### 2. 强制工具调用与重试 (ToolChoice & Retry)
+说明：
+
+- `NewLogHandler` 的输出语义没有改，仍然只输出 `Component Start` / `Component End` / `Component Error`
+- `NewLogHandler` 和 `StructuredLogs` 现在都依赖 `LogClient` 接口，而不是 `*slog.Logger`
+- `LogClient` 只要求实现 `Info(ctx, msg, fields...)` 和 `Error(ctx, msg, fields...)`
+- `StructuredLogs` 会输出 `agent.start` / `model.decision` / `tool.start` / `tool.success` / `tool.error` / `agent.end`
+- 当前没有为 `RuntimeSpec` 做缓存；构造成本不在热路径，不值得为此引入额外状态
+- 当前不承诺公开 `ParentMessageID` 一类字段；上游 `schema.Message` 没有稳定的顶层 message id
+- 结构化日志和 callback 日志都会继承调用时的 `ctx`；如果你的 `LogClient` 会从 ctx 提取 `trace_id/request_id`，这些字段会自然出现在日志里
+- 每次 `Generate` / `Stream` 都会生成一个 `invocation_id`，用于区分并发链路
+
+常用字段：
+
+- `invocation_id`：单次 `Generate` / `Stream` 的链路标识
+- `agent.start`：`execution_mode`、`tool_count`、`direct_return_enabled`、`message_count`
+- `model.decision`：`configured_tool_choice`、`tool_call_count`、`tool_names`、`finish_reason`、`reasoning_tokens`
+- `tool.start`：`tool_name`、`tool_call_id`、`attempt`、`arguments`
+- `tool.success`：`tool_name`、`attempt`、`latency_ms`、`result`、`direct_return`
+- `tool.error`：`tool_name`、`attempt`、`latency_ms`、`retryable`、`terminal`、`error`
+- `agent.end`：`status`、`latency_ms`、`direct_return`
+
+`Assistant` 场景日志示例：
+
+```json
+{"level":"INFO","msg":"agent.start","event":"agent.start","invocation_id":"inv-001","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"message_count":1}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-001","execution_mode":"assistant","configured_tool_choice":"allowed","tool_call_count":1,"tool_names":["lookup_user"],"finish_reason":"tool_calls"}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-001","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"arguments":"{\"name\":\"Alice\"}"}
+{"level":"INFO","msg":"tool.success","event":"tool.success","invocation_id":"inv-001","tool_name":"lookup_user","tool_call_id":"tc1","attempt":1,"latency_ms":12,"result":"{\"name\":\"Alice\"}"}
+{"level":"INFO","msg":"agent.end","event":"agent.end","invocation_id":"inv-001","execution_mode":"assistant","tool_count":1,"direct_return_enabled":false,"latency_ms":38,"status":"success"}
+```
+
+`Extraction` 重试 + direct return 日志示例：
+
+```json
+{"level":"INFO","msg":"agent.start","event":"agent.start","invocation_id":"inv-002","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"message_count":1}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-002","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"arguments":"{\"query\":\"bad\"}"}
+{"level":"ERROR","msg":"tool.error","event":"tool.error","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc1","attempt":1,"latency_ms":4,"retryable":true,"terminal":false,"error":"missing required field"}
+{"level":"INFO","msg":"model.decision","event":"model.decision","invocation_id":"inv-002","execution_mode":"extraction","configured_tool_choice":"forced","tool_call_count":1,"tool_names":["extract_resume"]}
+{"level":"INFO","msg":"tool.start","event":"tool.start","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"arguments":"{\"query\":\"good\"}"}
+{"level":"INFO","msg":"tool.success","event":"tool.success","invocation_id":"inv-002","tool_name":"extract_resume","tool_call_id":"tc2","attempt":2,"latency_ms":6,"result":"{\"name\":\"Alice\"}","direct_return":true}
+{"level":"INFO","msg":"agent.end","event":"agent.end","invocation_id":"inv-002","execution_mode":"extraction","tool_count":1,"direct_return_enabled":true,"latency_ms":29,"status":"success","direct_return":true}
+```
+
+排障顺序建议：
+
+1. 先看 `agent.start`，确认 `execution_mode`、`tool_count`、`direct_return_enabled` 是否符合预期
+2. 再看 `model.decision`，判断模型是否真的产出了 `tool_calls`
+3. 如果有 `tool.start` 但没有 `tool.success`，继续看 `tool.error` 的 `retryable` / `terminal`
+4. 如果工具成功但结果不像最终回答，检查 `direct_return` 是否命中，或者是否仍回到了模型总结
+
+### 2. Extraction 模式与失败修复
 
 ```go
-forced := schema.ToolChoiceForced
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    ToolChoice: &forced, // 强制模型必须调用工具
-    MaxRetries: 3,       // 如果工具报错，自动重试 3 次
+    Execution: llm.ExecutionConfig{
+        Mode:       llm.Extraction, // 强制模型先完成工具任务
+        MaxRetries: 3,              // 工具报错后反馈给模型修正再试
+    },
 })
 ```
+
+`MaxRetries` 只在 `Extraction` 模式下有效；如果放到 `Conversation` 或 `Assistant`，`NewAgent` 会直接报错。
 
 ### 3. 工具结果直接返回 (Direct Return)
 
@@ -95,11 +181,16 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 ```go
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
     // ...
-    ToolReturnDirectly: map[string]struct{}{
-        "search_tool": {}, // 执行完 search_tool 后立即结束对话并返回结果
+    Execution: llm.ExecutionConfig{
+        Mode: llm.Assistant,
+        DirectReturnTools: map[string]struct{}{
+            "search_tool": {}, // 执行完 search_tool 后立即结束对话并返回结果
+        },
     },
 })
 ```
+
+`DirectReturnTools` 只能填写已经注册到 `Tools.Standard`、`Tools.Invokable` 或 MCP 中的工具名。
 
 ### 4. 运行时动态控制 (Runtime Options)
 

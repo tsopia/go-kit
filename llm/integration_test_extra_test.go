@@ -2,8 +2,7 @@ package llm
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"encoding/json"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -28,55 +27,135 @@ type OrderInfo struct {
 	Amount  float64 `json:"amount" desc:"订单金额"`
 }
 
-// TestReal_StructTool_FullScenario 验证真实模型下的结构化输出提取
-// 场景：解析用户复杂的自然语言请求，提取嵌套结构和枚举值
-func TestReal_StructTool_FullScenario(t *testing.T) {
-	ensureConfig(t)
-
-	// 1. 定义复杂结构体工具
-	// 需求：解析 "帮我创建一个订单，用户是张三，25岁，订单金额 100.5 元，标签是 VIP 和 新用户"
+func TestStructTool_FullScenario(t *testing.T) {
 	tool := NewStructTool[ComplexStruct]("extract_order", "从自然语言中提取订单和用户信息")
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{
+						ID: "tc1",
+						Function: schema.FunctionCall{
+							Name:      "extract_order",
+							Arguments: `{"user_info":{"name":"张三","age":25},"order":{"order_id":"A001","amount":100.5},"request_type":"CREATE","tags":["VIP","新用户"]}`,
+						},
+					},
+				},
+			},
+		},
+	}
 
-	// 2. 创建 Agent
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		ModelConfig:        IntegrationTestConfig,
-		InvokableTools:     []InvokableTool{tool},
-		ToolChoice:         &forced,
-		ToolReturnDirectly: map[string]struct{}{"extract_order": {}},
-		MaxRetries:         3,
-		SystemPrompt:       "你是一个订单助手。请根据用户输入提取结构化信息。",
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"extract_order": {}},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	fmt.Println("\n=== TestReal_StructTool_FullScenario ===")
-	input := "帮我创建一个订单，用户是张三，25岁，订单金额 100.5 元，打上 VIP 和 新用户 的标签"
-	fmt.Printf("Input: %s\n", input)
 
 	msg, err := agent.Generate(context.Background(), []*schema.Message{
-		{Role: schema.User, Content: input},
+		{Role: schema.User, Content: "帮我创建一个订单，用户是张三，25岁，订单金额 100.5 元，打上 VIP 和 新用户 的标签"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model.calls != 1 {
+		t.Fatalf("unexpected model call count: got %d want 1", model.calls)
+	}
+
+	var got ComplexStruct
+	if err := json.Unmarshal([]byte(msg.Content), &got); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if got.UserInfo.Name != "张三" {
+		t.Fatalf("unexpected user name: %q", got.UserInfo.Name)
+	}
+	if got.Order.Amount != 100.5 {
+		t.Fatalf("unexpected order amount: %v", got.Order.Amount)
+	}
+	if got.RequestType != "CREATE" {
+		t.Fatalf("unexpected request type: %q", got.RequestType)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "VIP" || got.Tags[1] != "新用户" {
+		t.Fatalf("unexpected tags: %#v", got.Tags)
+	}
+}
+
+func TestStructTool_ExtractionModeScenario(t *testing.T) {
+	tool := NewStructTool[ComplexStruct]("extract_order", "从自然语言中提取订单和用户信息")
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{
+						ID: "tc1",
+						Function: schema.FunctionCall{
+							Name:      "extract_order",
+							Arguments: `{request_type:"CREATE"}`,
+						},
+					},
+				},
+			},
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{
+						ID: "tc2",
+						Function: schema.FunctionCall{
+							Name:      "extract_order",
+							Arguments: `{"user_info":{"name":"李四","age":31},"order":{"order_id":"B002","amount":88.8},"request_type":"CREATE","tags":["回头客"]}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"extract_order": {}},
+		},
+		Prompt: PromptConfig{
+			System: "把用户请求提取为合法 JSON；如果工具报错，修正参数后重试。",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("Raw Response (JSON): %s\n", msg.Content)
-
-	// 3. 验证结果
-	// 注意：真实模型可能并不总是完美遵循 schema（尤其是非常复杂的嵌套），但在简单-中等复杂度下通常表现良好。
-	// 这里我们验证核心字段是否正确解析。
-
-	// 使用 StructTool 的 Invoke 来验证（虽然这里已经是结果了，但可以用 tool.Invoke 做一次反序列化检查 + 格式化）
-	// 或者直接 json.Unmarshal
-	if !strings.Contains(msg.Content, "张三") {
-		t.Error("Validation Failed: expected '张三'")
+	msg, err := agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "帮我创建订单，用户李四，31岁，订单 B002，金额 88.8 元，标签回头客"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(msg.Content, "CREATE") {
-		t.Error("Validation Failed: expected enum 'CREATE'")
+	if model.calls != 2 {
+		t.Fatalf("unexpected model call count: got %d want 2", model.calls)
 	}
-	if !strings.Contains(msg.Content, "100.5") {
-		t.Error("Validation Failed: expected amount 100.5")
+
+	var got ComplexStruct
+	if err := json.Unmarshal([]byte(msg.Content), &got); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if got.UserInfo.Name != "李四" {
+		t.Fatalf("unexpected user name: %q", got.UserInfo.Name)
+	}
+	if got.Order.OrderID != "B002" {
+		t.Fatalf("unexpected order id: %q", got.Order.OrderID)
+	}
+	if got.Order.Amount != 88.8 {
+		t.Fatalf("unexpected order amount: %v", got.Order.Amount)
+	}
+	if len(got.Tags) != 1 || got.Tags[0] != "回头客" {
+		t.Fatalf("unexpected tags: %#v", got.Tags)
 	}
 }

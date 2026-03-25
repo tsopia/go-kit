@@ -40,6 +40,8 @@ type MCPConfig struct {
 	ToolWhitelist []string
 }
 
+var mcpToolLoader = NewMCPTools
+
 // NewMCPTools 创建 MCP Client 并加载工具。
 // 返回工具列表和清理函数。清理函数用于关闭 Client。
 // 注意：Client 的底层运行依赖于内部创建的 Context，该 Context 会在调用 cleanup 时取消。

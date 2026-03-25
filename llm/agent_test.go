@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -14,12 +16,16 @@ import (
 // ── ToolAdapter 测试 ───────────────────────────────────────────────
 
 type simpleTool struct {
-	info *schema.ToolInfo
-	ret  string
+	info  *schema.ToolInfo
+	ret   string
+	calls int
 }
 
-func (s *simpleTool) Info() *schema.ToolInfo                             { return s.info }
-func (s *simpleTool) Invoke(_ context.Context, _ string) (string, error) { return s.ret, nil }
+func (s *simpleTool) Info() *schema.ToolInfo { return s.info }
+func (s *simpleTool) Invoke(_ context.Context, _ string) (string, error) {
+	s.calls++
+	return s.ret, nil
+}
 
 func TestToolAdapter_ImplementsInterface(t *testing.T) {
 	st := &simpleTool{
@@ -80,9 +86,12 @@ func TestNewAgent_MissingModel(t *testing.T) {
 type fakeToolCallingModel struct {
 	responses []*schema.Message
 	idx       int
+	calls     int
+	withTools int
 }
 
 func (f *fakeToolCallingModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	f.calls++
 	if f.idx < len(f.responses) {
 		resp := f.responses[f.idx]
 		f.idx++
@@ -92,6 +101,7 @@ func (f *fakeToolCallingModel) Generate(_ context.Context, _ []*schema.Message, 
 }
 
 func (f *fakeToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	f.calls++
 	msg := &schema.Message{Content: "stream done"}
 	if f.idx < len(f.responses) {
 		msg = f.responses[f.idx]
@@ -106,12 +116,13 @@ func (f *fakeToolCallingModel) Stream(_ context.Context, _ []*schema.Message, _ 
 }
 
 func (f *fakeToolCallingModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	f.withTools++
 	return f, nil
 }
 
 func TestNewAgent_WithExternalModel_NoTools(t *testing.T) {
 	fm := &fakeToolCallingModel{responses: []*schema.Message{{Content: "hello"}}}
-	agent, err := NewAgent(context.Background(), AgentConfig{Model: fm})
+	agent, err := NewAgent(context.Background(), AgentConfig{Model: AgentModelConfig{Instance: fm}})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
 	}
@@ -134,9 +145,9 @@ func TestNewAgent_WithInvokableTools(t *testing.T) {
 	}
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		SystemPrompt:   "你是一个助手",
+		Model:  AgentModelConfig{Instance: fm},
+		Tools:  ToolsConfig{Invokable: []InvokableTool{st}},
+		Prompt: PromptConfig{System: "你是一个助手"},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
@@ -151,7 +162,7 @@ func TestNewAgent_Generate_SimpleChat(t *testing.T) {
 		responses: []*schema.Message{{Role: schema.Assistant, Content: "I'm fine"}},
 	}
 
-	agent, err := NewAgent(context.Background(), AgentConfig{Model: fm})
+	agent, err := NewAgent(context.Background(), AgentConfig{Model: AgentModelConfig{Instance: fm}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +203,8 @@ func TestNewAgent_Generate_WithToolCall(t *testing.T) {
 	}
 
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{priceTool},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{priceTool}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -210,9 +221,296 @@ func TestNewAgent_Generate_WithToolCall(t *testing.T) {
 	}
 }
 
-// ── ToolChoice 强制调用测试 ────────────────────────────────────────
+func TestExecutionModeContracts(t *testing.T) {
+	tests := []struct {
+		name           string
+		cfg            AgentConfig
+		wantContent    string
+		wantModelCalls int
+		wantToolCalls  int
+	}{
+		{
+			name: "conversation_no_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+				}},
+			},
+			wantContent:    "plain answer",
+			wantModelCalls: 1,
+		},
+		{
+			name: "assistant_optional_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "lookup_user", Arguments: `{"name":"Alice"}`}},
+							},
+						},
+						{Role: schema.Assistant, Content: "lookup done"},
+					},
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice","age":18}`,
+					},
+				}},
+			},
+			wantContent:    "lookup done",
+			wantModelCalls: 2,
+			wantToolCalls:  1,
+		},
+		{
+			name: "forced_retry_direct_return",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"bad"}`}},
+							},
+						},
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc2", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"Go 后端工程师","company":"Acme","requirements":["Go","K8s"],"salary":"30-50K"}`}},
+							},
+						},
+					},
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&failingTool{
+						info: &schema.ToolInfo{
+							Name: "extract_order",
+							Desc: "extract order",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"title": {
+									Type: schema.String,
+									Desc: "title",
+								},
+							}),
+						},
+						failCount: 1,
+					},
+				}},
+				Execution: ExecutionConfig{
+					Mode:              Extraction,
+					MaxRetries:        2,
+					DirectReturnTools: map[string]struct{}{"extract_order": {}},
+				},
+			},
+			wantContent:    `{"result":"success"}`,
+			wantModelCalls: 2,
+			wantToolCalls:  2,
+		},
+	}
 
-func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewAgent(context.Background(), tt.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+
+			if model, ok := tt.cfg.Model.Instance.(*fakeToolCallingModel); ok {
+				if model.calls != tt.wantModelCalls {
+					t.Fatalf("unexpected model call count: got %d want %d", model.calls, tt.wantModelCalls)
+				}
+			}
+
+			if tt.wantToolCalls > 0 {
+				switch tool := tt.cfg.Tools.Invokable[0].(type) {
+				case *simpleTool:
+					if tool.calls != tt.wantToolCalls {
+						t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+					}
+				case *failingTool:
+					if tool.calls != tt.wantToolCalls {
+						t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestNewAgent_ConversationAndAssistantModes(t *testing.T) {
+	tests := []struct {
+		name              string
+		cfg               AgentConfig
+		wantContent       string
+		wantModelCalls    int
+		wantToolCalls     int
+		wantWithToolsCall int
+	}{
+		{
+			name: "conversation_without_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+				}},
+				Execution: ExecutionConfig{Mode: Conversation},
+			},
+			wantContent:       "plain answer",
+			wantModelCalls:    1,
+			wantWithToolsCall: 0,
+		},
+		{
+			name: "assistant_direct_return_uses_bound_tools",
+			cfg: AgentConfig{
+				Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+					responses: []*schema.Message{
+						{
+							Role: schema.Assistant,
+							ToolCalls: []schema.ToolCall{
+								{ID: "tc1", Function: schema.FunctionCall{Name: "lookup_user", Arguments: `{"name":"Alice"}`}},
+							},
+						},
+					},
+				}},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice","age":18}`,
+					},
+				}},
+				Execution: ExecutionConfig{
+					Mode:              Assistant,
+					DirectReturnTools: map[string]struct{}{"lookup_user": {}},
+				},
+			},
+			wantContent:       `{"name":"Alice","age":18}`,
+			wantModelCalls:    1,
+			wantToolCalls:     1,
+			wantWithToolsCall: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent, err := NewAgent(context.Background(), tt.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+
+			model := tt.cfg.Model.Instance.(*fakeToolCallingModel)
+			if model.calls != tt.wantModelCalls {
+				t.Fatalf("unexpected model call count: got %d want %d", model.calls, tt.wantModelCalls)
+			}
+			if model.withTools != tt.wantWithToolsCall {
+				t.Fatalf("unexpected WithTools count: got %d want %d", model.withTools, tt.wantWithToolsCall)
+			}
+
+			if tt.wantToolCalls > 0 {
+				tool := tt.cfg.Tools.Invokable[0].(*simpleTool)
+				if tool.calls != tt.wantToolCalls {
+					t.Fatalf("unexpected tool call count: got %d want %d", tool.calls, tt.wantToolCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestNewAgent_ExtractionMode(t *testing.T) {
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: "tc1", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"bad"}`}},
+				},
+			},
+			{
+				Role: schema.Assistant,
+				ToolCalls: []schema.ToolCall{
+					{ID: "tc2", Function: schema.FunctionCall{Name: "extract_order", Arguments: `{"title":"Go 后端工程师","company":"Acme","requirements":["Go","K8s"],"salary":"30-50K"}`}},
+				},
+			},
+		},
+	}
+	tool := &failingTool{
+		info: &schema.ToolInfo{
+			Name: "extract_order",
+			Desc: "extract order",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"title": {Type: schema.String, Desc: "title"},
+			}),
+		},
+		failCount: 1,
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{tool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"extract_order": {}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "提取数据"},
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if resp.Content != `{"result":"success"}` {
+		t.Fatalf("unexpected response: got %q want %q", resp.Content, `{"result":"success"}`)
+	}
+	if model.calls != 2 {
+		t.Fatalf("unexpected model call count: got %d want 2", model.calls)
+	}
+	if model.withTools != 1 {
+		t.Fatalf("unexpected WithTools count: got %d want 1", model.withTools)
+	}
+	if tool.calls != 2 {
+		t.Fatalf("unexpected tool call count: got %d want 2", tool.calls)
+	}
+}
+
+// ── legacy-only 兼容路径测试 ───────────────────────────────────────
+
+func TestNewAgent_LegacyToolChoiceBuild(t *testing.T) {
 	fm := &fakeToolCallingModel{
 		responses: []*schema.Message{{Content: "hello"}},
 	}
@@ -229,75 +527,287 @@ func TestNewAgent_ToolChoiceForced_Build(t *testing.T) {
 
 	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		ToolChoice:     &forced,
-		MaxRetries:     2,
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{st}},
+		Execution: ExecutionConfig{
+			ToolChoice: &forced,
+			MaxRetries: 2,
+		},
 	})
 	if err != nil {
-		t.Fatalf("NewAgent with ToolChoiceForced failed: %v", err)
+		t.Fatalf("NewAgent with legacy ToolChoice failed: %v", err)
 	}
 	if agent == nil {
 		t.Fatal("agent should not be nil")
 	}
 }
 
-// ── toolCallTracker 单元测试 ──────────────────────────────────────
+func TestNewAgent_LegacyToolChoiceCompatibilityModes(t *testing.T) {
+	tests := []struct {
+		name              string
+		toolChoice        schema.ToolChoice
+		wantContent       string
+		wantWithToolsCall int
+	}{
+		{
+			name:              "forbidden_disables_tools",
+			toolChoice:        schema.ToolChoiceForbidden,
+			wantContent:       "plain answer",
+			wantWithToolsCall: 0,
+		},
+		{
+			name:              "allowed_keeps_tools_enabled",
+			toolChoice:        schema.ToolChoiceAllowed,
+			wantContent:       "plain answer",
+			wantWithToolsCall: 1,
+		},
+	}
 
-func TestToolCallTracker_ShouldForce(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			choice := tt.toolChoice
+			model := &fakeToolCallingModel{
+				responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+			}
+			agent, err := NewAgent(context.Background(), AgentConfig{
+				Model: AgentModelConfig{Instance: model},
+				Tools: ToolsConfig{Invokable: []InvokableTool{
+					&simpleTool{
+						info: &schema.ToolInfo{
+							Name: "lookup_user",
+							Desc: "lookup user",
+							ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+								"name": {Type: schema.String, Desc: "name"},
+							}),
+						},
+						ret: `{"name":"Alice"}`,
+					},
+				}},
+				Execution: ExecutionConfig{ToolChoice: &choice},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			resp, err := agent.Generate(context.Background(), []*schema.Message{
+				{Role: schema.User, Content: "run test"},
+			})
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+			if resp.Content != tt.wantContent {
+				t.Fatalf("unexpected response: got %q want %q", resp.Content, tt.wantContent)
+			}
+			if model.withTools != tt.wantWithToolsCall {
+				t.Fatalf("unexpected WithTools count: got %d want %d", model.withTools, tt.wantWithToolsCall)
+			}
+		})
+	}
+}
+
+func TestNewAgent_RejectsUnknownDirectReturnTool(t *testing.T) {
+	model := &fakeToolCallingModel{
+		responses: []*schema.Message{{Role: schema.Assistant, Content: "plain answer"}},
+	}
+
+	_, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: model},
+		Tools: ToolsConfig{Invokable: []InvokableTool{
+			&simpleTool{
+				info: &schema.ToolInfo{
+					Name: "lookup_user",
+					Desc: "lookup user",
+					ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+						"name": {Type: schema.String, Desc: "name"},
+					}),
+				},
+				ret: `{"name":"Alice"}`,
+			},
+		}},
+		Execution: ExecutionConfig{
+			Mode:              Assistant,
+			DirectReturnTools: map[string]struct{}{"missing_tool": {}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "direct return tool not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ── Extraction 内部状态单元测试 ───────────────────────────────────
+
+func TestExtractionState_ShouldForceToolCall(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
 	// 初始状态：应该强制
-	if !tracker.shouldForce() {
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force initially")
 	}
 
 	// 失败1次：仍然强制
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 1 failure")
 	}
 
 	// 失败2次：仍然强制
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 2 failures")
 	}
 
 	// 失败3次：超限，不再强制
-	tracker.recordFailure()
-	if tracker.shouldForce() {
+	state.recordFailure()
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after 3 failures (maxRetries reached)")
 	}
-	if !tracker.retriesExhausted() {
+	if !state.retriesExhausted() {
 		t.Fatal("retries should be exhausted")
 	}
 }
 
-func TestToolCallTracker_Success(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+func TestExtractionState_Success(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
 	// 成功后不再强制
-	tracker.recordSuccess("tool", "result")
-	if tracker.shouldForce() {
+	state.recordSuccess("tool", "result")
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after success")
 	}
-	if tracker.retriesExhausted() {
+	if state.retriesExhausted() {
 		t.Fatal("retries should NOT be exhausted after success")
 	}
 }
 
-func TestToolCallTracker_FailThenSuccess(t *testing.T) {
-	tracker := &toolCallTracker{maxRetries: 3}
+func TestExtractionState_FailThenSuccess(t *testing.T) {
+	state := &extractionState{maxRetries: 3}
 
-	tracker.recordFailure()
-	if !tracker.shouldForce() {
+	state.recordFailure()
+	if !state.shouldForceToolCall() {
 		t.Fatal("should force after 1 failure")
 	}
 
-	tracker.recordSuccess("tool", "result")
-	if tracker.shouldForce() {
+	state.recordSuccess("tool", "result")
+	if state.shouldForceToolCall() {
 		t.Fatal("should NOT force after success")
+	}
+}
+
+func TestExtractionRuntime_DirectReturnMessage(t *testing.T) {
+	runtime := newExtractionRuntime(3)
+	runtime.state.recordSuccess("extract", `{"result":"ok"}`)
+
+	msg, ok := runtime.directReturnMessage(map[string]struct{}{"extract": {}})
+	if !ok {
+		t.Fatal("expected direct return message")
+	}
+	if msg.Role != schema.Assistant {
+		t.Fatalf("unexpected role: %v", msg.Role)
+	}
+	if msg.Content != `{"result":"ok"}` {
+		t.Fatalf("unexpected content: %q", msg.Content)
+	}
+
+	if _, ok := runtime.directReturnMessage(map[string]struct{}{"other": {}}); ok {
+		t.Fatal("did not expect direct return for other tool")
+	}
+}
+
+func TestExtractionRetryMiddleware(t *testing.T) {
+	tests := []struct {
+		name              string
+		maxRetries        int
+		next              compose.InvokableToolEndpoint
+		wantErr           string
+		wantResult        string
+		wantFailureCount  int
+		wantSuccessTool   string
+		wantSuccessResult string
+	}{
+		{
+			name:       "tool_failure_before_limit_returns_repair_message",
+			maxRetries: 2,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return nil, errors.New("tool execution failed")
+			},
+			wantResult:       "工具执行失败: tool execution failed\n请分析错误原因，调整参数后重新调用工具。",
+			wantFailureCount: 1,
+		},
+		{
+			name:       "tool_failure_at_limit_returns_error",
+			maxRetries: 1,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return nil, errors.New("tool execution failed")
+			},
+			wantErr:          "tool extract: max retries (1) exceeded: tool execution failed",
+			wantFailureCount: 1,
+		},
+		{
+			name:       "tool_success_records_last_result",
+			maxRetries: 2,
+			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+				return &compose.ToolOutput{Result: `{"result":"success"}`}, nil
+			},
+			wantResult:        `{"result":"success"}`,
+			wantSuccessTool:   "extract",
+			wantSuccessResult: `{"result":"success"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &extractionState{maxRetries: tt.maxRetries}
+			endpoint := newExtractionRetryMiddleware(state).Invokable(tt.next)
+
+			output, err := endpoint(context.Background(), &compose.ToolInput{
+				Name:      "extract",
+				Arguments: `{"query":"test"}`,
+				CallID:    "call-1",
+			})
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("unexpected error: got %q want %q", err.Error(), tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantResult == "" {
+				if output != nil {
+					t.Fatalf("expected nil output, got %#v", output)
+				}
+			} else {
+				if output == nil {
+					t.Fatal("expected output")
+				}
+				if output.Result != tt.wantResult {
+					t.Fatalf("unexpected result: got %q want %q", output.Result, tt.wantResult)
+				}
+			}
+
+			if state.failureCount != tt.wantFailureCount {
+				t.Fatalf("unexpected failure count: got %d want %d", state.failureCount, tt.wantFailureCount)
+			}
+			if tt.wantSuccessTool != "" {
+				name, result, ok := state.lastSuccessfulTool()
+				if !ok {
+					t.Fatal("expected successful tool result")
+				}
+				if name != tt.wantSuccessTool {
+					t.Fatalf("unexpected tool name: got %q want %q", name, tt.wantSuccessTool)
+				}
+				if result != tt.wantSuccessResult {
+					t.Fatalf("unexpected tool result: got %q want %q", result, tt.wantSuccessResult)
+				}
+			}
+		})
 	}
 }
 
@@ -318,7 +828,7 @@ func (f *failingTool) Invoke(_ context.Context, _ string) (string, error) {
 	return `{"result":"success"}`, nil
 }
 
-func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
+func TestNewAgent_ExtractionMode_WithRetry(t *testing.T) {
 	// 模型第一次被迫调工具 → 工具失败 → 错误回模型 → 模型再调工具 → 工具成功 → 模型总结
 	toolInfo := &schema.ToolInfo{
 		Name: "extract",
@@ -344,13 +854,13 @@ func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
 			{Role: schema.Assistant, Content: "提取结果: success"},
 		},
 	}
-
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{ft},
-		ToolChoice:     &forced,
-		MaxRetries:     3,
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{ft}},
+		Execution: ExecutionConfig{
+			Mode:       Extraction,
+			MaxRetries: 3,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -368,6 +878,56 @@ func TestNewAgent_ToolChoiceForced_WithRetry(t *testing.T) {
 	}
 	if msg.Content != "提取结果: success" {
 		t.Fatalf("unexpected response: %q", msg.Content)
+	}
+}
+
+func TestNewAgent_ExtractionMode_RetryExhausted(t *testing.T) {
+	toolInfo := &schema.ToolInfo{
+		Name: "extract",
+		Desc: "extract data",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"query": {Type: schema.String, Desc: "query"},
+		}),
+	}
+
+	ft := &failingTool{info: toolInfo, failCount: 2}
+	fm := &fakeToolCallingModel{
+		responses: []*schema.Message{
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+				{ID: "tc1", Function: schema.FunctionCall{Name: "extract", Arguments: `{"query":"test"}`}},
+			}},
+			{Role: schema.Assistant, ToolCalls: []schema.ToolCall{
+				{ID: "tc2", Function: schema.FunctionCall{Name: "extract", Arguments: `{"query":"retry"}`}},
+			}},
+		},
+	}
+
+	agent, err := NewAgent(context.Background(), AgentConfig{
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{ft}},
+		Execution: ExecutionConfig{
+			Mode:       Extraction,
+			MaxRetries: 2,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = agent.Generate(context.Background(), []*schema.Message{
+		{Role: schema.User, Content: "提取数据"},
+	})
+	if err == nil {
+		t.Fatal("expected retry exhausted error")
+	}
+	if !strings.Contains(err.Error(), "max retries (2) exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ft.calls != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", ft.calls)
+	}
+	if fm.calls != 2 {
+		t.Fatalf("expected 2 model calls, got %d", fm.calls)
 	}
 }
 
@@ -390,13 +950,12 @@ func TestNewAgent_ToolReturnDirectly(t *testing.T) {
 		},
 	}
 
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{jdTool},
-		ToolChoice:     &forced,
-		ToolReturnDirectly: map[string]struct{}{
-			"generate_jd": {},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{jdTool}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},
 	})
 	if err != nil {
@@ -469,14 +1028,14 @@ func TestStructTool_Invoke_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestStructTool_FullScenario 完整模拟用户场景：
+// TestStructTool_RetryAndDirectReturn 完整模拟用户场景：
 //
 //	用户：「生成 Go 后端工程师 JD」
-//	→ 模型被迫调 generate_jd 工具（ToolChoiceForced）
+//	→ 模型进入 Extraction 模式并先调 generate_jd 工具
 //	→ 第1次：模型生成了非法 JSON → 工具 json.Unmarshal 失败 → 自动重试
 //	→ 第2次：模型生成了合法 JSON → 工具成功 → 直接返回（ToolReturnDirectly）
 //	→ 用户拿到 JobPosting 结构体
-func TestStructTool_FullScenario(t *testing.T) {
+func TestStructTool_RetryAndDirectReturn(t *testing.T) {
 	st := NewStructTool[JobPosting]("generate_jd", "根据需求生成职位描述")
 
 	fm := &fakeToolCallingModel{
@@ -498,16 +1057,15 @@ func TestStructTool_FullScenario(t *testing.T) {
 		},
 	}
 
-	forced := schema.ToolChoiceForced
 	agent, err := NewAgent(context.Background(), AgentConfig{
-		Model:          fm,
-		InvokableTools: []InvokableTool{st},
-		ToolChoice:     &forced,
-		MaxRetries:     3,
-		ToolReturnDirectly: map[string]struct{}{
-			"generate_jd": {},
+		Model: AgentModelConfig{Instance: fm},
+		Tools: ToolsConfig{Invokable: []InvokableTool{st}},
+		Execution: ExecutionConfig{
+			Mode:              Extraction,
+			MaxRetries:        3,
+			DirectReturnTools: map[string]struct{}{"generate_jd": {}},
 		},
-		SystemPrompt: "根据用户需求生成职位描述，输出必须是合法的 JSON。",
+		Prompt: PromptConfig{System: "根据用户需求生成职位描述，输出必须是合法的 JSON。"},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -1,59 +1,138 @@
 package llm
 
 import (
-	"bytes"
 	"context"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/tsopia/go-kit/utils"
 )
 
 func TestLogHandler_Integration(t *testing.T) {
-	// 1. 设置 Capturing Logger
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	client := &recordingLogClient{}
+	handler := NewLogHandler(client)
 
-	// 2. 创建 LogHandler
-	handler := NewLogHandler(logger)
-
-	// 3. 创建 Fake Agent
-	ctx := context.Background()
+	ctx := utils.WithTraceAndRequestID(context.Background(), "trace-123", "req-456")
 	agent, err := NewAgent(ctx, AgentConfig{
-		Model: &mockCallbackModel{}, // 使用本地 mock model
-		Callbacks: []callbacks.Handler{
-			handler,
-		},
+		Model:         AgentModelConfig{Instance: &mockCallbackModel{}},
+		Observability: ObservabilityConfig{Callbacks: []callbacks.Handler{handler}},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent failed: %v", err)
 	}
 
-	// 4. 执行 Generate
-	input := []*schema.Message{schema.UserMessage("hello")}
-	_, err = agent.Generate(ctx, input)
+	resp, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("hello")})
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
+	if resp.Content != "mock response" {
+		t.Fatalf("unexpected response: %q", resp.Content)
+	}
 
-	// 5. 验证日志输出
-	logs := buf.String()
-	t.Logf("Captured Logs:\n%s", logs)
+	entries := client.snapshot()
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 log entries, got %d", len(entries))
+	}
 
-	//检查是否包含关键日志
-	if !strings.Contains(logs, "Component Start") {
-		t.Error("Expected log to contain 'Component Start'")
+	if entries[0].msg != "Component Start" {
+		t.Fatalf("unexpected first message: %q", entries[0].msg)
 	}
-	if !strings.Contains(logs, "Component End") {
-		t.Error("Expected log to contain 'Component End'")
+	last := entries[len(entries)-1]
+	if last.msg != "Component End" {
+		t.Fatalf("unexpected last message: %q", last.msg)
 	}
-	// 检查是否包含组件信息
-	if !strings.Contains(logs, "\"component\":\"ChatModel\"") { // Eino JSON log format
-		t.Log("JSON Handler 字段格式可能不同，跳过 component 字段断言")
+
+	for _, entry := range entries {
+		if entry.traceID != "trace-123" {
+			t.Fatalf("expected trace id to propagate, got %q", entry.traceID)
+		}
+		if entry.requestID != "req-456" {
+			t.Fatalf("expected request id to propagate, got %q", entry.requestID)
+		}
+		if entry.invocationID == "" {
+			t.Fatal("expected invocation id in callback logs")
+		}
+		if _, ok := entry.fields["event"]; ok {
+			t.Fatal("did not expect structured event fields in NewLogHandler output")
+		}
 	}
+}
+
+func TestStreamingAndObservabilityConfig(t *testing.T) {
+	t.Run("observability_callbacks", func(t *testing.T) {
+		var starts, ends int
+		handler := callbacks.NewHandlerBuilder().
+			OnStartFn(func(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
+				starts++
+				return ctx
+			}).
+			OnEndFn(func(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
+				ends++
+				return ctx
+			}).
+			Build()
+
+		agent, err := NewAgent(context.Background(), AgentConfig{
+			Model:         AgentModelConfig{Instance: &mockCallbackModel{}},
+			Observability: ObservabilityConfig{Callbacks: []callbacks.Handler{handler}},
+		})
+		if err != nil {
+			t.Fatalf("NewAgent failed: %v", err)
+		}
+
+		resp, err := agent.Generate(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+		if err != nil {
+			t.Fatalf("Generate failed: %v", err)
+		}
+		if resp.Content != "mock response" {
+			t.Fatalf("unexpected response: %q", resp.Content)
+		}
+		if starts == 0 || ends == 0 {
+			t.Fatalf("expected callbacks to run, got starts=%d ends=%d", starts, ends)
+		}
+	})
+
+	t.Run("streaming_tool_call_checker", func(t *testing.T) {
+		var checkerCalled bool
+		agent, err := NewAgent(context.Background(), AgentConfig{
+			Model: AgentModelConfig{Instance: &fakeToolCallingModel{
+				responses: []*schema.Message{{Role: schema.Assistant, Content: "stream reply"}},
+			}},
+			Streaming: StreamingConfig{
+				ToolCallChecker: func(_ context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error) {
+					checkerCalled = true
+					defer sr.Close()
+					msg, err := sr.Recv()
+					if err != nil {
+						return false, err
+					}
+					return len(msg.ToolCalls) > 0, nil
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("NewAgent failed: %v", err)
+		}
+
+		stream, err := agent.Stream(context.Background(), []*schema.Message{schema.UserMessage("hello")})
+		if err != nil {
+			t.Fatalf("Stream failed: %v", err)
+		}
+		defer stream.Close()
+
+		msg, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("Recv failed: %v", err)
+		}
+		if msg.Content != "stream reply" {
+			t.Fatalf("unexpected stream content: %q", msg.Content)
+		}
+		if !checkerCalled {
+			t.Fatal("expected streaming tool call checker to run")
+		}
+	})
 }
 
 // 模拟的 Mock Model，复用 optimization_test.go 中的定义

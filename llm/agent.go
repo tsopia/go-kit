@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
-	"github.com/cloudwego/eino/callbacks"
-	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
@@ -18,143 +16,92 @@ import (
 // 常用于注入 system prompt 或上下文压缩。
 type MessageModifier = react.MessageModifier
 
-// AgentConfig 是创建 Agent 的配置。
-type AgentConfig struct {
-	// ModelConfig 用于通过 NewModel 创建模型实例。
-	// 与 Model 二选一，若同时提供则 Model 优先。
-	ModelConfig ModelConfig
-
-	// Model 直接传入已创建的模型实例。
-	Model model.ToolCallingChatModel
-
-	// Tools 使用 Eino 标准工具接口。
-	Tools []tool.BaseTool
-
-	// InvokableTools 使用简化工具接口（内部自动适配为 Eino 标准接口）。
-	// 与 Tools 可同时使用，两者合并。
-	InvokableTools []InvokableTool
-
-	// SystemPrompt 通过 MessageModifier 在每轮调用前注入。
-	// 与 MessageModifier 二选一，若同时提供则 MessageModifier 优先。
-	SystemPrompt string
-
-	// MessageModifier 在每轮调用模型前修改消息列表。
-	MessageModifier MessageModifier
-
-	// MessageRewriter 持久化修改消息历史（跨轮生效）。
-	// 常用于上下文压缩。
-	MessageRewriter MessageModifier
-
-	// ToolChoice 控制模型的工具调用行为。
-	//   - nil（默认）：模型自行决定是否调用工具
-	//   - schema.ToolChoiceForced：强制模型调用工具
-	//     首次调用 + 失败重试期间为 Forced，工具成功后自动切换为 Allowed。
-	//   - schema.ToolChoiceForbidden：禁止调用工具
-	//   - schema.ToolChoiceAllowed：允许但不强制
-	ToolChoice *schema.ToolChoice
-
-	// MaxRetries 工具执行失败时的最大重试次数。
-	// 仅在 ToolChoice 为 Forced 时生效。
-	// 默认 3。
-	MaxRetries int
-
-	// MaxStep Agent 最大运行步长。
-	// 每次节点转移为一步；一次循环 = ChatModel + Tools = 2 步。
-	// 默认 12（最多 5 次工具调用）。
-	MaxStep int
-
-	// ToolReturnDirectly 指定某些工具执行后直接返回结果，不再回模型。
-	ToolReturnDirectly map[string]struct{}
-
-	// StreamToolCallChecker 流式场景下判断是否包含 tool call。
-	// StreamToolCallChecker 流式场景下判断是否包含 tool call。
-	// 默认检查第一个 chunk。对于先输出文本再输出 tool call 的模型（如 Claude）需自定义。
-	StreamToolCallChecker func(ctx context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error)
-
-	// Callbacks 是可选的回调处理器列表，用于监控和日志。
-	Callbacks []callbacks.Handler
-}
-
 // Agent 封装 Eino ReactAgent，提供简化的高层 API。
 type Agent struct {
-	inner   *react.Agent
-	cfg     AgentConfig
-	tracker *toolCallTracker // 用于 ToolChoiceForced + ToolReturnDirectly 场景
+	inner      *react.Agent
+	cfg        AgentConfig
+	extraction *extractionRuntime
+	cleanup    func() error
+	logs       *structuredLogger
+	mode       ExecutionMode
+	toolCount  int
 }
 
 // NewAgent 创建一个 Agent。
+// Mode 是推荐配置入口；如果 Mode 和 ToolChoice 同时设置，以 Mode 为准。
+//
+// 配置约束：
+//   - Conversation 不允许同时配置工具、MaxRetries 或 DirectReturnTools
+//   - Assistant 不允许配置 MaxRetries
+//   - DirectReturnTools 只能引用已注册的工具名
 //
 // 使用示例：
 //
 //	// 场景 1: 纯对话
-//	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{ModelConfig: cfg})
+//	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{Model: llm.AgentModelConfig{Config: cfg}})
 //	msg, _ := agent.Generate(ctx, messages)
 //
 //	// 场景 2: 强制调工具 → 结果回模型 → 模型决策
-//	forced := schema.ToolChoiceForced
 //	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
-//	    ModelConfig:    cfg,
-//	    InvokableTools: []llm.InvokableTool{myTool},
-//	    ToolChoice:     &forced,
+//	    Model: llm.AgentModelConfig{Config: cfg},
+//	    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
+//	    Execution: llm.ExecutionConfig{Mode: llm.Extraction},
 //	})
 //
 //	// 场景 3: 强制调工具 → 直接拿结果
 //	agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
-//	    ModelConfig:        cfg,
-//	    InvokableTools:     []llm.InvokableTool{myTool},
-//	    ToolChoice:         &forced,
-//	    ToolReturnDirectly: map[string]struct{}{"my_tool": {}},
+//	    Model: llm.AgentModelConfig{Config: cfg},
+//	    Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
+//	    Execution: llm.ExecutionConfig{
+//	        Mode:              llm.Extraction,
+//	        DirectReturnTools: map[string]struct{}{"my_tool": {}},
+//	    },
 //	})
 func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
+	spec, err := compileRuntimeSpec(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("compile runtime spec: %w", err)
+	}
+
+	built, err := buildPromptAndTools(ctx, spec)
+	if err != nil {
+		return nil, fmt.Errorf("build prompt and tools: %w", err)
+	}
+
 	// 1. 创建或使用已有模型
-	chatModel := cfg.Model
+	chatModel := spec.Model.Instance
 	if chatModel == nil {
-		var err error
-		chatModel, err = NewModel(ctx, cfg.ModelConfig)
+		chatModel, err = NewModel(ctx, spec.Model.Config)
 		if err != nil {
+			_ = built.Cleanup()
 			return nil, fmt.Errorf("create model: %w", err)
 		}
 	}
 
+	structuredLogs := newStructuredLogger(spec.Observability.StructuredLogs)
+	chatModel = newObservedToolCallingModel(chatModel, structuredLogs, spec.Execution.Mode, spec.Execution.ToolChoice)
+
 	// 2. 合并工具列表：Eino 标准工具 + 适配后的简化工具
-	allTools := make([]tool.BaseTool, 0, len(cfg.Tools)+len(cfg.InvokableTools))
-	allTools = append(allTools, cfg.Tools...)
-	allTools = append(allTools, adaptTools(cfg.InvokableTools)...)
-
-	// 3. 构建 ToolsNodeConfig
 	toolsConfig := compose.ToolsNodeConfig{
-		Tools: allTools,
+		Tools: built.Tools,
 	}
+	toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newToolObserverMiddleware(structuredLogs, spec.Execution.DirectReturnTools))
 
-	// 4. 处理 ToolChoice + 重试机制
-	var tracker *toolCallTracker
-	// ReactAgent 的 ToolReturnDirectly 配置
-	// 如果开启了 ToolChoiceForced，我们需要接管 ToolReturnDirectly 逻辑，所以传给 ReactAgent 的要清空
-	reactToolReturnDirectly := cfg.ToolReturnDirectly
+	// 4. 处理 Extraction 模式下的强制工具调用和修复机制
+	var extraction *extractionRuntime
+	// ReactAgent 的 ToolReturnDirectly 配置。
+	// Extraction 运行时需要接管 direct return，避免和修复链路冲突。
+	reactToolReturnDirectly := spec.Execution.DirectReturnTools
 
-	if cfg.ToolChoice != nil && *cfg.ToolChoice == schema.ToolChoiceForced {
-		maxRetries := cfg.MaxRetries
-		if maxRetries <= 0 {
-			maxRetries = 3
-		}
-		tracker = &toolCallTracker{maxRetries: maxRetries}
-		chatModel = &forcedToolChoiceModel{inner: chatModel, tracker: tracker}
-		toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newRetryMiddleware(tracker))
+	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
+		maxRetries := spec.Execution.RepairMaxAttempts
+		extraction = newExtractionRuntime(maxRetries)
+		chatModel = extraction.wrapModel(chatModel)
+		toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, extraction.middleware())
 
-		// 如果有 tracker，我们在 Agent 层处理 direct return
-		if len(cfg.ToolReturnDirectly) > 0 {
+		// 如果有 extraction runtime，我们在 Agent 层处理 direct return
+		if len(spec.Execution.DirectReturnTools) > 0 {
 			reactToolReturnDirectly = nil
-		}
-	}
-
-	// 5. 确定 MessageModifier
-	modifier := cfg.MessageModifier
-	if modifier == nil && cfg.SystemPrompt != "" {
-		modifier = func(_ context.Context, input []*schema.Message) []*schema.Message {
-			res := make([]*schema.Message, 0, len(input)+1)
-			res = append(res, schema.SystemMessage(cfg.SystemPrompt))
-			res = append(res, input...)
-			return res
 		}
 	}
 
@@ -162,77 +109,117 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 	reactCfg := &react.AgentConfig{
 		ToolCallingModel:      chatModel,
 		ToolsConfig:           toolsConfig,
-		MessageModifier:       modifier,
-		MessageRewriter:       cfg.MessageRewriter,
-		MaxStep:               cfg.MaxStep,
+		MessageModifier:       built.MessageModifier,
+		MessageRewriter:       built.MessageRewriter,
+		MaxStep:               spec.Execution.MaxStep,
 		ToolReturnDirectly:    reactToolReturnDirectly,
-		StreamToolCallChecker: cfg.StreamToolCallChecker,
+		StreamToolCallChecker: spec.Streaming.ToolCallChecker,
 	}
 
 	// 7. 创建 ReactAgent
 	inner, err := react.NewAgent(ctx, reactCfg)
 	if err != nil {
+		_ = built.Cleanup()
 		return nil, fmt.Errorf("create react agent: %w", err)
 	}
-	return &Agent{inner: inner, cfg: cfg, tracker: tracker}, nil
+	return &Agent{
+		inner:      inner,
+		cfg:        cfg,
+		extraction: extraction,
+		cleanup:    built.Cleanup,
+		logs:       structuredLogs,
+		mode:       spec.Execution.Mode,
+		toolCount:  len(built.Tools),
+	}, nil
 }
 
 // Generate 非流式调用 Agent。
 // 模型会自动处理工具调用循环，直到返回最终答案。
-func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.Message, error) {
+func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (msg *schema.Message, err error) {
+	ctx = withInvocationID(ctx)
+	if a.cfg.Observability.StructuredLogs != nil {
+		ctx = withToolLogSession(ctx)
+	}
+	directReturnEnabled := len(a.cfg.Execution.DirectReturnTools) > 0
+	didDirectReturn := false
+	if a.logs != nil && a.logs.enabled() {
+		started := time.Now()
+		a.logs.logInfo(ctx, "agent.start",
+			"execution_mode", string(a.mode),
+			"tool_count", a.toolCount,
+			"direct_return_enabled", directReturnEnabled,
+			"message_count", len(messages),
+		)
+		defer func() {
+			attrs := []any{
+				"execution_mode", string(a.mode),
+				"tool_count", a.toolCount,
+				"direct_return_enabled", directReturnEnabled,
+				"latency_ms", time.Since(started).Milliseconds(),
+			}
+			if err != nil {
+				attrs = append(attrs, "status", "error", "error", err.Error())
+			} else {
+				attrs = append(attrs, "status", "success")
+			}
+			if didDirectReturn {
+				attrs = append(attrs, "direct_return", true)
+			}
+			a.logs.logInfo(ctx, "agent.end", attrs...)
+		}()
+	}
+
 	// 如果配置了回调，添加到 opts 中
-	if len(a.cfg.Callbacks) > 0 {
-		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Callbacks...)))
+	if len(a.cfg.Observability.Callbacks) > 0 {
+		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Observability.Callbacks...)))
 	}
 
 	// 优化：注入 Context Cancel 控制器，以便在工具执行成功后立即中断模型生成（节省 Token）
 	var cancel context.CancelFunc
-	if a.tracker != nil && len(a.cfg.ToolReturnDirectly) > 0 {
+	if a.extraction != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
 		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()
 
 		ctl := &agentControl{
 			cancel: cancel,
 			shouldReturnDirectly: func(name string) bool {
-				_, ok := a.cfg.ToolReturnDirectly[name]
+				_, ok := a.cfg.Execution.DirectReturnTools[name]
 				return ok
 			},
 		}
 		ctx = context.WithValue(ctx, ctxKeyAgentControl{}, ctl)
 	}
 
-	msg, err := a.inner.Generate(ctx, messages, opts...)
+	msg, err = a.inner.Generate(ctx, messages, opts...)
 	if err != nil {
-		// 如果是因为我们主动 Cancel 导致的错误，且 Tracker 有成功结果，则视为成功
-		if errors.Is(err, context.Canceled) && a.tracker != nil {
-			if name, result, ok := a.tracker.getLastSuccess(); ok {
-				if _, direct := a.cfg.ToolReturnDirectly[name]; direct {
-					return &schema.Message{
-						Role:    schema.Assistant,
-						Content: result,
-					}, nil
-				}
+		// 如果是因为我们主动 Cancel 导致的错误，且 Extraction 有成功结果，则视为成功
+		if errors.Is(err, context.Canceled) && a.extraction != nil {
+			if msg, ok := a.directReturnMessage(); ok {
+				didDirectReturn = true
+				return msg, nil
 			}
 		}
 		return nil, err
 	}
 
-	// 处理 ToolChoiceForced 下的 ToolReturnDirectly (如果在中间件没能及时 Cancel，这里作为兜底)
+	// 处理 Extraction 模式下的 ToolReturnDirectly (如果在中间件没能及时 Cancel，这里作为兜底)
 	// 因为我们禁用了 ReactAgent 的原生支持（为了支持重试），所以需要在这里手动替换结果
-	if a.tracker != nil && len(a.cfg.ToolReturnDirectly) > 0 {
-		if name, result, ok := a.tracker.getLastSuccess(); ok {
-			if _, direct := a.cfg.ToolReturnDirectly[name]; direct {
-				// 将工具结果作为最终回复返回
-				// 注意：这里我们构造一个 Assistant 消息，内容是工具结果
-				return &schema.Message{
-					Role:    schema.Assistant,
-					Content: result,
-				}, nil
-			}
-		}
+	if msg, ok := a.directReturnMessage(); ok {
+		didDirectReturn = true
+		return msg, nil
 	}
 
 	return msg, nil
+}
+
+func (a *Agent) directReturnMessage() (*schema.Message, bool) {
+	if a.extraction == nil {
+		return nil, false
+	}
+	if len(a.cfg.Execution.DirectReturnTools) == 0 {
+		return nil, false
+	}
+	return a.extraction.directReturnMessage(a.cfg.Execution.DirectReturnTools)
 }
 
 type ctxKeyAgentControl struct{}
@@ -245,9 +232,14 @@ type agentControl struct {
 // Stream 流式调用 Agent。
 // 完整支持流式 tool call：模型推理 → 工具调用 → 再推理，全程流式。
 func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.StreamReader[*schema.Message], error) {
+	ctx = withInvocationID(ctx)
+	if a.cfg.Observability.StructuredLogs != nil {
+		ctx = withToolLogSession(ctx)
+	}
+
 	// 如果配置了回调，添加到 opts 中
-	if len(a.cfg.Callbacks) > 0 {
-		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Callbacks...)))
+	if len(a.cfg.Observability.Callbacks) > 0 {
+		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Observability.Callbacks...)))
 	}
 
 	sr, err := a.inner.Stream(ctx, messages, opts...)
@@ -256,7 +248,7 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	}
 
 	// 对于 Stream 模式，如果需要 direct return，我们需要包装 StreamReader
-	if a.tracker != nil && len(a.cfg.ToolReturnDirectly) > 0 {
+	if a.extraction != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
 		// Stream 模式下暂时不介入 ToolReturnDirectly，让模型总结照常输出。
 		// 如果用户真的需要 direct return，推荐使用 Generate 方法。
 		return sr, nil
@@ -265,10 +257,14 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	return sr, nil
 }
 
+func (a *Agent) Close() error {
+	if a.cleanup == nil {
+		return nil
+	}
+	return a.cleanup()
+}
+
 // ExportGraph 导出底层 Graph，用于嵌入更大的编排图。
 func (a *Agent) ExportGraph() (compose.AnyGraph, []compose.GraphAddNodeOpt) {
 	return a.inner.ExportGraph()
 }
-
-// ToolChoiceForced 是一个便捷变量，避免每次都声明指针。
-var ToolChoiceForced = schema.ToolChoiceForced
