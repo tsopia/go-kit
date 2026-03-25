@@ -140,7 +140,11 @@ func newExtractionRetryMiddleware(state *extractionState) compose.ToolMiddleware
 				output, err := next(ctx, input)
 				if err != nil {
 					state.recordFailure()
-					if state.retriesExhausted() {
+					retriesExhausted := state.retriesExhausted()
+					if logState := toolLogStateFromContext(ctx); logState != nil {
+						logState.markError(err, !retriesExhausted, retriesExhausted)
+					}
+					if retriesExhausted {
 						return nil, fmt.Errorf("tool %s: max retries (%d) exceeded: %w", input.Name, state.maxRetries, err)
 					}
 					return &compose.ToolOutput{

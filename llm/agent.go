@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
@@ -21,6 +22,9 @@ type Agent struct {
 	cfg        AgentConfig
 	extraction *extractionRuntime
 	cleanup    func() error
+	logs       *structuredLogger
+	mode       ExecutionMode
+	toolCount  int
 }
 
 // NewAgent 创建一个 Agent。
@@ -81,6 +85,7 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 	toolsConfig := compose.ToolsNodeConfig{
 		Tools: built.Tools,
 	}
+	toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newToolObserverMiddleware(structuredLogs, spec.Execution.DirectReturnTools))
 
 	// 4. 处理 Extraction 模式下的强制工具调用和修复机制
 	var extraction *extractionRuntime
@@ -117,12 +122,52 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		_ = built.Cleanup()
 		return nil, fmt.Errorf("create react agent: %w", err)
 	}
-	return &Agent{inner: inner, cfg: cfg, extraction: extraction, cleanup: built.Cleanup}, nil
+	return &Agent{
+		inner:      inner,
+		cfg:        cfg,
+		extraction: extraction,
+		cleanup:    built.Cleanup,
+		logs:       structuredLogs,
+		mode:       spec.Execution.Mode,
+		toolCount:  len(built.Tools),
+	}, nil
 }
 
 // Generate 非流式调用 Agent。
 // 模型会自动处理工具调用循环，直到返回最终答案。
-func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.Message, error) {
+func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (msg *schema.Message, err error) {
+	if a.cfg.Observability.StructuredLogs != nil {
+		ctx = withToolLogSession(ctx)
+	}
+	directReturnEnabled := len(a.cfg.Execution.DirectReturnTools) > 0
+	didDirectReturn := false
+	if a.logs != nil && a.logs.enabled() {
+		started := time.Now()
+		a.logs.logInfo("agent.start",
+			"execution_mode", string(a.mode),
+			"tool_count", a.toolCount,
+			"direct_return_enabled", directReturnEnabled,
+			"message_count", len(messages),
+		)
+		defer func() {
+			attrs := []any{
+				"execution_mode", string(a.mode),
+				"tool_count", a.toolCount,
+				"direct_return_enabled", directReturnEnabled,
+				"latency_ms", time.Since(started).Milliseconds(),
+			}
+			if err != nil {
+				attrs = append(attrs, "status", "error", "error", err.Error())
+			} else {
+				attrs = append(attrs, "status", "success")
+			}
+			if didDirectReturn {
+				attrs = append(attrs, "direct_return", true)
+			}
+			a.logs.logInfo("agent.end", attrs...)
+		}()
+	}
+
 	// 如果配置了回调，添加到 opts 中
 	if len(a.cfg.Observability.Callbacks) > 0 {
 		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Observability.Callbacks...)))
@@ -144,11 +189,12 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 		ctx = context.WithValue(ctx, ctxKeyAgentControl{}, ctl)
 	}
 
-	msg, err := a.inner.Generate(ctx, messages, opts...)
+	msg, err = a.inner.Generate(ctx, messages, opts...)
 	if err != nil {
 		// 如果是因为我们主动 Cancel 导致的错误，且 Extraction 有成功结果，则视为成功
 		if errors.Is(err, context.Canceled) && a.extraction != nil {
 			if msg, ok := a.directReturnMessage(); ok {
+				didDirectReturn = true
 				return msg, nil
 			}
 		}
@@ -158,6 +204,7 @@ func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts .
 	// 处理 Extraction 模式下的 ToolReturnDirectly (如果在中间件没能及时 Cancel，这里作为兜底)
 	// 因为我们禁用了 ReactAgent 的原生支持（为了支持重试），所以需要在这里手动替换结果
 	if msg, ok := a.directReturnMessage(); ok {
+		didDirectReturn = true
 		return msg, nil
 	}
 
@@ -184,6 +231,10 @@ type agentControl struct {
 // Stream 流式调用 Agent。
 // 完整支持流式 tool call：模型推理 → 工具调用 → 再推理，全程流式。
 func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.StreamReader[*schema.Message], error) {
+	if a.cfg.Observability.StructuredLogs != nil {
+		ctx = withToolLogSession(ctx)
+	}
+
 	// 如果配置了回调，添加到 opts 中
 	if len(a.cfg.Observability.Callbacks) > 0 {
 		opts = append(opts, agent.WithComposeOptions(compose.WithCallbacks(a.cfg.Observability.Callbacks...)))
