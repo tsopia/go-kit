@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,11 +15,11 @@ import (
 // SimpleLogger 实现一个简单的日志记录器
 type SimpleLogger struct{}
 
-func (l *SimpleLogger) Debug(msg string, fields ...interface{}) {
+func (l *SimpleLogger) Debug(ctx context.Context, msg string, fields ...interface{}) {
 	fmt.Printf("[DEBUG] %s\n", msg)
 }
 
-func (l *SimpleLogger) Info(msg string, fields ...interface{}) {
+func (l *SimpleLogger) Info(ctx context.Context, msg string, fields ...interface{}) {
 	fmt.Printf("[INFO] %s", msg)
 	for i := 0; i < len(fields); i += 2 {
 		if i+1 < len(fields) {
@@ -28,7 +29,7 @@ func (l *SimpleLogger) Info(msg string, fields ...interface{}) {
 	fmt.Println()
 }
 
-func (l *SimpleLogger) Warn(msg string, fields ...interface{}) {
+func (l *SimpleLogger) Warn(ctx context.Context, msg string, fields ...interface{}) {
 	fmt.Printf("[WARN] %s", msg)
 	for i := 0; i < len(fields); i += 2 {
 		if i+1 < len(fields) {
@@ -38,7 +39,7 @@ func (l *SimpleLogger) Warn(msg string, fields ...interface{}) {
 	fmt.Println()
 }
 
-func (l *SimpleLogger) Error(msg string, fields ...interface{}) {
+func (l *SimpleLogger) Error(ctx context.Context, msg string, fields ...interface{}) {
 	fmt.Printf("[ERROR] %s", msg)
 	for i := 0; i < len(fields); i += 2 {
 		if i+1 < len(fields) {
@@ -139,8 +140,8 @@ func main() {
 		Logger:  nil, // 没有logger
 		Debug:   httpkit.DefaultDebugConfig(),
 	})
-
-	resp, err = noLoggerClient.Get("/api/simple")
+	ctx := context.Background()
+	resp, err = noLoggerClient.Get(ctx, "/api/simple")
 	if err != nil {
 		log.Printf("请求失败: %v", err)
 	} else {

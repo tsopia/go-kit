@@ -18,13 +18,13 @@ func main() {
 	// 创建HTTP客户端
 	client := httpclient.NewClient()
 
-	// 演示1: 使用WithCtx方法设置带超时的context
-	fmt.Println("=== 演示1: 使用WithCtx设置超时context ===")
+	// 演示1: 使用Context方法设置带超时的context
+	fmt.Println("=== 演示1: 使用Context设置超时context ===")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.NewRequest("GET", "https://httpbin.org/delay/1").
-		WithCtx(ctx).
+	resp, err := client.NewRequest("GET", "https://httpbin.org/delay/1").Context(
+		ctx).
 		Do()
 
 	if err != nil {
@@ -33,8 +33,8 @@ func main() {
 		fmt.Printf("请求成功，状态码: %d, 耗时: %v\n", resp.StatusCode, resp.Duration)
 	}
 
-	// 演示2: 使用WithCtx方法设置带取消的context
-	fmt.Println("\n=== 演示2: 使用WithCtx设置可取消的context ===")
+	// 演示2: 使用Context方法设置带取消的context
+	fmt.Println("\n=== 演示2: 使用Context设置可取消的context ===")
 	ctx2, cancel2 := context.WithCancel(context.Background())
 
 	// 2秒后取消请求
@@ -44,8 +44,8 @@ func main() {
 		cancel2()
 	}()
 
-	resp2, err2 := client.NewRequest("GET", "https://httpbin.org/delay/5").
-		WithCtx(ctx2).
+	resp2, err2 := client.NewRequest("GET", "https://httpbin.org/delay/5").Context(
+		ctx2).
 		Do()
 
 	if err2 != nil {
@@ -54,13 +54,13 @@ func main() {
 		fmt.Printf("请求成功，状态码: %d\n", resp2.StatusCode)
 	}
 
-	// 演示3: 使用WithCtx传递trace信息
-	fmt.Println("\n=== 演示3: 使用WithCtx传递trace信息 ===")
+	// 演示3: 使用Context传递trace信息
+	fmt.Println("\n=== 演示3: 使用Context传递trace信息 ===")
 	ctx3 := withLegacyContextValue(context.Background(), "trace_id", "abc123")
 	ctx3 = withLegacyContextValue(ctx3, "user_id", "user456")
 
-	resp3, err3 := client.NewRequest("GET", "https://httpbin.org/get").
-		WithCtx(ctx3).
+	resp3, err3 := client.NewRequest("GET", "https://httpbin.org/get").Context(
+		ctx3).
 		Header("X-Trace-ID", "abc123").
 		Header("X-User-ID", "user456").
 		Do()
@@ -78,8 +78,8 @@ func main() {
 		}
 	}
 
-	// 演示4: 对比Context方法和WithCtx方法
-	fmt.Println("\n=== 演示4: Context方法 vs WithCtx方法 ===")
+	// 演示4: 演示 Context 方法可重复用于不同请求
+	fmt.Println("\n=== 演示4: Context方法链式调用 ===")
 	ctx4, cancel4 := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel4()
 
@@ -87,9 +87,9 @@ func main() {
 	req1 := client.NewRequest("GET", "https://httpbin.org/get").Context(ctx4)
 	fmt.Println("使用Context方法创建请求")
 
-	// 使用WithCtx方法（更简洁）
-	req2 := client.NewRequest("GET", "https://httpbin.org/get").WithCtx(ctx4)
-	fmt.Println("使用WithCtx方法创建请求")
+	// 再创建一个请求，演示同样的 Context 用法
+	req2 := client.NewRequest("GET", "https://httpbin.org/get").Context(ctx4)
+	fmt.Println("再次使用Context方法创建请求")
 
 	// 两种方法功能完全一样
 	resp4a, _ := req1.Do()
@@ -99,5 +99,5 @@ func main() {
 		fmt.Printf("两种方法都成功，状态码: %d, %d\n", resp4a.StatusCode, resp4b.StatusCode)
 	}
 
-	fmt.Println("\n✅ WithCtx 方法演示完成！")
+	fmt.Println("\n✅ Context 方法演示完成！")
 }

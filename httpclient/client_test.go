@@ -41,7 +41,8 @@ func mustEncodeJSON(t *testing.T, w http.ResponseWriter, value interface{}) {
 func mustGet(t *testing.T, client *Client, path string) {
 	t.Helper()
 
-	if _, err := client.Get(path); err != nil {
+	ctx := context.Background()
+	if _, err := client.Get(ctx, path); err != nil {
 		t.Fatalf("client.Get(%q) failed: %v", path, err)
 	}
 }
@@ -180,7 +181,8 @@ func TestResetDefaultForGlobalHelpers(t *testing.T) {
 	defer ResetDefault()
 	ResetDefault(WithBaseURL(server.URL))
 
-	resp, err := Get("/default")
+	ctx := context.Background()
+	resp, err := Get(ctx, "/default")
 	if err != nil {
 		t.Fatalf("expected no error from global Get, got %v", err)
 	}
@@ -213,7 +215,8 @@ func TestGet(t *testing.T) {
 	client := NewClient()
 	client.SetBaseURL(server.URL)
 
-	resp, err := client.Get("/test")
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "/test")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -266,7 +269,8 @@ func TestPostJSON(t *testing.T) {
 		"age":  25,
 	}
 
-	resp, err := client.PostJSON("/users", payload)
+	ctx := context.Background()
+	resp, err := client.PostJSON(ctx, "/users", payload)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -294,7 +298,8 @@ func TestPutJSON(t *testing.T) {
 		"name": "updated",
 	}
 
-	resp, err := client.PutJSON("/users/123", payload)
+	ctx := context.Background()
+	resp, err := client.PutJSON(ctx, "/users/123", payload)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -334,7 +339,8 @@ func TestRetryReplaysRequestBody(t *testing.T) {
 	})
 
 	body := map[string]string{"name": "retry"}
-	resp, err := client.PostJSON("/retry", body)
+	ctx := context.Background()
+	resp, err := client.PostJSON(ctx, "/retry", body)
 	if err != nil {
 		t.Fatalf("expected request to eventually succeed: %v", err)
 	}
@@ -402,7 +408,8 @@ func TestDelete(t *testing.T) {
 	client := NewClient()
 	client.SetBaseURL(server.URL)
 
-	resp, err := client.Delete("/users/123")
+	ctx := context.Background()
+	resp, err := client.Delete(ctx, "/users/123")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -422,7 +429,8 @@ func TestResponseJSON(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -450,7 +458,8 @@ func TestResponseString(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -470,7 +479,8 @@ func TestResponseBytes(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -489,7 +499,8 @@ func TestResponseIsSuccess(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -522,7 +533,8 @@ func TestResponseIsOK(t *testing.T) {
 
 			client := NewClient()
 			client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
-			resp, err := client.Get(server.URL)
+			ctx := context.Background()
+			resp, err := client.Get(ctx, server.URL)
 			if err != nil {
 				t.Fatalf("Expected no error, got %v", err)
 			}
@@ -555,7 +567,8 @@ func TestResponseIsRedirect(t *testing.T) {
 			defer server.Close()
 
 			client := NewClient()
-			resp, err := client.Get(server.URL)
+			ctx := context.Background()
+			resp, err := client.Get(ctx, server.URL)
 			if err != nil {
 				t.Fatalf("Expected no error, got %v", err)
 			}
@@ -574,7 +587,8 @@ func TestResponseIsClientError(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -596,7 +610,8 @@ func TestResponseIsServerError(t *testing.T) {
 
 	client := NewClient()
 	client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -635,7 +650,8 @@ func TestResponseIsError(t *testing.T) {
 
 	client := NewClient()
 	client.retry = &RetryConfig{MaxRetries: 0, RetryableStatus: []int{}}
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -654,7 +670,8 @@ func TestResponseError(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient()
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -688,7 +705,8 @@ func TestRetryMiddleware(t *testing.T) {
 	}
 	client.AddMiddleware(RetryMiddleware(retryConfig))
 
-	resp, err := client.Get(server.URL)
+	ctx := context.Background()
+	resp, err := client.Get(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -746,7 +764,8 @@ func TestDebugConfig(t *testing.T) {
 	})
 
 	// 发送请求
-	resp, err := client.Get("/test")
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "/test")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -848,7 +867,8 @@ func TestDebugBodyTruncation(t *testing.T) {
 		},
 	})
 
-	_, err := client.Get("/test")
+	ctx := context.Background()
+	_, err := client.Get(ctx, "/test")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -871,7 +891,8 @@ func TestDebugError(t *testing.T) {
 		Debug:   DefaultDebugConfig(),
 	})
 
-	_, err := client.Get("/test")
+	ctx := context.Background()
+	_, err := client.Get(ctx, "/test")
 	if err == nil {
 		t.Error("期望请求失败")
 	}
@@ -949,7 +970,8 @@ func TestDebugJSONFormatting(t *testing.T) {
 		},
 	})
 
-	_, err := client.Get("/test")
+	ctx := context.Background()
+	_, err := client.Get(ctx, "/test")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -975,13 +997,11 @@ func TestDebugIndependentFromLogLevel(t *testing.T) {
 	t.Run("Info级别Logger+强制启用HTTP_Debug", func(t *testing.T) {
 		mockLogger := &MockLogger{}
 
-		// 创建Info级别的logger（通常不会输出debug信息）
-		// 但通过Debug.Enabled=true强制启用HTTP debug
 		client := NewClientWithOptions(ClientOptions{
 			BaseURL: server.URL,
-			Logger:  mockLogger, // 假设这是Info级别的logger
+			Logger:  mockLogger,
 			Debug: &DebugConfig{
-				Enabled:            true, // 强制启用HTTP debug
+				Enabled:            true,
 				LogRequestHeaders:  true,
 				LogRequestBody:     true,
 				LogResponseHeaders: true,
@@ -989,17 +1009,16 @@ func TestDebugIndependentFromLogLevel(t *testing.T) {
 			},
 		})
 
-		_, err := client.Get("/test")
+		ctx := context.Background()
+		_, err := client.Get(ctx, "/test")
 		if err != nil {
 			t.Fatalf("请求失败: %v", err)
 		}
 
-		// 验证即使logger是Info级别，HTTP debug日志也被记录
 		if len(mockLogger.debugLogs) == 0 {
 			t.Error("期望记录HTTP debug日志，即使logger级别是Info")
 		}
 
-		// 验证debug日志包含请求和响应信息
 		debugLog := strings.Join(mockLogger.debugLogs, "\n")
 		if !strings.Contains(debugLog, "🔍 HTTP REQUEST/RESPONSE DEBUG") {
 			t.Error("期望包含🔍 HTTP REQUEST/RESPONSE DEBUG")
@@ -1016,13 +1035,11 @@ func TestDebugIndependentFromLogLevel(t *testing.T) {
 	t.Run("Debug级别Logger+关闭HTTP_Debug", func(t *testing.T) {
 		mockLogger := &MockLogger{}
 
-		// 创建Debug级别的logger（通常会输出debug信息）
-		// 但通过Debug.Enabled=false关闭HTTP debug
 		client := NewClientWithOptions(ClientOptions{
 			BaseURL: server.URL,
-			Logger:  mockLogger, // 假设这是Debug级别的logger
+			Logger:  mockLogger,
 			Debug: &DebugConfig{
-				Enabled:            false, // 关闭HTTP debug
+				Enabled:            false,
 				LogRequestHeaders:  true,
 				LogRequestBody:     true,
 				LogResponseHeaders: true,
@@ -1030,17 +1047,16 @@ func TestDebugIndependentFromLogLevel(t *testing.T) {
 			},
 		})
 
-		_, err := client.Get("/test")
+		ctx := context.Background()
+		_, err := client.Get(ctx, "/test")
 		if err != nil {
 			t.Fatalf("请求失败: %v", err)
 		}
 
-		// 验证即使logger是Debug级别，HTTP debug日志也不会被记录
 		if len(mockLogger.debugLogs) > 0 {
 			t.Error("期望不记录HTTP debug日志，即使logger级别是Debug")
 		}
 
-		// 但Info级别的日志仍然会被记录
 		if len(mockLogger.infoLogs) == 0 {
 			t.Error("期望记录Info级别的日志")
 		}
@@ -1056,7 +1072,7 @@ func TestDebugGranularControl(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// 场景: 只想看请求头，不想看响应体（减少日志噪音）
+	// 场景: 只想看请求头，不想看响应体
 	t.Run("只记录请求头", func(t *testing.T) {
 		mockLogger := &MockLogger{}
 
@@ -1065,10 +1081,10 @@ func TestDebugGranularControl(t *testing.T) {
 			Logger:  mockLogger,
 			Debug: &DebugConfig{
 				Enabled:            true,
-				LogRequestHeaders:  true,  // 只记录请求头
-				LogRequestBody:     false, // 不记录请求体
-				LogResponseHeaders: false, // 不记录响应头
-				LogResponseBody:    false, // 不记录响应体
+				LogRequestHeaders:  true,
+				LogRequestBody:     false,
+				LogResponseHeaders: false,
+				LogResponseBody:    false,
 			},
 		})
 
@@ -1083,7 +1099,6 @@ func TestDebugGranularControl(t *testing.T) {
 
 		debugLog := strings.Join(mockLogger.debugLogs, "\n")
 
-		// 应该包含请求头信息
 		if !strings.Contains(debugLog, "🔍 HTTP REQUEST/RESPONSE DEBUG") {
 			t.Error("期望包含🔍 HTTP REQUEST/RESPONSE DEBUG")
 		}
@@ -1091,13 +1106,12 @@ func TestDebugGranularControl(t *testing.T) {
 			t.Error("期望包含Authorization头")
 		}
 
-		// 不应该包含响应体信息
 		if strings.Contains(debugLog, "HTTP RESPONSE DEBUG") {
 			t.Error("不期望包含HTTP RESPONSE DEBUG")
 		}
 	})
 
-	// 场景: 只想看响应，不想看请求（API调试时常见）
+	// 场景: 只想看响应
 	t.Run("只记录响应信息", func(t *testing.T) {
 		mockLogger := &MockLogger{}
 
@@ -1106,26 +1120,25 @@ func TestDebugGranularControl(t *testing.T) {
 			Logger:  mockLogger,
 			Debug: &DebugConfig{
 				Enabled:            true,
-				LogRequestHeaders:  false, // 不记录请求头
-				LogRequestBody:     false, // 不记录请求体
-				LogResponseHeaders: true,  // 记录响应头
-				LogResponseBody:    true,  // 记录响应体
+				LogRequestHeaders:  false,
+				LogRequestBody:     false,
+				LogResponseHeaders: true,
+				LogResponseBody:    true,
 			},
 		})
 
-		_, err := client.Get("/test")
+		ctx := context.Background()
+		_, err := client.Get(ctx, "/test")
 		if err != nil {
 			t.Fatalf("请求失败: %v", err)
 		}
 
 		debugLog := strings.Join(mockLogger.debugLogs, "\n")
 
-		// 由于统一日志输出，总是包含完整的请求/响应信息
 		if !strings.Contains(debugLog, "🔍 HTTP REQUEST/RESPONSE DEBUG") {
 			t.Error("期望包含🔍 HTTP REQUEST/RESPONSE DEBUG")
 		}
 
-		// 应该包含响应信息
 		if !strings.Contains(debugLog, "📥 RESPONSE:") {
 			t.Error("期望包含📥 RESPONSE:")
 		}
@@ -1272,19 +1285,19 @@ type MockLogger struct {
 	errorLogs []string
 }
 
-func (m *MockLogger) Debug(msg string, fields ...interface{}) {
+func (m *MockLogger) Debug(ctx context.Context, msg string, fields ...interface{}) {
 	m.debugLogs = append(m.debugLogs, msg)
 }
 
-func (m *MockLogger) Info(msg string, fields ...interface{}) {
+func (m *MockLogger) Info(ctx context.Context, msg string, fields ...interface{}) {
 	m.infoLogs = append(m.infoLogs, msg)
 }
 
-func (m *MockLogger) Warn(msg string, fields ...interface{}) {
+func (m *MockLogger) Warn(ctx context.Context, msg string, fields ...interface{}) {
 	m.warnLogs = append(m.warnLogs, msg)
 }
 
-func (m *MockLogger) Error(msg string, fields ...interface{}) {
+func (m *MockLogger) Error(ctx context.Context, msg string, fields ...interface{}) {
 	m.errorLogs = append(m.errorLogs, msg)
 }
 
@@ -1453,7 +1466,8 @@ func TestDebugUnifiedOutputWithoutLogger(t *testing.T) {
 	})
 
 	// 执行请求
-	resp, err := client.Get("/test")
+	ctx := context.Background()
+	resp, err := client.Get(ctx, "/test")
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
 	}
@@ -1478,7 +1492,7 @@ func TestRequestWithCtx(t *testing.T) {
 	}
 
 	// 使用WithCtx方法设置context
-	result := req.WithCtx(ctx)
+	result := req.Context(ctx)
 
 	// 验证返回的是同一个Request对象（链式调用）
 	if result != req {
@@ -1507,7 +1521,7 @@ func TestRequestWithCtxTimeout(t *testing.T) {
 	}
 
 	// 使用WithCtx设置超时context
-	req.WithCtx(ctx)
+	req.Context(ctx)
 
 	// 验证context被正确设置
 	if req.ctx != ctx {
@@ -1536,7 +1550,7 @@ func TestRequestWithCtxVsContext(t *testing.T) {
 
 	// 使用WithCtx方法
 	req2 := &Request{ctx: context.Background()}
-	req2.WithCtx(ctx)
+	req2.Context(ctx)
 
 	// 验证两种方法设置的context是相同的
 	if req1.ctx != req2.ctx {
@@ -1558,8 +1572,8 @@ func TestRequestWithCtxChaining(t *testing.T) {
 	ctx := context.WithValue(context.Background(), requestChainKey, "chain_value")
 
 	// 测试链式调用
-	req := client.NewRequest("GET", "/test").
-		WithCtx(ctx).
+	req := client.NewRequest("GET", "/test").Context(
+		ctx).
 		Header("Test-Header", "test-value").
 		Timeout(5 * time.Second)
 

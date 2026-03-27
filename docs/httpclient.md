@@ -15,9 +15,14 @@
 
 ### 1）默认即用（全局方法）
 ```go
-import "github.com/tsopia/go-kit/httpclient"
+import (
+    "context"
 
-resp, err := httpclient.Get("https://api.example.com/ping")
+    "github.com/tsopia/go-kit/httpclient"
+)
+
+ctx := context.Background()
+resp, err := httpclient.Get(ctx, "https://api.example.com/ping")
 if err != nil {
     // 处理错误
 }
@@ -27,6 +32,7 @@ fmt.Println(resp.StatusCode, resp.String())
 ### 2）创建独立客户端并覆盖配置
 ```go
 import (
+    "context"
     "time"
 
     "github.com/tsopia/go-kit/httpclient"
@@ -35,22 +41,26 @@ import (
 cli := httpclient.NewClient(
     httpclient.WithBaseURL("https://api.example.com"),
     httpclient.WithTimeout(5*time.Second),
-    httpclient.WithExtraHeaders(map[string]string{"X-Trace": "demo"}),
+    httpclient.WithAdditionalHeaders(map[string]string{"X-Trace": "demo"}),
     httpclient.WithRetry(&httpclient.RetryConfig{MaxRetries: 2}),
 )
 
-resp, err := cli.PostJSON("/users", map[string]string{"name": "Go"})
+ctx := context.Background()
+resp, err := cli.PostJSON(ctx, "/users", map[string]string{"name": "Go"})
 ```
 
 ### 3）重置全局默认客户端
 ```go
+import "context"
+
 // 替换包级默认客户端（线程安全）
 httpclient.ResetDefault(
     httpclient.WithBaseURL("https://api.example.com"),
     httpclient.WithTimeout(2*time.Second),
 )
 
-resp, _ := httpclient.Get("/health")
+ctx := context.Background()
+resp, _ := httpclient.Get(ctx, "/health")
 ```
 
 ### 4）注入自定义 http.Client / Transport
@@ -68,11 +78,17 @@ _ = raw.Transport // 复用同一传输层
 
 ### 5）链式请求构建与上下文
 ```go
+import (
+    "context"
+    "net/http"
+    "time"
+)
+
 resp, err := cli.NewRequest(http.MethodPost, "/users").
+    Context(context.Background()).
     Header("Content-Type", "application/json").
     JSON(map[string]any{"name": "kit"}).
     Timeout(3*time.Second).
-    Context(ctx).
     Do()
 ```
 
@@ -88,7 +104,7 @@ resp, err := cli.NewRequest(http.MethodPost, "/users").
 ## 🔧 配置选项速查
 常用函数式选项（后传入的覆盖前者）：
 - `WithTimeout(duration)`
-- `WithBaseURL(url)` / `WithHeaders(map)` / `WithExtraHeaders(map)` / `WithCookies([]*http.Cookie)` / `WithUserAgent(string)`
+- `WithBaseURL(url)` / `WithHeaders(map)` / `WithAdditionalHeaders(map)` / `WithCookies([]*http.Cookie)` / `WithUserAgent(string)`
 - `WithRetry(*RetryConfig)` / `WithCircuitBreaker(*CircuitBreakerConfig)`
 - `WithPool(*PoolConfig)` / `WithTLS(*tls.Config)` / `WithProxy(func(*http.Request) (*url.URL, error))`
 - `WithInterceptors(...Interceptor)` / `WithMiddlewares(...Middleware)`
@@ -96,8 +112,9 @@ resp, err := cli.NewRequest(http.MethodPost, "/users").
 - `WithDebug(*DebugConfig)` / `WithHTTPClient(*http.Client)` / `WithTransport(http.RoundTripper)`
 
 ## 📚 更多示例
-- 上下文版全局方法：`GetContext/PostContext/...`
+- Context-first 全局方法：`Get(ctx, url)` / `Post(ctx, url, body)` / `PostJSON(ctx, url, data)`
+- 链式请求上下文：`client.NewRequest(method, url).Context(ctx).Do()`
 - 释放连接：`client.HTTPClient().CloseIdleConnections()`
-- 重置默认客户端：`httpclient.ResetDefault(opts...)`；获取当前默认：`httpclient.GetDefaultClient()`
+- 默认客户端生命周期：`httpclient.ConfigureDefault(opts...)` / `httpclient.ResetDefault(opts...)` / `httpclient.GetDefaultClient()`
 
 > 旧接口 `NewClientWithOptions` 依旧可用，但推荐使用 `NewClient(With...)` 的函数式写法以获得明确的覆盖顺序。
