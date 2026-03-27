@@ -566,6 +566,9 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 		if !c.shouldRetry(resp, err) {
 			return resp, err
 		}
+		if closeErr := closeRetryResponseBody(resp); closeErr != nil {
+			return nil, closeErr
+		}
 
 		lastErr = err
 		if attempt < c.retry.MaxRetries {
@@ -582,7 +585,7 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 				fmt.Printf("[WARN] HTTP请求失败，准备重试 - Attempt: %d/%d, Delay: %v, Error: %v\n",
 					attempt+1, c.retry.MaxRetries, delay, err)
 			}
-			
+
 			// 响应 context 取消，避免 sleep 阻塞
 			select {
 			case <-time.After(delay):
@@ -593,6 +596,26 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, fmt.Errorf("重试%d次后仍然失败: %w", c.retry.MaxRetries, lastErr)
+}
+
+func closeRetryResponseBody(resp *http.Response) error {
+	if resp == nil || resp.Body == nil {
+		return nil
+	}
+
+	_, readErr := io.Copy(io.Discard, resp.Body)
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		if closeErr != nil {
+			return fmt.Errorf("丢弃重试响应体失败: %w; 关闭响应体失败: %v", readErr, closeErr)
+		}
+		return fmt.Errorf("丢弃重试响应体失败: %w", readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("关闭重试响应体失败: %w", closeErr)
+	}
+
+	return nil
 }
 
 // executeWithInterceptors 使用拦截器执行请求

@@ -3,6 +3,7 @@ package httpclient
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -121,4 +122,82 @@ func TestRetryCancellation(t *testing.T) {
 	if duration > 300*time.Millisecond {
 		t.Fatalf("context cancellation did not interrupt sleep fast enough, took %v", duration)
 	}
+}
+
+func TestRetryClosesResponseBodyBeforeRetry(t *testing.T) {
+	bodies := []*trackedBody{
+		newTrackedBody("retry-1"),
+		newTrackedBody("retry-2"),
+		newTrackedBody("ok"),
+	}
+	statuses := []int{
+		http.StatusServiceUnavailable,
+		http.StatusServiceUnavailable,
+		http.StatusOK,
+	}
+
+	var calls int32
+	client := NewClient(
+		WithHTTPClient(&http.Client{
+			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				call := int(atomic.AddInt32(&calls, 1) - 1)
+				if call >= len(bodies) {
+					return nil, errors.New("unexpected extra retry")
+				}
+
+				return &http.Response{
+					StatusCode: statuses[call],
+					Status:     http.StatusText(statuses[call]),
+					Header:     make(http.Header),
+					Body:       bodies[call],
+					Request:    req,
+				}, nil
+			}),
+		}),
+		WithRetry(&RetryConfig{
+			MaxRetries:      2,
+			InitialDelay:    time.Millisecond,
+			MaxDelay:        time.Millisecond,
+			BackoffFactor:   1,
+			RetryableStatus: []int{http.StatusServiceUnavailable},
+		}),
+	)
+
+	resp, err := client.Get(context.Background(), "http://example.com/test")
+	if err != nil {
+		t.Fatalf("expected success after retries, got %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected final status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	for i := 0; i < len(bodies); i++ {
+		if got := atomic.LoadInt32(&bodies[i].closed); got != 1 {
+			t.Fatalf("expected body %d to be closed once, got %d", i, got)
+		}
+	}
+}
+
+type trackedBody struct {
+	data   []byte
+	closed int32
+}
+
+func newTrackedBody(content string) *trackedBody {
+	return &trackedBody{data: []byte(content)}
+}
+
+func (b *trackedBody) Read(p []byte) (int, error) {
+	if len(b.data) == 0 {
+		return 0, io.EOF
+	}
+
+	n := copy(p, b.data)
+	b.data = b.data[n:]
+	return n, nil
+}
+
+func (b *trackedBody) Close() error {
+	atomic.AddInt32(&b.closed, 1)
+	return nil
 }
