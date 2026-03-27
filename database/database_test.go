@@ -273,6 +273,66 @@ func TestResolveClient(t *testing.T) {
 	}
 }
 
+func TestPackageLevelHelpers(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	t.Run("Ping在未配置默认客户端时返回错误", func(t *testing.T) {
+		err := Ping()
+		if err != ErrMissingClient {
+			t.Fatalf("Ping() error = %v, want %v", err, ErrMissingClient)
+		}
+	})
+
+	t.Run("Ping使用默认客户端", func(t *testing.T) {
+		_, err := Configure(testConfig())
+		if err != nil {
+			t.Fatalf("Configure() 失败: %v", err)
+		}
+
+		if err := Ping(); err != nil {
+			t.Fatalf("Ping() 失败: %v", err)
+		}
+	})
+
+	t.Run("Exec和Query支持显式覆盖客户端", func(t *testing.T) {
+		override := testDatabase(t)
+		defer closeTestDatabase(t, override)
+
+		if err := override.AutoMigrate(&TestUser{}); err != nil {
+			t.Fatalf("AutoMigrate() 失败: %v", err)
+		}
+
+		ctx := context.Background()
+		err := Exec(
+			ctx,
+			"INSERT INTO test_users(name, email, age, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			[]interface{}{"包级用户", "pkg@example.com", 18, time.Now(), time.Now()},
+			override,
+		)
+		if err != nil {
+			t.Fatalf("Exec() 失败: %v", err)
+		}
+
+		var user TestUser
+		err = Query(
+			ctx,
+			&user,
+			"SELECT * FROM test_users WHERE email = ? LIMIT 1",
+			[]interface{}{"pkg@example.com"},
+			override,
+		)
+		if err != nil {
+			t.Fatalf("Query() 失败: %v", err)
+		}
+		if user.Email != "pkg@example.com" {
+			t.Fatalf("Query() 返回了错误记录: %+v", user)
+		}
+	})
+}
+
 // TestDatabase_GetDB 测试获取GORM实例
 func TestDatabase_GetDB(t *testing.T) {
 	db := testDatabase(t)

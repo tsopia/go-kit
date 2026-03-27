@@ -28,3 +28,33 @@ type DB interface {
 	// 使用特定扩展或 Driver 原生能力）。调用方负责确保合理的生命周期管理。
 	SQLDB() (*sql.DB, error)
 }
+
+// Ping 使用默认客户端或显式覆盖客户端进行连通性检测。
+func Ping(c ...*Database) error {
+	client, err := resolveClient(c...)
+	if err != nil {
+		return err
+	}
+
+	return client.Ping()
+}
+
+// Exec 使用默认客户端或显式覆盖客户端执行写操作。
+func Exec(ctx context.Context, query string, args []interface{}, c ...*Database) error {
+	client, err := resolveClient(c...)
+	if err != nil {
+		return err
+	}
+
+	return client.Exec(ctx, query, args...)
+}
+
+// Query 使用默认客户端或显式覆盖客户端执行查询。
+func Query(ctx context.Context, dest interface{}, query string, args []interface{}, c ...*Database) error {
+	client, err := resolveClient(c...)
+	if err != nil {
+		return err
+	}
+
+	return client.Query(ctx, dest, query, args...)
+}
