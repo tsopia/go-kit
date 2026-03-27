@@ -4,20 +4,36 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 var (
-	defaultClient   *Client
+	defaultClient   atomic.Value
 	defaultClientMu sync.Mutex
 )
 
 func getDefaultClient() *Client {
+	// 快速路径：无锁读取
+	if v := defaultClient.Load(); v != nil {
+		if client, ok := v.(*Client); ok {
+			return client
+		}
+	}
+	
+	// 慢速路径：加锁初始化
 	defaultClientMu.Lock()
 	defer defaultClientMu.Unlock()
-	if defaultClient == nil {
-		defaultClient = NewClient()
+	
+	// 双重检查
+	if v := defaultClient.Load(); v != nil {
+		if client, ok := v.(*Client); ok {
+			return client
+		}
 	}
-	return defaultClient
+	
+	client := NewClient()
+	defaultClient.Store(client)
+	return client
 }
 
 // ConfigureDefault 配置默认客户端
@@ -25,15 +41,16 @@ func getDefaultClient() *Client {
 func ConfigureDefault(opts ...Option) {
 	defaultClientMu.Lock()
 	defer defaultClientMu.Unlock()
-	defaultClient = NewClient(opts...)
+	defaultClient.Store(NewClient(opts...))
 }
 
 // ResetDefault 重置默认客户端（主要用于测试）
 func ResetDefault(opts ...Option) *Client {
 	defaultClientMu.Lock()
 	defer defaultClientMu.Unlock()
-	defaultClient = NewClient(opts...)
-	return defaultClient
+	client := NewClient(opts...)
+	defaultClient.Store(client)
+	return client
 }
 
 // GetDefaultClient 获取默认客户端实例
@@ -48,7 +65,7 @@ func SetDefaultClient(client *Client) {
 	}
 	defaultClientMu.Lock()
 	defer defaultClientMu.Unlock()
-	defaultClient = client
+	defaultClient.Store(client)
 }
 
 // ==================== Context-first 全局函数 ====================

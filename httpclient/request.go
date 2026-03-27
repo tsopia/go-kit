@@ -132,11 +132,26 @@ func (r *Request) Do() (*Response, error) {
 		return nil, r.bodyErr
 	}
 
+	// 初始化默认 Context
+	if r.ctx == nil {
+		r.ctx = context.Background()
+	}
+
 	// 应用超时
 	if r.timeout > 0 {
-		ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
-		defer cancel()
-		r.ctx = ctx
+		needsTimeout := true
+		if deadline, ok := r.ctx.Deadline(); ok {
+			// 如果已有 Context 的剩余超时更短，无需再创建 Timeout（避免轻微浪费）
+			if time.Until(deadline) <= r.timeout {
+				needsTimeout = false
+			}
+		}
+
+		if needsTimeout {
+			ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
+			defer cancel()
+			r.ctx = ctx
+		}
 	}
 
 	return r.client.do(r)

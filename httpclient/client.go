@@ -453,7 +453,7 @@ func (c *Client) do(req *Request) (*Response, error) {
 	// 执行请求
 	var resp *http.Response
 	if c.circuitBreaker != nil {
-		err = c.circuitBreaker.Execute(func() error {
+		err = c.circuitBreaker.Execute(req.ctx, func() error {
 			resp, err = c.executeRequest(httpReq)
 			return err
 		})

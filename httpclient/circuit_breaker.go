@@ -1,19 +1,20 @@
 package httpclient
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
 )
 
 var (
-	ErrCircuitOpen          = errors.New("circuit breaker is open")
+	ErrCircuitOpen            = errors.New("circuit breaker is open")
 	ErrCircuitHalfOpenLimited = errors.New("circuit breaker half-open request limit reached")
 )
 
 // CircuitBreaker 熔断器接口
 type CircuitBreaker interface {
-	Execute(func() error) error
+	Execute(ctx context.Context, fn func() error) error
 	State() string
 }
 
@@ -54,7 +55,7 @@ func newCircuitBreaker(config CircuitBreakerConfig) CircuitBreaker {
 }
 
 // Execute 执行函数
-func (cb *statefulCircuitBreaker) Execute(fn func() error) error {
+func (cb *statefulCircuitBreaker) Execute(ctx context.Context, fn func() error) error {
 	cb.mu.Lock()
 	state := cb.currentStateLocked()
 
@@ -69,6 +70,11 @@ func (cb *statefulCircuitBreaker) Execute(fn func() error) error {
 	}
 
 	cb.mu.Unlock()
+
+	// 提前检查 Context 是否已取消
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	err := fn()
 
