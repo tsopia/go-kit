@@ -173,6 +173,16 @@ func TestNew(t *testing.T) {
 			t.Error("期望创建失败，但没有错误")
 		}
 	})
+
+	t.Run("空配置返回错误而不是panic", func(t *testing.T) {
+		db, err := New(nil)
+		if err == nil {
+			t.Fatal("期望创建失败，但没有错误")
+		}
+		if db != nil {
+			t.Fatal("期望返回空数据库实例")
+		}
+	})
 }
 
 func TestConfigureAndGetClient(t *testing.T) {
@@ -565,6 +575,30 @@ func TestDatabase_Tx(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("期望事务回滚后数据为0条，实际为%d条", count)
+	}
+}
+
+func TestHealthCheckHooks(t *testing.T) {
+	var afterProbeErr error
+	db, err := NewWithOptions(testConfig(), WithHooks(Hooks{
+		AfterProbe: func(ctx context.Context, probeErr error) {
+			afterProbeErr = probeErr
+		},
+	}))
+	if err != nil {
+		t.Fatalf("创建测试数据库失败: %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭测试数据库失败: %v", err)
+	}
+
+	status := db.HealthCheckWithContext(context.Background())
+	if status.Healthy {
+		t.Fatal("期望健康检查失败")
+	}
+	if afterProbeErr == nil {
+		t.Fatal("期望 AfterProbe 收到探针错误，但得到 nil")
 	}
 }
 

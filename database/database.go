@@ -96,6 +96,10 @@ func CloseDefault() error {
 
 // NewWithOptions 支持通过可选参数注入日志、钩子或自定义组件。
 func NewWithOptions(config *Config, opts ...Option) (*Database, error) {
+	if config == nil {
+		return nil, fmt.Errorf("数据库配置不能为空")
+	}
+
 	config.SetDefaults()
 
 	if err := config.Validate(); err != nil {

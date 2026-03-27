@@ -75,6 +75,7 @@ func (h *gormHealthChecker) HealthCheck() error {
 }
 
 func (h *gormHealthChecker) HealthCheckWithContext(ctx context.Context) *HealthStatus {
+	var probeErr error
 	status := &HealthStatus{
 		Healthy:   true,
 		Timestamp: time.Now(),
@@ -101,6 +102,9 @@ func (h *gormHealthChecker) HealthCheckWithContext(ctx context.Context) *HealthS
 	if err := h.Ping(); err != nil {
 		status.Healthy = false
 		status.Errors = append(status.Errors, fmt.Sprintf("连接失败: %v", err))
+		if probeErr == nil {
+			probeErr = err
+		}
 	}
 
 	if status.Stats.OpenConnections == 0 {
@@ -111,9 +115,12 @@ func (h *gormHealthChecker) HealthCheckWithContext(ctx context.Context) *HealthS
 	if err := h.runDriverSpecificCheck(ctx); err != nil {
 		status.Healthy = false
 		status.Errors = append(status.Errors, err.Error())
+		if probeErr == nil {
+			probeErr = err
+		}
 	}
 
-	h.finishProbe(ctx, nil)
+	h.finishProbe(ctx, probeErr)
 	return status
 }
 
