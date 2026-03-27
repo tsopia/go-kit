@@ -3,7 +3,6 @@ package httpclient
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,508 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
-
-// RetryConfig 重试配置
-type RetryConfig struct {
-	MaxRetries      int           // 最大重试次数
-	InitialDelay    time.Duration // 初始延迟
-	MaxDelay        time.Duration // 最大延迟
-	BackoffFactor   float64       // 退避因子
-	RetryableStatus []int         // 可重试的状态码
-	RetryableErrors []error       // 可重试的错误类型
-}
-
-// DebugConfig Debug配置
-type DebugConfig struct {
-	Enabled            bool     // 是否启用Debug
-	LogRequestHeaders  bool     // 是否记录请求头
-	LogRequestBody     bool     // 是否记录请求体
-	LogResponseHeaders bool     // 是否记录响应头
-	LogResponseBody    bool     // 是否记录响应体
-	MaxBodySize        int      // 最大记录的Body大小（字节），0表示不限制
-	SensitiveHeaders   []string // 敏感请求头列表，将被脱敏
-}
-
-// DefaultDebugConfig 默认Debug配置
-func DefaultDebugConfig() *DebugConfig {
-	return &DebugConfig{
-		Enabled:            true,
-		LogRequestHeaders:  true,
-		LogRequestBody:     true,
-		LogResponseHeaders: true,
-		LogResponseBody:    true,
-		MaxBodySize:        1024 * 10, // 10KB
-		SensitiveHeaders: []string{
-			"Authorization",
-			"Cookie",
-			"Set-Cookie",
-			"X-Api-Key",
-			"X-Auth-Token",
-			"Bearer",
-		},
-	}
-}
-
-// CircuitBreakerConfig 熔断器配置
-type CircuitBreakerConfig struct {
-	MaxRequests      uint32        // 半开状态最大请求数
-	Interval         time.Duration // 统计时间窗口
-	Timeout          time.Duration // 熔断超时时间
-	FailureThreshold uint32        // 失败阈值
-	SuccessThreshold uint32        // 成功阈值
-}
-
-// PoolConfig 连接池配置
-type PoolConfig struct {
-	MaxIdleConns        int           // 最大空闲连接数
-	MaxIdleConnsPerHost int           // 每个主机最大空闲连接数
-	MaxConnsPerHost     int           // 每个主机最大连接数
-	IdleConnTimeout     time.Duration // 空闲连接超时时间
-	DisableKeepAlives   bool          // 禁用keep-alive
-	DisableCompression  bool          // 禁用压缩
-}
-
-// ClientOptions HTTP客户端选项
-type ClientOptions struct {
-	Timeout        time.Duration                         // 超时时间
-	BaseURL        string                                // 基础URL
-	Headers        map[string]string                     // 默认请求头
-	UserAgent      string                                // 用户代理
-	Cookies        []*http.Cookie                        // 默认Cookie
-	Retry          *RetryConfig                          // 重试配置
-	CircuitBreaker *CircuitBreakerConfig                 // 熔断器配置
-	Pool           *PoolConfig                           // 连接池配置
-	TLS            *tls.Config                           // TLS配置
-	Proxy          func(*http.Request) (*url.URL, error) // 代理函数
-	Interceptors   []Interceptor                         // 拦截器
-	Middlewares    []Middleware                          // 中间件
-	Logger         Logger                                // 日志记录器
-	Metrics        Metrics                               // 指标收集器
-	RateLimiter    RateLimiter                           // 限流器
-	Debug          *DebugConfig                          // Debug配置
-	HTTPClient     *http.Client                          // 自定义HTTP Client
-}
-
-// Option 选项函数
-type Option func(*ClientOptions)
-
-func applyOptions(options ...Option) ClientOptions {
-	base := DefaultOptions()
-	for _, opt := range options {
-		if opt != nil {
-			opt(&base)
-		}
-	}
-	return cloneOptions(base)
-}
-
-func cloneOptions(opts ClientOptions) ClientOptions {
-	copyHeaders := func(in map[string]string) map[string]string {
-		if in == nil {
-			return nil
-		}
-		out := make(map[string]string, len(in))
-		for k, v := range in {
-			out[k] = v
-		}
-		return out
-	}
-
-	copyCookies := func(in []*http.Cookie) []*http.Cookie {
-		if in == nil {
-			return nil
-		}
-		out := make([]*http.Cookie, len(in))
-		for i, c := range in {
-			if c == nil {
-				continue
-			}
-			clone := *c
-			out[i] = &clone
-		}
-		return out
-	}
-
-	copyInterceptors := func(in []Interceptor) []Interceptor {
-		if in == nil {
-			return nil
-		}
-		out := make([]Interceptor, len(in))
-		copy(out, in)
-		return out
-	}
-
-	copyMiddlewares := func(in []Middleware) []Middleware {
-		if in == nil {
-			return nil
-		}
-		out := make([]Middleware, len(in))
-		copy(out, in)
-		return out
-	}
-
-	copyDebug := func(in *DebugConfig) *DebugConfig {
-		if in == nil {
-			return nil
-		}
-		out := *in
-		if in.SensitiveHeaders != nil {
-			out.SensitiveHeaders = append([]string{}, in.SensitiveHeaders...)
-		}
-		return &out
-	}
-
-	return ClientOptions{
-		Timeout:        opts.Timeout,
-		BaseURL:        opts.BaseURL,
-		Headers:        copyHeaders(opts.Headers),
-		UserAgent:      opts.UserAgent,
-		Cookies:        copyCookies(opts.Cookies),
-		Retry:          opts.Retry,
-		CircuitBreaker: opts.CircuitBreaker,
-		Pool:           opts.Pool,
-		TLS:            opts.TLS,
-		Proxy:          opts.Proxy,
-		Interceptors:   copyInterceptors(opts.Interceptors),
-		Middlewares:    copyMiddlewares(opts.Middlewares),
-		Logger:         opts.Logger,
-		Metrics:        opts.Metrics,
-		RateLimiter:    opts.RateLimiter,
-		Debug:          copyDebug(opts.Debug),
-		HTTPClient:     opts.HTTPClient,
-	}
-}
-
-// DefaultOptions 默认配置
-func DefaultOptions() ClientOptions {
-	debug := DefaultDebugConfig()
-	debug.Enabled = false
-
-	return ClientOptions{
-		Timeout:   30 * time.Second,
-		UserAgent: "go-kit-httpclient/1.0",
-		Retry: &RetryConfig{
-			MaxRetries:    2,
-			InitialDelay:  100 * time.Millisecond,
-			MaxDelay:      2 * time.Second,
-			BackoffFactor: 2.0,
-			RetryableStatus: []int{
-				408, 429, 500, 502, 503, 504,
-			},
-		},
-		Pool: &PoolConfig{
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 10,
-			MaxConnsPerHost:     0,
-			IdleConnTimeout:     90 * time.Second,
-		},
-		CircuitBreaker: &CircuitBreakerConfig{
-			FailureThreshold: 5,
-			SuccessThreshold: 1,
-			MaxRequests:      1,
-			Timeout:          30 * time.Second,
-		},
-		Debug: debug,
-	}
-}
-
-// WithTimeout 设置超时时间
-func WithTimeout(timeout time.Duration) Option {
-	return func(opts *ClientOptions) {
-		opts.Timeout = timeout
-	}
-}
-
-// WithBaseURL 设置基础URL
-func WithBaseURL(baseURL string) Option {
-	return func(opts *ClientOptions) {
-		opts.BaseURL = strings.TrimSuffix(baseURL, "/")
-	}
-}
-
-// WithHeaders 覆盖默认请求头
-func WithHeaders(headers map[string]string) Option {
-	return func(opts *ClientOptions) {
-		opts.Headers = headers
-	}
-}
-
-// WithExtraHeaders 追加请求头
-func WithExtraHeaders(headers map[string]string) Option {
-	return func(opts *ClientOptions) {
-		if opts.Headers == nil {
-			opts.Headers = map[string]string{}
-		}
-		for k, v := range headers {
-			opts.Headers[k] = v
-		}
-	}
-}
-
-// WithCookies 设置默认Cookie
-func WithCookies(cookies []*http.Cookie) Option {
-	return func(opts *ClientOptions) {
-		opts.Cookies = cookies
-	}
-}
-
-// WithUserAgent 设置User-Agent
-func WithUserAgent(ua string) Option {
-	return func(opts *ClientOptions) {
-		opts.UserAgent = ua
-	}
-}
-
-// WithRetry 设置重试配置
-func WithRetry(cfg *RetryConfig) Option {
-	return func(opts *ClientOptions) {
-		opts.Retry = cfg
-	}
-}
-
-// WithCircuitBreaker 设置熔断配置
-func WithCircuitBreaker(cfg *CircuitBreakerConfig) Option {
-	return func(opts *ClientOptions) {
-		opts.CircuitBreaker = cfg
-	}
-}
-
-// WithPool 设置连接池配置
-func WithPool(cfg *PoolConfig) Option {
-	return func(opts *ClientOptions) {
-		opts.Pool = cfg
-	}
-}
-
-// WithTLS 设置TLS配置
-func WithTLS(cfg *tls.Config) Option {
-	return func(opts *ClientOptions) {
-		opts.TLS = cfg
-	}
-}
-
-// WithProxy 设置代理
-func WithProxy(proxy func(*http.Request) (*url.URL, error)) Option {
-	return func(opts *ClientOptions) {
-		opts.Proxy = proxy
-	}
-}
-
-// WithInterceptors 设置拦截器
-func WithInterceptors(interceptors ...Interceptor) Option {
-	return func(opts *ClientOptions) {
-		opts.Interceptors = append(opts.Interceptors, interceptors...)
-	}
-}
-
-// WithMiddlewares 设置中间件
-func WithMiddlewares(middlewares ...Middleware) Option {
-	return func(opts *ClientOptions) {
-		opts.Middlewares = append(opts.Middlewares, middlewares...)
-	}
-}
-
-// WithLogger 设置日志器
-func WithLogger(logger Logger) Option {
-	return func(opts *ClientOptions) {
-		opts.Logger = logger
-	}
-}
-
-// WithMetrics 设置指标收集
-func WithMetrics(metrics Metrics) Option {
-	return func(opts *ClientOptions) {
-		opts.Metrics = metrics
-	}
-}
-
-// WithRateLimiter 设置限流器
-func WithRateLimiter(rateLimiter RateLimiter) Option {
-	return func(opts *ClientOptions) {
-		opts.RateLimiter = rateLimiter
-	}
-}
-
-// WithDebug 设置调试配置
-func WithDebug(debug *DebugConfig) Option {
-	return func(opts *ClientOptions) {
-		opts.Debug = debug
-	}
-}
-
-// WithHTTPClient 注入自定义 http.Client
-func WithHTTPClient(client *http.Client) Option {
-	return func(opts *ClientOptions) {
-		opts.HTTPClient = client
-	}
-}
-
-// WithTransport 注入自定义 RoundTripper
-func WithTransport(transport http.RoundTripper) Option {
-	return func(opts *ClientOptions) {
-		if opts.HTTPClient == nil {
-			opts.HTTPClient = &http.Client{}
-		}
-		opts.HTTPClient.Transport = transport
-	}
-}
-
-// Interceptor HTTP拦截器
-type Interceptor func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error)
-
-// Middleware HTTP中间件函数类型
-type Middleware func(next http.RoundTripper) http.RoundTripper
-
-// Logger 日志接口
-type Logger interface {
-	Debug(msg string, fields ...interface{})
-	Info(msg string, fields ...interface{})
-	Warn(msg string, fields ...interface{})
-	Error(msg string, fields ...interface{})
-}
-
-// Metrics 指标接口
-type Metrics interface {
-	IncCounter(name string, labels map[string]string)
-	AddHistogram(name string, value float64, labels map[string]string)
-	SetGauge(name string, value float64, labels map[string]string)
-}
-
-// RateLimiter 限流器接口
-type RateLimiter interface {
-	Allow() bool
-	Wait(ctx context.Context) error
-}
-
-// CircuitBreaker 熔断器接口
-type CircuitBreaker interface {
-	Execute(func() error) error
-	State() string
-}
-
-var ErrCircuitOpen = errors.New("circuit breaker is open")
-var ErrCircuitHalfOpenLimited = errors.New("circuit breaker half-open request limit reached")
-
-type circuitState string
-
-const (
-	stateClosed   circuitState = "closed"
-	stateOpen     circuitState = "open"
-	stateHalfOpen circuitState = "half-open"
-)
-
-// statefulCircuitBreaker 具有基础状态机的熔断器实现
-type statefulCircuitBreaker struct {
-	config    CircuitBreakerConfig
-	state     circuitState
-	failures  uint32
-	successes uint32
-	openedAt  time.Time
-	mu        sync.Mutex
-}
-
-// newCircuitBreaker 创建新的熔断器
-func newCircuitBreaker(config CircuitBreakerConfig) CircuitBreaker {
-	if config.FailureThreshold == 0 {
-		config.FailureThreshold = 5
-	}
-	if config.SuccessThreshold == 0 {
-		config.SuccessThreshold = 1
-	}
-	if config.MaxRequests == 0 {
-		config.MaxRequests = 1
-	}
-	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
-	}
-
-	return &statefulCircuitBreaker{config: config, state: stateClosed}
-}
-
-// Execute 执行函数
-func (cb *statefulCircuitBreaker) Execute(fn func() error) error {
-	cb.mu.Lock()
-	state := cb.currentStateLocked()
-
-	if state == stateOpen {
-		cb.mu.Unlock()
-		return ErrCircuitOpen
-	}
-
-	if state == stateHalfOpen && cb.successes >= cb.config.MaxRequests {
-		cb.mu.Unlock()
-		return ErrCircuitHalfOpenLimited
-	}
-
-	cb.mu.Unlock()
-
-	err := fn()
-
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.updateStateLocked(err == nil)
-
-	return err
-}
-
-// State 获取熔断器状态
-func (cb *statefulCircuitBreaker) State() string {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	return string(cb.currentStateLocked())
-}
-
-func (cb *statefulCircuitBreaker) currentStateLocked() circuitState {
-	if cb.state == stateOpen && time.Since(cb.openedAt) >= cb.config.Timeout {
-		cb.state = stateHalfOpen
-		cb.failures = 0
-		cb.successes = 0
-	}
-
-	return cb.state
-}
-
-func (cb *statefulCircuitBreaker) updateStateLocked(success bool) {
-	switch cb.currentStateLocked() {
-	case stateClosed:
-		if success {
-			cb.failures = 0
-			return
-		}
-
-		cb.failures++
-		if cb.failures >= cb.config.FailureThreshold {
-			cb.tripLocked()
-		}
-	case stateHalfOpen:
-		if success {
-			cb.successes++
-			if cb.successes >= cb.config.SuccessThreshold {
-				cb.resetLocked()
-			}
-			return
-		}
-
-		cb.tripLocked()
-	}
-}
-
-func (cb *statefulCircuitBreaker) tripLocked() {
-	cb.state = stateOpen
-	cb.openedAt = time.Now()
-	cb.failures = 0
-	cb.successes = 0
-}
-
-func (cb *statefulCircuitBreaker) resetLocked() {
-	cb.state = stateClosed
-	cb.failures = 0
-	cb.successes = 0
-}
 
 // Client HTTP客户端
 type Client struct {
@@ -532,33 +31,6 @@ type Client struct {
 	rateLimiter    RateLimiter
 	mu             sync.RWMutex
 	debugConfig    *DebugConfig
-}
-
-// Response HTTP响应
-type Response struct {
-	StatusCode int
-	Status     string
-	Headers    http.Header
-	Body       []byte
-	Response   *http.Response
-	Request    *http.Request
-	Duration   time.Duration
-}
-
-// Request HTTP请求构建器
-type Request struct {
-	client  *Client
-	method  string
-	url     string
-	headers map[string]string
-	cookies []*http.Cookie
-	body    io.Reader
-	bodyErr error
-	bodyRaw []byte
-	bodySrc io.ReadSeeker
-	timeout time.Duration
-	ctx     context.Context
-	retries int
 }
 
 // httpDebugInfo 调试信息结构体
@@ -717,10 +189,54 @@ func (c *Client) NewRequest(method, url string) *Request {
 	}
 }
 
+// ==================== Context-first Client 方法 ====================
+
+// Get 发送GET请求
+func (c *Client) Get(ctx context.Context, url string) (*Response, error) {
+	return c.NewRequest(http.MethodGet, url).Context(ctx).Do()
+}
+
+// Post 发送POST请求
+func (c *Client) Post(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return c.NewRequest(http.MethodPost, url).Context(ctx).Body(body).Do()
+}
+
+// PostJSON 发送JSON POST请求
+func (c *Client) PostJSON(ctx context.Context, url string, data interface{}) (*Response, error) {
+	return c.NewRequest(http.MethodPost, url).Context(ctx).JSON(data).Do()
+}
+
+// Put 发送PUT请求
+func (c *Client) Put(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return c.NewRequest(http.MethodPut, url).Context(ctx).Body(body).Do()
+}
+
+// PutJSON 发送JSON PUT请求
+func (c *Client) PutJSON(ctx context.Context, url string, data interface{}) (*Response, error) {
+	return c.NewRequest(http.MethodPut, url).Context(ctx).JSON(data).Do()
+}
+
+// Delete 发送DELETE请求
+func (c *Client) Delete(ctx context.Context, url string) (*Response, error) {
+	return c.NewRequest(http.MethodDelete, url).Context(ctx).Do()
+}
+
+// Patch 发送PATCH请求
+func (c *Client) Patch(ctx context.Context, url string, body io.Reader) (*Response, error) {
+	return c.NewRequest(http.MethodPatch, url).Context(ctx).Body(body).Do()
+}
+
+// PatchJSON 发送JSON PATCH请求
+func (c *Client) PatchJSON(ctx context.Context, url string, data interface{}) (*Response, error) {
+	return c.NewRequest(http.MethodPatch, url).Context(ctx).JSON(data).Do()
+}
+
 // Do 直接执行HTTP请求
 func (c *Client) Do(ctx context.Context, method, url string, body io.Reader) (*Response, error) {
 	return c.NewRequest(method, url).Context(ctx).Body(body).Do()
 }
+
+// ==================== Client 配置方法 ====================
 
 // HTTPClient 返回底层 http.Client
 func (c *Client) HTTPClient() *http.Client {
@@ -813,6 +329,8 @@ func (c *Client) DisableDebug() {
 	}
 }
 
+// ==================== 内部实现 ====================
+
 // rebuildTransport 重新构建传输层
 func (c *Client) rebuildTransport() {
 	transport := c.httpClient.Transport
@@ -886,30 +404,6 @@ func (c *Client) buildRequest(req *Request) (*http.Request, error) {
 	return httpReq, nil
 }
 
-func (r *Request) prepareBody() (io.Reader, func() (io.ReadCloser, error), error) {
-	switch {
-	case r.bodySrc != nil:
-		if _, err := r.bodySrc.Seek(0, io.SeekStart); err != nil {
-			return nil, nil, fmt.Errorf("重置请求体失败: %w", err)
-		}
-
-		return r.bodySrc, func() (io.ReadCloser, error) {
-			if _, err := r.bodySrc.Seek(0, io.SeekStart); err != nil {
-				return nil, err
-			}
-			return io.NopCloser(r.bodySrc), nil
-		}, nil
-	case r.bodyRaw != nil:
-		return bytes.NewReader(r.bodyRaw), func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(r.bodyRaw)), nil
-		}, nil
-	case r.body != nil:
-		return r.body, nil, nil
-	default:
-		return nil, nil, nil
-	}
-}
-
 // do 执行HTTP请求
 func (c *Client) do(req *Request) (*Response, error) {
 	start := time.Now()
@@ -944,7 +438,7 @@ func (c *Client) do(req *Request) (*Response, error) {
 		// 使用defer确保在函数返回时输出完整的调试信息
 		defer func() {
 			debugInfo.Duration = time.Since(debugInfo.StartTime)
-			c.logCombinedDebugInfo(debugInfo)
+			c.logCombinedDebugInfo(req.ctx, debugInfo)
 		}()
 	}
 
@@ -1028,7 +522,7 @@ func (c *Client) do(req *Request) (*Response, error) {
 
 	// 记录日志
 	if c.logger != nil {
-		c.logger.Info("HTTP请求完成",
+		c.logger.Info(req.ctx, "HTTP请求完成",
 			"method", req.method,
 			"url", req.url,
 			"status", resp.StatusCode,
@@ -1077,7 +571,7 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 		if attempt < c.retry.MaxRetries {
 			delay := c.calculateDelay(attempt)
 			if c.logger != nil {
-				c.logger.Warn("HTTP请求失败，准备重试",
+				c.logger.Warn(req.Context(), "HTTP请求失败，准备重试",
 					"attempt", attempt+1,
 					"max_retries", c.retry.MaxRetries,
 					"delay", delay,
@@ -1197,216 +691,7 @@ func isNetworkError(err error) bool {
 		strings.Contains(err.Error(), "network is unreachable")
 }
 
-// Get 发送GET请求
-func (c *Client) Get(url string) (*Response, error) {
-	return c.NewRequest("GET", url).Do()
-}
-
-// Post 发送POST请求
-func (c *Client) Post(url string, body io.Reader) (*Response, error) {
-	return c.NewRequest("POST", url).Body(body).Do()
-}
-
-// PostJSON 发送JSON POST请求
-func (c *Client) PostJSON(url string, data interface{}) (*Response, error) {
-	return c.NewRequest("POST", url).JSON(data).Do()
-}
-
-// Put 发送PUT请求
-func (c *Client) Put(url string, body io.Reader) (*Response, error) {
-	return c.NewRequest("PUT", url).Body(body).Do()
-}
-
-// PutJSON 发送JSON PUT请求
-func (c *Client) PutJSON(url string, data interface{}) (*Response, error) {
-	return c.NewRequest("PUT", url).JSON(data).Do()
-}
-
-// Delete 发送DELETE请求
-func (c *Client) Delete(url string) (*Response, error) {
-	return c.NewRequest("DELETE", url).Do()
-}
-
-// Patch 发送PATCH请求
-func (c *Client) Patch(url string, body io.Reader) (*Response, error) {
-	return c.NewRequest("PATCH", url).Body(body).Do()
-}
-
-// PatchJSON 发送JSON PATCH请求
-func (c *Client) PatchJSON(url string, data interface{}) (*Response, error) {
-	return c.NewRequest("PATCH", url).JSON(data).Do()
-}
-
-// Request 请求构建器方法
-
-// Header 设置请求头
-func (r *Request) Header(key, value string) *Request {
-	r.headers[key] = value
-	return r
-}
-
-// Headers 批量设置请求头
-func (r *Request) Headers(headers map[string]string) *Request {
-	for key, value := range headers {
-		r.headers[key] = value
-	}
-	return r
-}
-
-// Cookie 添加Cookie
-func (r *Request) Cookie(cookie *http.Cookie) *Request {
-	r.cookies = append(r.cookies, cookie)
-	return r
-}
-
-// Body 设置请求体
-func (r *Request) Body(body io.Reader) *Request {
-	r.bodyErr = nil
-	r.bodyRaw = nil
-	r.bodySrc = nil
-
-	if body == nil {
-		r.body = nil
-		return r
-	}
-
-	if seeker, ok := body.(io.ReadSeeker); ok {
-		r.bodySrc = seeker
-		r.body = seeker
-		return r
-	}
-
-	data, err := io.ReadAll(body)
-	if err != nil {
-		r.bodyErr = fmt.Errorf("读取请求体失败: %w", err)
-		return r
-	}
-
-	r.bodyRaw = data
-	r.body = bytes.NewReader(data)
-	return r
-}
-
-// JSON 设置JSON请求体
-func (r *Request) JSON(data interface{}) *Request {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		// 这里可以考虑返回错误，但为了链式调用的简洁性，暂时忽略
-		return r
-	}
-	r.bodyErr = nil
-	r.bodySrc = nil
-	r.body = bytes.NewBuffer(jsonData)
-	r.bodyRaw = jsonData
-	r.headers["Content-Type"] = "application/json"
-	return r
-}
-
-// Form 设置表单请求体
-func (r *Request) Form(data url.Values) *Request {
-	r.bodyErr = nil
-	r.bodySrc = nil
-	r.body = strings.NewReader(data.Encode())
-	r.bodyRaw = []byte(data.Encode())
-	r.headers["Content-Type"] = "application/x-www-form-urlencoded"
-	return r
-}
-
-// Timeout 设置超时时间
-func (r *Request) Timeout(timeout time.Duration) *Request {
-	r.timeout = timeout
-	return r
-}
-
-// Context 设置上下文
-func (r *Request) Context(ctx context.Context) *Request {
-	r.ctx = ctx
-	return r
-}
-
-// WithCtx 设置上下文 (Context方法的简洁版本)
-func (r *Request) WithCtx(ctx context.Context) *Request {
-	r.ctx = ctx
-	return r
-}
-
-// Retries 设置重试次数
-func (r *Request) Retries(retries int) *Request {
-	r.retries = retries
-	return r
-}
-
-// Do 执行请求
-func (r *Request) Do() (*Response, error) {
-	// 应用超时
-	if r.timeout > 0 {
-		ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
-		defer cancel()
-		r.ctx = ctx
-	}
-
-	return r.client.do(r)
-}
-
-// Response 响应方法
-
-// JSON 解析响应为JSON
-func (r *Response) JSON(v interface{}) error {
-	return json.Unmarshal(r.Body, v)
-}
-
-// String 获取响应字符串
-func (r *Response) String() string {
-	return string(r.Body)
-}
-
-// Bytes 获取响应字节
-func (r *Response) Bytes() []byte {
-	return r.Body
-}
-
-// IsSuccess 检查是否为成功响应 (仅2xx)
-func (r *Response) IsSuccess() bool {
-	return r.StatusCode >= 200 && r.StatusCode < 300
-}
-
-// IsOK 检查是否为OK响应 (2xx + 3xx)
-func (r *Response) IsOK() bool {
-	return r.StatusCode >= 200 && r.StatusCode < 400
-}
-
-// IsRedirect 检查是否为重定向响应
-func (r *Response) IsRedirect() bool {
-	return r.StatusCode >= 300 && r.StatusCode < 400
-}
-
-// IsClientError 检查是否为客户端错误
-func (r *Response) IsClientError() bool {
-	return r.StatusCode >= 400 && r.StatusCode < 500
-}
-
-// IsServerError 检查是否为服务器错误
-func (r *Response) IsServerError() bool {
-	return r.StatusCode >= 500
-}
-
-// IsError 检查是否为错误响应 (4xx + 5xx)
-func (r *Response) IsError() bool {
-	return r.StatusCode >= 400
-}
-
-// IsInformational 检查是否为信息性响应
-func (r *Response) IsInformational() bool {
-	return r.StatusCode >= 100 && r.StatusCode < 200
-}
-
-// Error 获取错误信息
-func (r *Response) Error() string {
-	if r.IsError() {
-		return fmt.Sprintf("HTTP %d: %s", r.StatusCode, r.String())
-	}
-	return ""
-}
+// ==================== 预定义中间件 ====================
 
 // middlewareTransport 中间件传输层
 type middlewareTransport struct {
@@ -1416,8 +701,6 @@ type middlewareTransport struct {
 func (mt *middlewareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return mt.next.RoundTrip(req)
 }
-
-// 预定义的中间件
 
 // RetryMiddleware 重试中间件
 func RetryMiddleware(config RetryConfig) Middleware {
@@ -1497,14 +780,14 @@ func (lt *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	duration := time.Since(start)
 
 	if err != nil {
-		lt.logger.Error("HTTP请求失败",
+		lt.logger.Error(req.Context(), "HTTP请求失败",
 			"method", req.Method,
 			"url", req.URL.String(),
 			"duration", duration,
 			"error", err,
 		)
 	} else {
-		lt.logger.Info("HTTP请求成功",
+		lt.logger.Info(req.Context(), "HTTP请求成功",
 			"method", req.Method,
 			"url", req.URL.String(),
 			"status", resp.StatusCode,
@@ -1555,123 +838,7 @@ func (mt *metricsTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return resp, err
 }
 
-// 全局客户端实例
-var (
-	defaultClientValue atomic.Value // *Client
-	defaultClientOnce  sync.Once
-	defaultClientMu    sync.Mutex
-)
-
-func getDefaultClient() *Client {
-	if client, ok := defaultClientValue.Load().(*Client); ok {
-		return client
-	}
-
-	defaultClientOnce.Do(func() {
-		defaultClientValue.Store(NewClient())
-	})
-
-	if client, ok := defaultClientValue.Load().(*Client); ok {
-		return client
-	}
-
-	return NewClient()
-}
-
-func ResetDefault(opts ...Option) *Client {
-	defaultClientMu.Lock()
-	defer defaultClientMu.Unlock()
-
-	client := NewClient(opts...)
-	defaultClientValue.Store(client)
-	return client
-}
-
-func SetDefaultClient(client *Client) {
-	if client == nil {
-		return
-	}
-	defaultClientMu.Lock()
-	defer defaultClientMu.Unlock()
-	defaultClientValue.Store(client)
-}
-
-func GetDefaultClient() *Client {
-	return getDefaultClient()
-}
-
-// 全局函数
-func Get(url string) (*Response, error) {
-	return getDefaultClient().Get(url)
-}
-
-func Post(url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().Post(url, body)
-}
-
-func PostJSON(url string, data interface{}) (*Response, error) {
-	return getDefaultClient().PostJSON(url, data)
-}
-
-func Put(url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().Put(url, body)
-}
-
-func PutJSON(url string, data interface{}) (*Response, error) {
-	return getDefaultClient().PutJSON(url, data)
-}
-
-func Delete(url string) (*Response, error) {
-	return getDefaultClient().Delete(url)
-}
-
-func Patch(url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().Patch(url, body)
-}
-
-func PatchJSON(url string, data interface{}) (*Response, error) {
-	return getDefaultClient().PatchJSON(url, data)
-}
-
-func GetContext(ctx context.Context, url string) (*Response, error) {
-	return getDefaultClient().NewRequest(http.MethodGet, url).Context(ctx).Do()
-}
-
-func PostContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().NewRequest(http.MethodPost, url).Context(ctx).Body(body).Do()
-}
-
-func PutContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().NewRequest(http.MethodPut, url).Context(ctx).Body(body).Do()
-}
-
-func DeleteContext(ctx context.Context, url string) (*Response, error) {
-	return getDefaultClient().NewRequest(http.MethodDelete, url).Context(ctx).Do()
-}
-
-func PatchContext(ctx context.Context, url string, body io.Reader) (*Response, error) {
-	return getDefaultClient().NewRequest(http.MethodPatch, url).Context(ctx).Body(body).Do()
-}
-
-func SetTimeout(timeout time.Duration) {
-	getDefaultClient().SetTimeout(timeout)
-}
-
-func SetBaseURL(baseURL string) {
-	getDefaultClient().SetBaseURL(baseURL)
-}
-
-func SetHeader(key, value string) {
-	getDefaultClient().SetHeader(key, value)
-}
-
-func SetHeaders(headers map[string]string) {
-	getDefaultClient().SetHeaders(headers)
-}
-
-func DefaultClient() *Client {
-	return getDefaultClient()
-}
+// ==================== Debug 信息收集 ====================
 
 // collectRequestDebugInfo 收集请求调试信息
 func (c *Client) collectRequestDebugInfo(debugInfo *httpDebugInfo, httpReq *http.Request, req *Request) {
@@ -1705,7 +872,7 @@ func (c *Client) collectResponseDebugInfo(debugInfo *httpDebugInfo, response *Re
 }
 
 // logCombinedDebugInfo 输出合并的调试信息
-func (c *Client) logCombinedDebugInfo(debugInfo *httpDebugInfo) {
+func (c *Client) logCombinedDebugInfo(ctx context.Context, debugInfo *httpDebugInfo) {
 
 	// 检查是否有任何信息需要记录
 	if !c.debugConfig.LogRequestHeaders && !c.debugConfig.LogRequestBody &&
@@ -1759,9 +926,9 @@ func (c *Client) logCombinedDebugInfo(debugInfo *httpDebugInfo) {
 	// 根据是否有logger决定输出方式
 	if c.logger != nil {
 		if debugInfo.Error != "" {
-			c.logger.Error(combinedDebugInfo)
+			c.logger.Error(ctx, combinedDebugInfo)
 		} else {
-			c.logger.Debug(combinedDebugInfo)
+			c.logger.Debug(ctx, combinedDebugInfo)
 		}
 	} else {
 		// 没有logger时直接输出到终端

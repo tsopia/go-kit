@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,10 +16,10 @@ func (f benchRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 
 type nopLogger struct{}
 
-func (nopLogger) Debug(string, ...interface{}) {}
-func (nopLogger) Info(string, ...interface{})  {}
-func (nopLogger) Warn(string, ...interface{})  {}
-func (nopLogger) Error(string, ...interface{}) {}
+func (nopLogger) Debug(context.Context, string, ...interface{}) {}
+func (nopLogger) Info(context.Context, string, ...interface{})  {}
+func (nopLogger) Warn(context.Context, string, ...interface{})  {}
+func (nopLogger) Error(context.Context, string, ...interface{}) {}
 
 func benchmarkClient(b *testing.B, opts ClientOptions) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
