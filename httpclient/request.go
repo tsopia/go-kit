@@ -114,11 +114,7 @@ func (r *Request) Context(ctx context.Context) *Request {
 	return r
 }
 
-// WithCtx 设置上下文 (Context方法的简洁版本)
-func (r *Request) WithCtx(ctx context.Context) *Request {
-	r.ctx = ctx
-	return r
-}
+
 
 // Retries 设置重试次数
 func (r *Request) Retries(retries int) *Request {
@@ -149,6 +145,8 @@ func (r *Request) Do() (*Response, error) {
 
 		if needsTimeout {
 			ctx, cancel := context.WithTimeout(r.ctx, r.timeout)
+			// 注意：这会在 Do() 结束时触发 cancel()，而不是整个调用生命周期结束。
+			// 因为 c.do() 是同步阻塞操作，所以这个行为是正确的，可以确保响应体读取并关闭后才取消上下文。
 			defer cancel()
 			r.ctx = ctx
 		}

@@ -1492,7 +1492,7 @@ func TestRequestWithCtx(t *testing.T) {
 	}
 
 	// 使用WithCtx方法设置context
-	result := req.WithCtx(ctx)
+	result := req.Context(ctx)
 
 	// 验证返回的是同一个Request对象（链式调用）
 	if result != req {
@@ -1521,7 +1521,7 @@ func TestRequestWithCtxTimeout(t *testing.T) {
 	}
 
 	// 使用WithCtx设置超时context
-	req.WithCtx(ctx)
+	req.Context(ctx)
 
 	// 验证context被正确设置
 	if req.ctx != ctx {
@@ -1550,7 +1550,7 @@ func TestRequestWithCtxVsContext(t *testing.T) {
 
 	// 使用WithCtx方法
 	req2 := &Request{ctx: context.Background()}
-	req2.WithCtx(ctx)
+	req2.Context(ctx)
 
 	// 验证两种方法设置的context是相同的
 	if req1.ctx != req2.ctx {
@@ -1572,8 +1572,8 @@ func TestRequestWithCtxChaining(t *testing.T) {
 	ctx := context.WithValue(context.Background(), requestChainKey, "chain_value")
 
 	// 测试链式调用
-	req := client.NewRequest("GET", "/test").
-		WithCtx(ctx).
+	req := client.NewRequest("GET", "/test").Context(
+		ctx).
 		Header("Test-Header", "test-value").
 		Timeout(5 * time.Second)
 

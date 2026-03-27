@@ -19,18 +19,18 @@ func getDefaultClient() *Client {
 			return client
 		}
 	}
-	
+
 	// 慢速路径：加锁初始化
 	defaultClientMu.Lock()
 	defer defaultClientMu.Unlock()
-	
+
 	// 双重检查
 	if v := defaultClient.Load(); v != nil {
 		if client, ok := v.(*Client); ok {
 			return client
 		}
 	}
-	
+
 	client := NewClient()
 	defaultClient.Store(client)
 	return client

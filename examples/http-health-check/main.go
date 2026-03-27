@@ -204,9 +204,9 @@ func main() {
 		log.Println("[INFO] 处理根路径请求")
 
 		c.JSON(200, gin.H{
-			"message":     "带日志集成的服务器",
-			"trace_id":    traceID,
-			"request_id":  requestID,
+			"message":    "带日志集成的服务器",
+			"trace_id":   traceID,
+			"request_id": requestID,
 		})
 	})
 

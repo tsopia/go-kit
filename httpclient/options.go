@@ -261,8 +261,8 @@ func WithHeaders(headers map[string]string) Option {
 	}
 }
 
-// WithExtraHeaders 追加请求头
-func WithExtraHeaders(headers map[string]string) Option {
+// WithAdditionalHeaders 追加请求头
+func WithAdditionalHeaders(headers map[string]string) Option {
 	return func(opts *ClientOptions) {
 		if opts.Headers == nil {
 			opts.Headers = map[string]string{}

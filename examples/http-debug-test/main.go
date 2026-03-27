@@ -140,8 +140,8 @@ func main() {
 		Logger:  nil, // 没有logger
 		Debug:   httpkit.DefaultDebugConfig(),
 	})
-	ctx:=context.Background()
-	resp, err = noLoggerClient.Get(ctx,"/api/simple")
+	ctx := context.Background()
+	resp, err = noLoggerClient.Get(ctx, "/api/simple")
 	if err != nil {
 		log.Printf("请求失败: %v", err)
 	} else {

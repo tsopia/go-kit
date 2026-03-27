@@ -23,8 +23,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.NewRequest("GET", "https://httpbin.org/delay/1").
-		WithCtx(ctx).
+	resp, err := client.NewRequest("GET", "https://httpbin.org/delay/1").Context(
+		ctx).
 		Do()
 
 	if err != nil {
@@ -44,8 +44,8 @@ func main() {
 		cancel2()
 	}()
 
-	resp2, err2 := client.NewRequest("GET", "https://httpbin.org/delay/5").
-		WithCtx(ctx2).
+	resp2, err2 := client.NewRequest("GET", "https://httpbin.org/delay/5").Context(
+		ctx2).
 		Do()
 
 	if err2 != nil {
@@ -59,8 +59,8 @@ func main() {
 	ctx3 := withLegacyContextValue(context.Background(), "trace_id", "abc123")
 	ctx3 = withLegacyContextValue(ctx3, "user_id", "user456")
 
-	resp3, err3 := client.NewRequest("GET", "https://httpbin.org/get").
-		WithCtx(ctx3).
+	resp3, err3 := client.NewRequest("GET", "https://httpbin.org/get").Context(
+		ctx3).
 		Header("X-Trace-ID", "abc123").
 		Header("X-User-ID", "user456").
 		Do()
@@ -88,7 +88,7 @@ func main() {
 	fmt.Println("使用Context方法创建请求")
 
 	// 使用WithCtx方法（更简洁）
-	req2 := client.NewRequest("GET", "https://httpbin.org/get").WithCtx(ctx4)
+	req2 := client.NewRequest("GET", "https://httpbin.org/get").Context(ctx4)
 	fmt.Println("使用WithCtx方法创建请求")
 
 	// 两种方法功能完全一样

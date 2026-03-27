@@ -563,8 +563,8 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 		}
 
 		resp, err := c.executeWithInterceptors(currentReq)
-		if err == nil && !c.shouldRetry(resp, err) {
-			return resp, nil
+		if !c.shouldRetry(resp, err) {
+			return resp, err
 		}
 
 		lastErr = err
@@ -582,7 +582,13 @@ func (c *Client) executeRequest(req *http.Request) (*http.Response, error) {
 				fmt.Printf("[WARN] HTTP请求失败，准备重试 - Attempt: %d/%d, Delay: %v, Error: %v\n",
 					attempt+1, c.retry.MaxRetries, delay, err)
 			}
-			time.Sleep(delay)
+			
+			// 响应 context 取消，避免 sleep 阻塞
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
 		}
 	}
 
@@ -615,6 +621,10 @@ func (c *Client) executeWithInterceptors(req *http.Request) (*http.Response, err
 // shouldRetry 判断是否应该重试
 func (c *Client) shouldRetry(resp *http.Response, err error) bool {
 	if c.retry == nil {
+		return false
+	}
+
+	if err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 		return false
 	}
 
@@ -721,13 +731,17 @@ func (rt *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt <= rt.config.MaxRetries; attempt++ {
 		resp, err := rt.next.RoundTrip(req)
-		if err == nil && !rt.shouldRetry(resp, err) {
-			return resp, nil
+		if !rt.shouldRetry(resp, err) {
+			return resp, err
 		}
 		lastErr = err
 		if attempt < rt.config.MaxRetries {
 			delay := rt.calculateDelay(attempt)
-			time.Sleep(delay)
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
 		}
 	}
 	return nil, lastErr
@@ -735,6 +749,11 @@ func (rt *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func (rt *retryTransport) shouldRetry(resp *http.Response, err error) bool {
 	if err != nil {
+		// 中间件中同样检查上下文相关错误不予重试
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
+		// 其他情况下可以认为默认错误值得一次重试尝试，或者你可以根据配置实现更细致的判断
 		return true
 	}
 	if resp != nil {
