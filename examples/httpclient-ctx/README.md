@@ -1,20 +1,20 @@
-# HTTP Client WithCtx 方法使用指南
+# HTTP Client Context 方法使用指南
 
-本示例演示了 `httpclient` 包中新增的 `WithCtx` 方法的使用方式。
+本示例演示了 `httpclient` 包中 `Request.Context(ctx)` 的使用方式。
 
 ## 功能概述
 
-`WithCtx` 方法是 `Context` 方法的简洁版本，用于为HTTP请求设置Go的`context.Context`。它支持：
+`Context` 方法用于为 HTTP 请求设置 `context.Context`。它支持：
 
 - ⏰ **超时控制** - 设置请求超时时间
-- 🚫 **取消控制** - 主动取消正在进行的请求  
+- 🚫 **取消控制** - 主动取消正在进行的请求
 - 📋 **值传递** - 在请求中传递trace ID、用户信息等上下文数据
 - 🔗 **链式调用** - 与其他请求方法完美配合
 
 ## 方法签名
 
 ```go
-func (r *Request) WithCtx(ctx context.Context) *Request
+func (r *Request) Context(ctx context.Context) *Request
 ```
 
 ## 使用场景
@@ -26,9 +26,9 @@ func (r *Request) WithCtx(ctx context.Context) *Request
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
-// 使用WithCtx设置超时
+// 使用 Context 设置超时
 resp, err := client.NewRequest("GET", "https://api.example.com/data").
-    WithCtx(ctx).
+    Context(ctx).
     Do()
 ```
 
@@ -44,7 +44,7 @@ go func() {
 }()
 
 resp, err := client.NewRequest("GET", "https://api.example.com/slow").
-    WithCtx(ctx).
+    Context(ctx).
     Do()
 ```
 
@@ -56,7 +56,7 @@ ctx := context.WithValue(context.Background(), "trace_id", "abc123")
 ctx = context.WithValue(ctx, "user_id", "user456")
 
 resp, err := client.NewRequest("GET", "https://api.example.com/user").
-    WithCtx(ctx).
+    Context(ctx).
     Header("X-Trace-ID", "abc123").
     Do()
 
@@ -69,7 +69,7 @@ userID := ctx.Value("user_id")
 
 ```go
 resp, err := client.NewRequest("POST", "/api/users").
-    WithCtx(ctx).                          // 设置context
+    Context(ctx).                          // 设置context
     Header("Content-Type", "application/json"). // 设置请求头
     JSON(userData).                        // 设置JSON请求体
     Timeout(10 * time.Second).            // 设置超时（会覆盖context的超时）
@@ -85,7 +85,7 @@ resp, err := client.NewRequest("POST", "/api/users").
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 
-resp, err := client.NewRequest("GET", url).WithCtx(ctx).Do()
+resp, err := client.NewRequest("GET", url).Context(ctx).Do()
 ```
 
 ### 2. 正确处理取消
@@ -94,7 +94,7 @@ resp, err := client.NewRequest("GET", url).WithCtx(ctx).Do()
 ctx, cancel := context.WithCancel(context.Background())
 defer cancel()
 
-resp, err := client.NewRequest("GET", url).WithCtx(ctx).Do()
+resp, err := client.NewRequest("GET", url).Context(ctx).Do()
 if err != nil {
     if ctx.Err() == context.Canceled {
         fmt.Println("请求被主动取消")
@@ -111,4 +111,4 @@ cd examples/httpclient-ctx
 go run main.go
 ```
 
-这个简洁的 `WithCtx` 方法让您的HTTP客户端代码更加优雅和强大！ 
+`Context(ctx)` 让请求级超时、取消和上下文透传都保持在同一条链路里，和当前 `httpclient` 的 Context-first API 一致。
