@@ -161,11 +161,33 @@ func TestHandleJSONDefaultInternalErrorResponse(t *testing.T) {
 	if resp.Code != "internal_error" {
 		t.Fatalf("expected error code %q, got %q", "internal_error", resp.Code)
 	}
-	if resp.Message != sentinel.Error() {
-		t.Fatalf("expected message %q, got %q", sentinel.Error(), resp.Message)
+	if resp.Message != "internal server error" {
+		t.Fatalf("expected message %q, got %q", "internal server error", resp.Message)
 	}
 	if resp.Details != nil {
 		t.Fatalf("expected no details, got %#v", resp.Details)
+	}
+}
+
+func TestHandleInternalErrorHidesRawMessage(t *testing.T) {
+	sensitiveErr := errors.New("SELECT * FROM users WHERE password = 'secret'")
+
+	srv := NewServer(nil)
+	srv.POST("/sql", HandleJSON(func(ctx context.Context, req loginRequest) (gin.H, error) {
+		return nil, sensitiveErr
+	}))
+
+	w := performJSONRequest(t, srv, http.MethodPost, "/sql", gin.H{"email": "foo@example.com"})
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	resp := decodeErrorResponse(t, w)
+	if resp.Message == sensitiveErr.Error() {
+		t.Fatalf("raw error message leaked to response: %q", resp.Message)
+	}
+	if resp.Message != "internal server error" {
+		t.Fatalf("expected generic message, got %q", resp.Message)
 	}
 }
 

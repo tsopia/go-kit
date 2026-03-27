@@ -1,9 +1,8 @@
 package middleware
 
 import (
-	"math"
+	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
@@ -30,7 +29,8 @@ func RateLimit(rps float64) gin.HandlerFunc {
 // RateLimitWithConfig 使用自定义配置创建速率限制中间件。
 func RateLimitWithConfig(config RateLimitConfig) gin.HandlerFunc {
 	if config.Rate <= 0 {
-		panic("middleware: rate must be greater than 0")
+		slog.Warn("middleware: RateLimit called with rate <= 0, all requests will pass through")
+		return func(c *gin.Context) { c.Next() }
 	}
 
 	burst := config.Burst
@@ -58,13 +58,10 @@ func RateLimitWithConfig(config RateLimitConfig) gin.HandlerFunc {
 			}
 		}
 
-		// 计算到下一个令牌的真实等待秒数（向上取整，最小 1 秒）
-		delay := limiter.Reserve().Delay()
-		secs := int(math.Ceil(delay.Seconds()))
-		if secs < 1 {
-			secs = 1
-		}
-		c.Header("Retry-After", strconv.Itoa(secs))
+		// 固定 Retry-After: 1。
+		// 不使用 limiter.Reserve().Delay() 是因为 Reserve() 会消费一个 token，
+		// 导致 reject 路径额外降低后续请求的通过率。
+		c.Header("Retry-After", "1")
 		c.AbortWithStatus(http.StatusTooManyRequests)
 	}
 }

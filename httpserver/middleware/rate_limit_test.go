@@ -147,7 +147,7 @@ func TestRateLimitCustomOnRejected(t *testing.T) {
 	}
 }
 
-func TestRateLimitPanicsOnZeroRate(t *testing.T) {
+func TestRateLimitNoopOnInvalidRate(t *testing.T) {
 	testCases := []struct {
 		name string
 		rate float64
@@ -159,13 +159,19 @@ func TestRateLimitPanicsOnZeroRate(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Fatal("expected panic")
-				}
-			}()
+			engine := gin.New()
+			engine.Use(RateLimitWithConfig(RateLimitConfig{Rate: tc.rate}))
+			engine.GET("/test", func(c *gin.Context) {
+				c.Status(http.StatusOK)
+			})
 
-			_ = RateLimitWithConfig(RateLimitConfig{Rate: tc.rate})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			engine.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+			}
 		})
 	}
 }

@@ -34,9 +34,12 @@ type Config struct {
 	LivenessPath      string
 	HealthCheckPort   int
 
-	// HandlerTimeout 用于 preset 自动挂载的中间件超时。
-	// 只在 preset.NewProductionServer 中使用，非 preset 场景无效。
-	// 必须小于 WriteTimeout 才能生效。
+	// HandlerTimeout 用于 preset 自动挂载的 Timeout 中间件。
+	//
+	// 重要：仅在 preset.NewProductionServer 中生效！
+	// 如果使用 NewServer 手动创建服务器，需要自行挂载：
+	//   srv.Use(middleware.Timeout(duration))
+	// 必须小于 WriteTimeout 才能生效（否则 Validate 会返回错误）。
 	HandlerTimeout time.Duration
 }
 

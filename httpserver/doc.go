@@ -30,6 +30,13 @@
 //	srv.RunWithGracefulShutdown()          // 监听系统信号并优雅关闭
 //	srv.WaitForShutdown()                  // 等待信号并优雅关闭
 //
+// 启动方法选择指南：
+//
+//   - 一般 Web 服务          → RunWithGracefulShutdown()（监听信号、自动 drain + shutdown）
+//   - errgroup / 并发控制    → RunWithContext(ctx)（ctx 取消时自动优雅关闭）
+//   - 单元/集成测试          → Start() + defer srv.Shutdown(ctx)（非阻塞启动）
+//   - 自定义 listener（测试）→ Serve(ln)（阻塞，需自行管理关闭）
+//
 // 服务器状态：
 //
 //	srv.State()      // 获取当前状态: new/starting/ready/draining/stopping/stopped/failed

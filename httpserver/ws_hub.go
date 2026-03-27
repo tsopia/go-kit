@@ -4,36 +4,38 @@ import (
 	"sync"
 )
 
-type wsTrySender interface {
+// WSSender 描述可以尝试发送 WebSocket 消息的能力。
+// WSSession 实现了此接口，可直接传递给 WSHub.Join/Leave。
+type WSSender interface {
 	TrySend(WSMessage) bool
 }
 
 // WSHub 管理 WebSocket 连接的分组（如聊天室）
 type WSHub struct {
 	mu    sync.RWMutex
-	rooms map[string]map[wsTrySender]struct{}
+	rooms map[string]map[WSSender]struct{}
 }
 
 // NewWSHub 创建一个新的 WSHub
 func NewWSHub() *WSHub {
 	return &WSHub{
-		rooms: make(map[string]map[wsTrySender]struct{}),
+		rooms: make(map[string]map[WSSender]struct{}),
 	}
 }
 
 // Join 将连接加入指定房间
-func (h *WSHub) Join(roomID string, send wsTrySender) {
+func (h *WSHub) Join(roomID string, send WSSender) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if h.rooms[roomID] == nil {
-		h.rooms[roomID] = make(map[wsTrySender]struct{})
+		h.rooms[roomID] = make(map[WSSender]struct{})
 	}
 	h.rooms[roomID][send] = struct{}{}
 }
 
 // Leave 将连接从房间移除
-func (h *WSHub) Leave(roomID string, send wsTrySender) {
+func (h *WSHub) Leave(roomID string, send WSSender) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -48,7 +50,7 @@ func (h *WSHub) Leave(roomID string, send wsTrySender) {
 // Broadcast 向房间所有连接广播消息
 func (h *WSHub) Broadcast(roomID string, msg WSMessage) {
 	h.mu.RLock()
-	members := make([]wsTrySender, 0, len(h.rooms[roomID]))
+	members := make([]WSSender, 0, len(h.rooms[roomID]))
 	for send := range h.rooms[roomID] {
 		members = append(members, send)
 	}

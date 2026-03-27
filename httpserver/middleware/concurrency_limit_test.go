@@ -352,7 +352,7 @@ func TestConcurrencyLimitOnRejectedFallsBackToDefaultWhenUnwritten(t *testing.T)
 	}
 }
 
-func TestConcurrencyLimitPanicsOnInvalidLimit(t *testing.T) {
+func TestConcurrencyLimitNoopOnInvalidLimit(t *testing.T) {
 	testCases := []struct {
 		name  string
 		limit int
@@ -364,15 +364,21 @@ func TestConcurrencyLimitPanicsOnInvalidLimit(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			defer func() {
-				if recover() == nil {
-					t.Fatal("expected panic")
-				}
-			}()
-
-			_ = ConcurrencyLimitWithConfig(ConcurrencyLimitConfig{
+			engine := gin.New()
+			engine.Use(ConcurrencyLimitWithConfig(ConcurrencyLimitConfig{
 				Limit: tc.limit,
+			}))
+			engine.GET("/test", func(c *gin.Context) {
+				c.Status(http.StatusOK)
 			})
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			engine.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+			}
 		})
 	}
 }

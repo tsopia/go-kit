@@ -19,6 +19,13 @@ type TimeoutConfig struct {
 }
 
 // Timeout 为请求设置处理超时。
+//
+// 注意：Timeout 是"超时检测 + 兜底响应"，不是"超时中断"。
+// 它在 handler 执行前通过 context.WithTimeout 设置 deadline，
+// 但由于 Gin handler 共享 goroutine，不会中断正在执行的 handler。
+// 如果 handler 未检查 ctx.Done()，即使超时也会执行完毕。
+// 超时后若 handler 尚未写出响应（c.Writer.Written() == false），
+// 中间件会返回 504 Gateway Timeout 作为兜底。
 func Timeout(timeout time.Duration) gin.HandlerFunc {
 	return TimeoutWithConfig(TimeoutConfig{Timeout: timeout})
 }

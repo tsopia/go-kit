@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +24,8 @@ func ConcurrencyLimit(limit int) gin.HandlerFunc {
 // ConcurrencyLimitWithConfig 根据配置创建并发闸门中间件。
 func ConcurrencyLimitWithConfig(config ConcurrencyLimitConfig) gin.HandlerFunc {
 	if config.Limit <= 0 {
-		panic("middleware: limit must be greater than 0")
+		slog.Warn("middleware: ConcurrencyLimit called with limit <= 0, all requests will pass through")
+		return func(c *gin.Context) { c.Next() }
 	}
 
 	sem := make(chan struct{}, config.Limit)

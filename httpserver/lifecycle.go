@@ -90,9 +90,8 @@ func (s *Server) configuredAddr() string {
 
 func (s *Server) prepareToStart() error {
 	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-
 	if s.state != StateNew && s.state != StateFailed {
+		s.stateMu.Unlock()
 		return fmt.Errorf("cannot start server from state %s", s.state)
 	}
 
@@ -102,9 +101,10 @@ func (s *Server) prepareToStart() error {
 		s.healthServer = nil
 		s.healthAddr = ""
 	}
+	s.stateMu.Unlock()
 
-	s.state = StateStarting
-	return nil
+	// 通过 tryTransitionTo 统一状态转换，确保 OnStateChange hook 触发。
+	return s.tryTransitionTo(StateStarting)
 }
 
 // startInternal 是统一启动入口，所有公开启动方法最终都走这里
@@ -243,7 +243,15 @@ func (s *Server) prepareHealthServer() (net.Listener, error) {
 }
 
 func (s *Server) serveMainListener(ln net.Listener) error {
-	err := s.server.Serve(ln)
+	s.stateMu.Lock()
+	srv := s.server
+	s.stateMu.Unlock()
+
+	if srv == nil {
+		return http.ErrServerClosed
+	}
+
+	err := srv.Serve(ln)
 	if err != nil && err != http.ErrServerClosed {
 		s.reportServeError(err)
 		return err
@@ -253,7 +261,15 @@ func (s *Server) serveMainListener(ln net.Listener) error {
 }
 
 func (s *Server) serveHealthListener(ln net.Listener) error {
-	err := s.healthServer.Serve(ln)
+	s.stateMu.Lock()
+	srv := s.healthServer
+	s.stateMu.Unlock()
+
+	if srv == nil {
+		return http.ErrServerClosed
+	}
+
+	err := srv.Serve(ln)
 	if err != nil && err != http.ErrServerClosed {
 		s.reportServeError(err)
 		return err

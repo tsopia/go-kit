@@ -454,6 +454,6 @@ func renderHandlerError(c *gin.Context, cfg handlerConfig, err error) {
 
 	c.JSON(http.StatusInternalServerError, ErrorResponse{
 		Code:    "internal_error",
-		Message: err.Error(),
+		Message: "internal server error",
 	})
 }

@@ -710,3 +710,37 @@ func TestHealthCheckPathMutation(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareToStartTriggersOnStateChange(t *testing.T) {
+	t.Parallel()
+
+	var transitions []struct{ from, to State }
+	srv := NewServer(&Config{
+		Host: "127.0.0.1",
+		Port: 18088,
+	}, WithHooks(Hooks{
+		OnStateChange: func(_ context.Context, from State, to State) {
+			transitions = append(transitions, struct{ from, to State }{from, to})
+		},
+	}))
+
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start(): %v", err)
+	}
+	defer func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			t.Fatalf("Shutdown(): %v", err)
+		}
+	}()
+
+	// 应该收到 New→Starting 和 Starting→Ready 两个事件
+	foundStarting := false
+	for _, tr := range transitions {
+		if tr.from == StateNew && tr.to == StateStarting {
+			foundStarting = true
+		}
+	}
+	if !foundStarting {
+		t.Fatalf("OnStateChange did not receive New→Starting transition, got %v", transitions)
+	}
+}
