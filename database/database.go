@@ -52,6 +52,9 @@ func Configure(config *Config, opts ...Option) (*Database, error) {
 
 	if defaultClient != nil {
 		if closeErr := defaultClient.Close(); closeErr != nil {
+			if cleanupErr := client.Close(); cleanupErr != nil {
+				return nil, fmt.Errorf("关闭替换失败的新客户端失败: %w (旧默认客户端关闭失败: %v)", cleanupErr, closeErr)
+			}
 			return nil, closeErr
 		}
 	}

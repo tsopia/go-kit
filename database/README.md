@@ -150,10 +150,10 @@ cfg := &database.Config{
 
 ```go
 cfg := &database.Config{
-	Driver:           "sqlite",
-	Database:         "test.db",
-	RetryEnabled:     false,
-	RetryMaxAttempts: 5,
+	Driver:          "sqlite",
+	Database:        "test.db",
+	RetryConfigured: true,
+	RetryEnabled:    false,
 }
 ```
 

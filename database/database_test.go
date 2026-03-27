@@ -208,6 +208,41 @@ func TestConfigureAndGetClient(t *testing.T) {
 	}
 }
 
+func TestConfigureClosesNewClientOnReplaceFailure(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	expectedErr := errors.New("close old default failed")
+	failCloseOnce := true
+	_, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			if failCloseOnce {
+				failCloseOnce = false
+				return expectedErr
+			}
+			return nil
+		},
+	}))
+	if err != nil {
+		t.Fatalf("首次 Configure() 失败: %v", err)
+	}
+
+	closedNewClient := false
+	_, err = Configure(testConfig(), WithHooks(Hooks{
+		AfterClose: func(ctx context.Context, closeErr error) {
+			closedNewClient = true
+		},
+	}))
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("Configure() error = %v, want %v", err, expectedErr)
+	}
+	if !closedNewClient {
+		t.Fatal("期望替换失败时关闭新建客户端，实际未关闭")
+	}
+}
+
 func TestResolveClient(t *testing.T) {
 	resetDefaultClientForTest(t)
 	t.Cleanup(func() {

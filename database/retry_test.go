@@ -207,8 +207,19 @@ func TestRetryDisabled(t *testing.T) {
 		{
 			name: "显式关闭重试时保持关闭",
 			config: &Config{
+				Driver:          "sqlite",
+				Database:        ":memory:",
+				RetryConfigured: true,
+				RetryEnabled:    false,
+			},
+			wantEnabled: false,
+		},
+		{
+			name: "显式关闭重试且提供自定义次数时保持关闭",
+			config: &Config{
 				Driver:           "sqlite",
 				Database:         ":memory:",
+				RetryConfigured:  true,
 				RetryEnabled:     false,
 				RetryMaxAttempts: 5,
 			},

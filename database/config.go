@@ -68,6 +68,7 @@ type Config struct {
 	RetryBackoffFactor float64       `mapstructure:"retry_backoff_factor" json:"retry_backoff_factor" yaml:"retry_backoff_factor"`
 	RetryJitterEnabled bool          `mapstructure:"retry_jitter_enabled" json:"retry_jitter_enabled" yaml:"retry_jitter_enabled"`
 	RetryEnabled       bool          `mapstructure:"retry_enabled" json:"retry_enabled" yaml:"retry_enabled"`
+	RetryConfigured    bool          `mapstructure:"retry_configured" json:"retry_configured" yaml:"retry_configured"`
 
 	// 其他配置
 	TablePrefix       string `mapstructure:"table_prefix" json:"table_prefix" yaml:"table_prefix"`
@@ -140,7 +141,8 @@ func (c *Config) SetDefaults() {
 }
 
 func (c *Config) hasExplicitRetryConfig() bool {
-	return c.RetryMaxAttempts != 0 ||
+	return c.RetryConfigured ||
+		c.RetryMaxAttempts != 0 ||
 		c.RetryInitialDelay != 0 ||
 		c.RetryMaxDelay != 0 ||
 		c.RetryBackoffFactor != 0
