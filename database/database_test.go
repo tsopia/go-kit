@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -529,6 +530,42 @@ func TestDatabase_Transaction(t *testing.T) {
 			t.Errorf("期望0个用户（回滚后），实际%d个", count)
 		}
 	})
+}
+
+func TestDatabase_Tx(t *testing.T) {
+	db := testDatabase(t)
+	defer closeTestDatabase(t, db)
+
+	if err := db.AutoMigrate(&TestUser{}); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
+	}
+
+	ctx := context.Background()
+	expectedErr := errors.New("transaction callback failed")
+
+	err := db.Tx(ctx, func(tx *gorm.DB) error {
+		user := &TestUser{
+			Name:  "事务用户",
+			Email: "tx@example.com",
+			Age:   20,
+		}
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("Tx() error = %v, want %v", err, expectedErr)
+	}
+
+	var count int64
+	if err := db.GetDB().WithContext(ctx).Model(&TestUser{}).Where("email = ?", "tx@example.com").Count(&count).Error; err != nil {
+		t.Fatalf("统计事务数据失败: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("期望事务回滚后数据为0条，实际为%d条", count)
+	}
 }
 
 // TestDatabase_ErrorHandling 测试错误处理
