@@ -191,18 +191,38 @@ func TestCalculateRetryDelay_WithJitter(t *testing.T) {
 }
 
 func TestRetryDisabled(t *testing.T) {
-	config := &Config{
-		Driver:           "sqlite",
-		Database:         ":memory:",
-		RetryEnabled:     false,
-		RetryMaxAttempts: 1,
+	tests := []struct {
+		name        string
+		config      *Config
+		wantEnabled bool
+	}{
+		{
+			name: "未设置重试配置时默认启用",
+			config: &Config{
+				Driver:   "sqlite",
+				Database: ":memory:",
+			},
+			wantEnabled: true,
+		},
+		{
+			name: "显式关闭重试时保持关闭",
+			config: &Config{
+				Driver:           "sqlite",
+				Database:         ":memory:",
+				RetryEnabled:     false,
+				RetryMaxAttempts: 5,
+			},
+			wantEnabled: false,
+		},
 	}
 
-	config.SetDefaults()
-
-	// 验证禁用重试时的行为
-	if config.RetryEnabled {
-		t.Error("期望 RetryEnabled = false, 实际 = true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.config.SetDefaults()
+			if tt.config.RetryEnabled != tt.wantEnabled {
+				t.Fatalf("RetryEnabled = %v, want %v", tt.config.RetryEnabled, tt.wantEnabled)
+			}
+		})
 	}
 }
 
