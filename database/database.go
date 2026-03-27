@@ -24,6 +24,11 @@ type Database struct {
 	healthChecker HealthChecker
 }
 
+var (
+	defaultClientMu sync.RWMutex
+	defaultClient   *Database
+)
+
 type stdLogger struct{}
 
 func (l stdLogger) Info(msg string, fields ...interface{})  { log.Printf("INFO %s %v", msg, fields) }
@@ -33,6 +38,60 @@ func (l stdLogger) Error(msg string, fields ...interface{}) { log.Printf("ERROR 
 // New 创建新的数据库管理器
 func New(config *Config) (*Database, error) {
 	return NewWithOptions(config)
+}
+
+// Configure 初始化或替换默认客户端。
+func Configure(config *Config, opts ...Option) (*Database, error) {
+	client, err := NewWithOptions(config, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
+
+	if defaultClient != nil {
+		if closeErr := defaultClient.Close(); closeErr != nil {
+			return nil, closeErr
+		}
+	}
+
+	defaultClient = client
+	return client, nil
+}
+
+// GetClient 获取默认客户端。
+func GetClient() *Database {
+	defaultClientMu.RLock()
+	defer defaultClientMu.RUnlock()
+	return defaultClient
+}
+
+func resolveClient(overrides ...*Database) (*Database, error) {
+	if len(overrides) > 0 && overrides[0] != nil {
+		return overrides[0], nil
+	}
+
+	client := GetClient()
+	if client == nil {
+		return nil, ErrMissingClient
+	}
+
+	return client, nil
+}
+
+// CloseDefault 关闭默认客户端并清空引用。
+func CloseDefault() error {
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
+
+	if defaultClient == nil {
+		return nil
+	}
+
+	client := defaultClient
+	defaultClient = nil
+	return client.Close()
 }
 
 // NewWithOptions 支持通过可选参数注入日志、钩子或自定义组件。

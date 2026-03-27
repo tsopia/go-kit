@@ -57,6 +57,21 @@ func closeTestDatabase(t *testing.T, db *Database) {
 	}
 }
 
+func resetDefaultClientForTest(t *testing.T) {
+	t.Helper()
+
+	defaultClientMu.Lock()
+	defer defaultClientMu.Unlock()
+
+	if defaultClient != nil {
+		if err := defaultClient.Close(); err != nil {
+			t.Fatalf("关闭默认客户端失败: %v", err)
+		}
+	}
+
+	defaultClient = nil
+}
+
 // TestConfig_Validate 测试配置验证
 func TestConfig_Validate(t *testing.T) {
 	t.Run("有效配置", func(t *testing.T) {
@@ -157,6 +172,105 @@ func TestNew(t *testing.T) {
 			t.Error("期望创建失败，但没有错误")
 		}
 	})
+}
+
+func TestConfigureAndGetClient(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	client, err := Configure(testConfig())
+	if err != nil {
+		t.Fatalf("Configure() 失败: %v", err)
+	}
+	if client == nil {
+		t.Fatal("Configure() 返回了空客户端")
+	}
+
+	got := GetClient()
+	if got == nil {
+		t.Fatal("GetClient() 返回了空客户端")
+	}
+	if got != client {
+		t.Fatal("GetClient() 没有返回已配置客户端")
+	}
+}
+
+func TestResolveClient(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	override := testDatabase(t)
+	defer closeTestDatabase(t, override)
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T)
+		overrides []*Database
+		wantErr   error
+	}{
+		{
+			name: "优先返回显式覆盖客户端",
+			setup: func(t *testing.T) {
+				_, err := Configure(testConfig())
+				if err != nil {
+					t.Fatalf("Configure() 失败: %v", err)
+				}
+			},
+			overrides: []*Database{override},
+		},
+		{
+			name: "未覆盖时返回默认客户端",
+			setup: func(t *testing.T) {
+				_, err := Configure(testConfig())
+				if err != nil {
+					t.Fatalf("Configure() 失败: %v", err)
+				}
+			},
+		},
+		{
+			name: "未配置默认客户端时返回错误",
+			setup: func(t *testing.T) {
+				resetDefaultClientForTest(t)
+			},
+			wantErr: ErrMissingClient,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDefaultClientForTest(t)
+			tt.setup(t)
+
+			got, err := resolveClient(tt.overrides...)
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("resolveClient() 期望失败，但返回了 nil")
+				}
+				if err != tt.wantErr {
+					t.Fatalf("resolveClient() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("resolveClient() 失败: %v", err)
+			}
+			if got == nil {
+				t.Fatal("resolveClient() 返回了空客户端")
+			}
+
+			if len(tt.overrides) > 0 && got != tt.overrides[0] {
+				t.Fatal("resolveClient() 没有优先返回显式覆盖客户端")
+			}
+			if len(tt.overrides) == 0 && got != GetClient() {
+				t.Fatal("resolveClient() 没有返回默认客户端")
+			}
+		})
+	}
 }
 
 // TestDatabase_GetDB 测试获取GORM实例
