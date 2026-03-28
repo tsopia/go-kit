@@ -78,7 +78,13 @@ capabilities:
         snippet: |
           client := httpclient.NewClient(
               httpclient.WithTimeout(30 * time.Second),
-              httpclient.WithRetry(&httpclient.RetryConfig{MaxRetries: 3}),
+              httpclient.WithRetry(&httpclient.RetryConfig{
+                  MaxRetries:      3,
+                  InitialDelay:    100 * time.Millisecond,
+                  MaxDelay:        2 * time.Second,
+                  BackoffFactor:   2.0,
+                  RetryableStatus: []int{408, 429, 500, 502, 503, 504},
+              }),
           )
     dependencies: [kit]
 
