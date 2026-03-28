@@ -25,8 +25,9 @@ type Database struct {
 }
 
 var (
-	defaultClientMu sync.RWMutex
-	defaultClient   *Database
+	defaultClientMu   sync.RWMutex
+	defaultClientOpMu sync.Mutex
+	defaultClient     *Database
 )
 
 type stdLogger struct{}
@@ -47,11 +48,12 @@ func Configure(config *Config, opts ...Option) (*Database, error) {
 		return nil, err
 	}
 
-	defaultClientMu.Lock()
-	defer defaultClientMu.Unlock()
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
 
-	if defaultClient != nil {
-		if closeErr := defaultClient.Close(); closeErr != nil {
+	existingClient := GetClient()
+	if existingClient != nil {
+		if closeErr := existingClient.Close(); closeErr != nil {
 			if cleanupErr := client.Close(); cleanupErr != nil {
 				return nil, fmt.Errorf("关闭替换失败的新客户端失败: %w (旧默认客户端关闭失败: %v)", cleanupErr, closeErr)
 			}
@@ -59,7 +61,9 @@ func Configure(config *Config, opts ...Option) (*Database, error) {
 		}
 	}
 
+	defaultClientMu.Lock()
 	defaultClient = client
+	defaultClientMu.Unlock()
 	return client, nil
 }
 
@@ -85,16 +89,25 @@ func resolveClient(overrides ...*Database) (*Database, error) {
 
 // CloseDefault 关闭默认客户端并清空引用。
 func CloseDefault() error {
-	defaultClientMu.Lock()
-	defer defaultClientMu.Unlock()
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
 
-	if defaultClient == nil {
+	client := GetClient()
+	if client == nil {
 		return nil
 	}
 
-	client := defaultClient
-	defaultClient = nil
-	return client.Close()
+	if err := client.Close(); err != nil {
+		return err
+	}
+
+	defaultClientMu.Lock()
+	if defaultClient == client {
+		defaultClient = nil
+	}
+	defaultClientMu.Unlock()
+
+	return nil
 }
 
 // NewWithOptions 支持通过可选参数注入日志、钩子或自定义组件。

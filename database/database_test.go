@@ -61,16 +61,19 @@ func closeTestDatabase(t *testing.T, db *Database) {
 func resetDefaultClientForTest(t *testing.T) {
 	t.Helper()
 
-	defaultClientMu.Lock()
-	defer defaultClientMu.Unlock()
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
 
-	if defaultClient != nil {
-		if err := defaultClient.Close(); err != nil {
+	client := GetClient()
+	if client != nil {
+		if err := client.Close(); err != nil {
 			t.Fatalf("关闭默认客户端失败: %v", err)
 		}
 	}
 
+	defaultClientMu.Lock()
 	defaultClient = nil
+	defaultClientMu.Unlock()
 }
 
 // TestConfig_Validate 测试配置验证
@@ -240,6 +243,73 @@ func TestConfigureClosesNewClientOnReplaceFailure(t *testing.T) {
 	}
 	if !closedNewClient {
 		t.Fatal("期望替换失败时关闭新建客户端，实际未关闭")
+	}
+}
+
+func TestConfigureAllowsHooksToUseDefaultHelpers(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	pingCalled := false
+	_, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			pingCalled = true
+			return Ping()
+		},
+	}))
+	if err != nil {
+		t.Fatalf("首次 Configure() 失败: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, configureErr := Configure(testConfig())
+		done <- configureErr
+	}()
+
+	select {
+	case configureErr := <-done:
+		if configureErr != nil {
+			t.Fatalf("Configure() 失败: %v", configureErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Configure() 在 close hook 调用包级 helper 时发生死锁")
+	}
+
+	if !pingCalled {
+		t.Fatal("期望 close hook 调用了包级 helper")
+	}
+}
+
+func TestCloseDefaultKeepsClientOnCloseFailure(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	expectedErr := errors.New("close default failed")
+	failCloseOnce := true
+	client, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			if failCloseOnce {
+				failCloseOnce = false
+				return expectedErr
+			}
+			return nil
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Configure() 失败: %v", err)
+	}
+
+	err = CloseDefault()
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("CloseDefault() error = %v, want %v", err, expectedErr)
+	}
+	if got := GetClient(); got != client {
+		t.Fatal("CloseDefault() 失败后不应清空默认客户端")
 	}
 }
 
