@@ -24,6 +24,12 @@ type Database struct {
 	healthChecker HealthChecker
 }
 
+var (
+	defaultClientMu   sync.RWMutex
+	defaultClientOpMu sync.Mutex
+	defaultClient     *Database
+)
+
 type stdLogger struct{}
 
 func (l stdLogger) Info(msg string, fields ...interface{})  { log.Printf("INFO %s %v", msg, fields) }
@@ -35,8 +41,81 @@ func New(config *Config) (*Database, error) {
 	return NewWithOptions(config)
 }
 
+// Configure 初始化或替换默认客户端。
+func Configure(config *Config, opts ...Option) (*Database, error) {
+	client, err := NewWithOptions(config, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
+
+	existingClient := GetClient()
+	if existingClient != nil {
+		if closeErr := existingClient.Close(); closeErr != nil {
+			if cleanupErr := client.Close(); cleanupErr != nil {
+				return nil, fmt.Errorf("关闭替换失败的新客户端失败: %w (旧默认客户端关闭失败: %v)", cleanupErr, closeErr)
+			}
+			return nil, closeErr
+		}
+	}
+
+	defaultClientMu.Lock()
+	defaultClient = client
+	defaultClientMu.Unlock()
+	return client, nil
+}
+
+// GetClient 获取默认客户端。
+func GetClient() *Database {
+	defaultClientMu.RLock()
+	defer defaultClientMu.RUnlock()
+	return defaultClient
+}
+
+func resolveClient(overrides ...*Database) (*Database, error) {
+	if len(overrides) > 0 && overrides[0] != nil {
+		return overrides[0], nil
+	}
+
+	client := GetClient()
+	if client == nil {
+		return nil, ErrMissingClient
+	}
+
+	return client, nil
+}
+
+// CloseDefault 关闭默认客户端并清空引用。
+func CloseDefault() error {
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
+
+	client := GetClient()
+	if client == nil {
+		return nil
+	}
+
+	if err := client.Close(); err != nil {
+		return err
+	}
+
+	defaultClientMu.Lock()
+	if defaultClient == client {
+		defaultClient = nil
+	}
+	defaultClientMu.Unlock()
+
+	return nil
+}
+
 // NewWithOptions 支持通过可选参数注入日志、钩子或自定义组件。
 func NewWithOptions(config *Config, opts ...Option) (*Database, error) {
+	if config == nil {
+		return nil, fmt.Errorf("数据库配置不能为空")
+	}
+
 	config.SetDefaults()
 
 	if err := config.Validate(); err != nil {

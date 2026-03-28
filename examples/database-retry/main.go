@@ -77,13 +77,13 @@ func main() {
 		Database: ":memory:",
 
 		// 禁用重试
-		RetryEnabled:     false,
-		RetryMaxAttempts: 1,
+		RetryConfigured: true,
+		RetryEnabled:    false,
 	}
 
-	fmt.Printf("重试配置: 启用=%v, 最大次数=%d\n",
-		config3.RetryEnabled,
-		config3.RetryMaxAttempts)
+	fmt.Printf("重试配置: 显式配置=%v, 启用=%v\n",
+		config3.RetryConfigured,
+		config3.RetryEnabled)
 
 	db3, err := database.New(config3)
 	if err != nil {

@@ -38,6 +38,7 @@ golangci-lint run    # 代码检查
 - 高层函数支持可选 `*Client` 参数：`func Do(ctx context.Context, ..., c ...*Client)`
 - 未配置时返回 `ErrMissingClient`
 - `Client` 只持配置，业务逻辑在 `Manager/Queue` 或工具函数中
+- 对 `database`、`httpserver` 这类资源型包，允许“显式实例优先，默认实例为辅”；默认实例只作为便利入口，不能替代显式生命周期管理
 
 ### 目录结构
 ```
@@ -307,4 +308,3 @@ Step 6: Commit
 | 单次 Task 修改行数 | ≤ 50 |
 | 测试:实现代码比例 | ≥ 1.5:1 |
 | Task 执行时间 | 2-5 分钟 |
-

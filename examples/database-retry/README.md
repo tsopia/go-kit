@@ -68,8 +68,8 @@ config := &database.Config{
     Database: ":memory:",
     
     // 禁用重试
-    RetryEnabled:     false,
-    RetryMaxAttempts: 1,
+    RetryConfigured: true,
+    RetryEnabled:    false,
 }
 ```
 

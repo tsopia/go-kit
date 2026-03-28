@@ -68,6 +68,7 @@ type Config struct {
 	RetryBackoffFactor float64       `mapstructure:"retry_backoff_factor" json:"retry_backoff_factor" yaml:"retry_backoff_factor"`
 	RetryJitterEnabled bool          `mapstructure:"retry_jitter_enabled" json:"retry_jitter_enabled" yaml:"retry_jitter_enabled"`
 	RetryEnabled       bool          `mapstructure:"retry_enabled" json:"retry_enabled" yaml:"retry_enabled"`
+	RetryConfigured    bool          `mapstructure:"retry_configured" json:"retry_configured" yaml:"retry_configured"`
 
 	// 其他配置
 	TablePrefix       string `mapstructure:"table_prefix" json:"table_prefix" yaml:"table_prefix"`
@@ -99,6 +100,7 @@ func (c *Config) SetDefaults() {
 	}
 
 	// 重试配置默认值
+	explicitRetryToggle := c.hasExplicitRetryToggle()
 	if c.RetryMaxAttempts == 0 {
 		c.RetryMaxAttempts = DefaultRetryMaxAttempts
 	}
@@ -111,8 +113,8 @@ func (c *Config) SetDefaults() {
 	if c.RetryBackoffFactor == 0 {
 		c.RetryBackoffFactor = DefaultRetryBackoffFactor
 	}
-	// 默认启用重试和抖动
-	if c.RetryMaxAttempts > 1 {
+	// 未显式提供重试配置时，沿用默认启用策略。
+	if !explicitRetryToggle && c.RetryMaxAttempts > 1 {
 		c.RetryEnabled = true
 	}
 	if c.RetryEnabled && !c.RetryJitterEnabled {
@@ -136,6 +138,10 @@ func (c *Config) SetDefaults() {
 			c.Timezone = DefaultPostgresTimezone
 		}
 	}
+}
+
+func (c *Config) hasExplicitRetryToggle() bool {
+	return c.RetryConfigured
 }
 
 // Validate 验证配置

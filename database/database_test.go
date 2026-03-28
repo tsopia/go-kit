@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -55,6 +56,24 @@ func closeTestDatabase(t *testing.T, db *Database) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("关闭测试数据库失败: %v", err)
 	}
+}
+
+func resetDefaultClientForTest(t *testing.T) {
+	t.Helper()
+
+	defaultClientOpMu.Lock()
+	defer defaultClientOpMu.Unlock()
+
+	client := GetClient()
+	if client != nil {
+		if err := client.Close(); err != nil {
+			t.Fatalf("关闭默认客户端失败: %v", err)
+		}
+	}
+
+	defaultClientMu.Lock()
+	defaultClient = nil
+	defaultClientMu.Unlock()
 }
 
 // TestConfig_Validate 测试配置验证
@@ -155,6 +174,277 @@ func TestNew(t *testing.T) {
 		_, err := New(config)
 		if err == nil {
 			t.Error("期望创建失败，但没有错误")
+		}
+	})
+
+	t.Run("空配置返回错误而不是panic", func(t *testing.T) {
+		db, err := New(nil)
+		if err == nil {
+			t.Fatal("期望创建失败，但没有错误")
+		}
+		if db != nil {
+			t.Fatal("期望返回空数据库实例")
+		}
+	})
+}
+
+func TestConfigureAndGetClient(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	client, err := Configure(testConfig())
+	if err != nil {
+		t.Fatalf("Configure() 失败: %v", err)
+	}
+	if client == nil {
+		t.Fatal("Configure() 返回了空客户端")
+	}
+
+	got := GetClient()
+	if got == nil {
+		t.Fatal("GetClient() 返回了空客户端")
+	}
+	if got != client {
+		t.Fatal("GetClient() 没有返回已配置客户端")
+	}
+}
+
+func TestConfigureClosesNewClientOnReplaceFailure(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	expectedErr := errors.New("close old default failed")
+	failCloseOnce := true
+	_, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			if failCloseOnce {
+				failCloseOnce = false
+				return expectedErr
+			}
+			return nil
+		},
+	}))
+	if err != nil {
+		t.Fatalf("首次 Configure() 失败: %v", err)
+	}
+
+	closedNewClient := false
+	_, err = Configure(testConfig(), WithHooks(Hooks{
+		AfterClose: func(ctx context.Context, closeErr error) {
+			closedNewClient = true
+		},
+	}))
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("Configure() error = %v, want %v", err, expectedErr)
+	}
+	if !closedNewClient {
+		t.Fatal("期望替换失败时关闭新建客户端，实际未关闭")
+	}
+}
+
+func TestConfigureAllowsHooksToUseDefaultHelpers(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	pingCalled := false
+	_, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			pingCalled = true
+			return Ping()
+		},
+	}))
+	if err != nil {
+		t.Fatalf("首次 Configure() 失败: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, configureErr := Configure(testConfig())
+		done <- configureErr
+	}()
+
+	select {
+	case configureErr := <-done:
+		if configureErr != nil {
+			t.Fatalf("Configure() 失败: %v", configureErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Configure() 在 close hook 调用包级 helper 时发生死锁")
+	}
+
+	if !pingCalled {
+		t.Fatal("期望 close hook 调用了包级 helper")
+	}
+}
+
+func TestCloseDefaultKeepsClientOnCloseFailure(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	expectedErr := errors.New("close default failed")
+	failCloseOnce := true
+	client, err := Configure(testConfig(), WithHooks(Hooks{
+		BeforeClose: func(ctx context.Context, db *gorm.DB) error {
+			if failCloseOnce {
+				failCloseOnce = false
+				return expectedErr
+			}
+			return nil
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Configure() 失败: %v", err)
+	}
+
+	err = CloseDefault()
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("CloseDefault() error = %v, want %v", err, expectedErr)
+	}
+	if got := GetClient(); got != client {
+		t.Fatal("CloseDefault() 失败后不应清空默认客户端")
+	}
+}
+
+func TestResolveClient(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	override := testDatabase(t)
+	defer closeTestDatabase(t, override)
+
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T)
+		overrides []*Database
+		wantErr   error
+	}{
+		{
+			name: "优先返回显式覆盖客户端",
+			setup: func(t *testing.T) {
+				_, err := Configure(testConfig())
+				if err != nil {
+					t.Fatalf("Configure() 失败: %v", err)
+				}
+			},
+			overrides: []*Database{override},
+		},
+		{
+			name: "未覆盖时返回默认客户端",
+			setup: func(t *testing.T) {
+				_, err := Configure(testConfig())
+				if err != nil {
+					t.Fatalf("Configure() 失败: %v", err)
+				}
+			},
+		},
+		{
+			name: "未配置默认客户端时返回错误",
+			setup: func(t *testing.T) {
+				resetDefaultClientForTest(t)
+			},
+			wantErr: ErrMissingClient,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDefaultClientForTest(t)
+			tt.setup(t)
+
+			got, err := resolveClient(tt.overrides...)
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatal("resolveClient() 期望失败，但返回了 nil")
+				}
+				if err != tt.wantErr {
+					t.Fatalf("resolveClient() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("resolveClient() 失败: %v", err)
+			}
+			if got == nil {
+				t.Fatal("resolveClient() 返回了空客户端")
+			}
+
+			if len(tt.overrides) > 0 && got != tt.overrides[0] {
+				t.Fatal("resolveClient() 没有优先返回显式覆盖客户端")
+			}
+			if len(tt.overrides) == 0 && got != GetClient() {
+				t.Fatal("resolveClient() 没有返回默认客户端")
+			}
+		})
+	}
+}
+
+func TestPackageLevelHelpers(t *testing.T) {
+	resetDefaultClientForTest(t)
+	t.Cleanup(func() {
+		resetDefaultClientForTest(t)
+	})
+
+	t.Run("Ping在未配置默认客户端时返回错误", func(t *testing.T) {
+		err := Ping()
+		if err != ErrMissingClient {
+			t.Fatalf("Ping() error = %v, want %v", err, ErrMissingClient)
+		}
+	})
+
+	t.Run("Ping使用默认客户端", func(t *testing.T) {
+		_, err := Configure(testConfig())
+		if err != nil {
+			t.Fatalf("Configure() 失败: %v", err)
+		}
+
+		if err := Ping(); err != nil {
+			t.Fatalf("Ping() 失败: %v", err)
+		}
+	})
+
+	t.Run("Exec和Query支持显式覆盖客户端", func(t *testing.T) {
+		override := testDatabase(t)
+		defer closeTestDatabase(t, override)
+
+		if err := override.AutoMigrate(&TestUser{}); err != nil {
+			t.Fatalf("AutoMigrate() 失败: %v", err)
+		}
+
+		ctx := context.Background()
+		err := Exec(
+			ctx,
+			"INSERT INTO test_users(name, email, age, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			[]interface{}{"包级用户", "pkg@example.com", 18, time.Now(), time.Now()},
+			override,
+		)
+		if err != nil {
+			t.Fatalf("Exec() 失败: %v", err)
+		}
+
+		var user TestUser
+		err = Query(
+			ctx,
+			&user,
+			"SELECT * FROM test_users WHERE email = ? LIMIT 1",
+			[]interface{}{"pkg@example.com"},
+			override,
+		)
+		if err != nil {
+			t.Fatalf("Query() 失败: %v", err)
+		}
+		if user.Email != "pkg@example.com" {
+			t.Fatalf("Query() 返回了错误记录: %+v", user)
 		}
 	})
 }
@@ -355,6 +645,66 @@ func TestDatabase_Transaction(t *testing.T) {
 			t.Errorf("期望0个用户（回滚后），实际%d个", count)
 		}
 	})
+}
+
+func TestDatabase_Tx(t *testing.T) {
+	db := testDatabase(t)
+	defer closeTestDatabase(t, db)
+
+	if err := db.AutoMigrate(&TestUser{}); err != nil {
+		t.Fatalf("自动迁移失败: %v", err)
+	}
+
+	ctx := context.Background()
+	expectedErr := errors.New("transaction callback failed")
+
+	err := db.Tx(ctx, func(tx *gorm.DB) error {
+		user := &TestUser{
+			Name:  "事务用户",
+			Email: "tx@example.com",
+			Age:   20,
+		}
+		if err := tx.Create(user).Error; err != nil {
+			return err
+		}
+
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("Tx() error = %v, want %v", err, expectedErr)
+	}
+
+	var count int64
+	if err := db.GetDB().WithContext(ctx).Model(&TestUser{}).Where("email = ?", "tx@example.com").Count(&count).Error; err != nil {
+		t.Fatalf("统计事务数据失败: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("期望事务回滚后数据为0条，实际为%d条", count)
+	}
+}
+
+func TestHealthCheckHooks(t *testing.T) {
+	var afterProbeErr error
+	db, err := NewWithOptions(testConfig(), WithHooks(Hooks{
+		AfterProbe: func(ctx context.Context, probeErr error) {
+			afterProbeErr = probeErr
+		},
+	}))
+	if err != nil {
+		t.Fatalf("创建测试数据库失败: %v", err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("关闭测试数据库失败: %v", err)
+	}
+
+	status := db.HealthCheckWithContext(context.Background())
+	if status.Healthy {
+		t.Fatal("期望健康检查失败")
+	}
+	if afterProbeErr == nil {
+		t.Fatal("期望 AfterProbe 收到探针错误，但得到 nil")
+	}
 }
 
 // TestDatabase_ErrorHandling 测试错误处理

@@ -7,6 +7,7 @@ import (
 
 // 预定义错误
 var (
+	ErrMissingClient     = errors.New("database: client not configured")
 	ErrMissingDriver     = errors.New("数据库驱动不能为空")
 	ErrUnsupportedDriver = errors.New("不支持的数据库驱动")
 	ErrMissingHost       = errors.New("数据库主机不能为空")

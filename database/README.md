@@ -1,576 +1,243 @@
 # Database Package
 
-基于 GORM 的数据库封装，提供简洁、可扩展、易用的数据库操作接口。
+基于 GORM 的数据库封装，提供连接管理、事务执行、健康检查以及受控的底层逃逸能力。
 
-## ✨ 特性
+## 定位
 
-- **多数据库支持**: MySQL、PostgreSQL、SQLite
-- **配置验证**: 完整的配置校验机制
-- **连接池管理**: 自动配置连接池参数
-- **连接重试**: 智能重试机制，支持指数退避和抖动
-- **日志自定义**: 支持文件日志输出
-- **读写分离预留**: 为未来扩展预留接口
-- **线程安全**: 支持并发访问
-- **错误处理**: 友好的错误信息
-- **GORM Gen 兼容**: 直接将 `*gorm.DB` 注入生成代码，事务/上下文保持一致
+`database` 是资源型 SDK：
 
-## 🚀 快速开始
+- 主路径是显式实例：`New` / `NewWithOptions`
+- 兼容路径是默认实例：`Configure` / `GetClient`
+- 单库应用可用默认实例
+- 多库、测试、框架初始化、事务编排优先使用显式实例
 
-### 基础使用 - 简化配置
+## 特性
+
+- 支持 MySQL、PostgreSQL、SQLite
+- 配置校验与默认值补齐
+- 连接池与连接重试
+- `Connector` / `Executor` / `HealthChecker` 可替换
+- 支持 `Hooks` 扩展生命周期
+- 保留 `GetDB` / `Raw` / `SQLDB` 以支持高级 GORM 或驱动原生能力
+
+## 快速开始
+
+### 显式实例
 
 ```go
 package main
 
 import (
-    "go-kit/pkg/database"
-    "gorm.io/gorm"
+	"context"
+	"log"
+
+	"github.com/tsopia/go-kit/database"
 )
 
 func main() {
-    // 1. 使用Builder模式创建配置
-    config := database.NewConfigBuilder().
-        SQLite(":memory:").
-        Build()
+	cfg := &database.Config{
+		Driver:   "sqlite",
+		Database: ":memory:",
+		LogLevel: "silent",
+	}
 
-    // 2. 创建数据库连接
-    db, err := database.New(config)
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
+	db, err := database.New(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
 
-    // 3. 获取GORM实例
-    gormDB := db.GetDB()
-    
-    // 4. 使用GORM进行数据库操作
-    // ... 你的业务逻辑
+	if err := db.Ping(); err != nil {
+		log.Fatal(err)
+	}
+
+	var one int
+	if err := db.Query(context.Background(), &one, "SELECT 1"); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
+
+### 默认实例
+
+```go
+cfg := &database.Config{
+	Driver:   "sqlite",
+	Database: ":memory:",
+}
+
+if _, err := database.Configure(cfg); err != nil {
+	return fmt.Errorf("configure database: %w", err)
+}
+defer database.CloseDefault()
+
+if err := database.Ping(); err != nil {
+	return fmt.Errorf("ping database: %w", err)
+}
+
+if err := database.Exec(ctx, "UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", []interface{}{userID}); err != nil {
+	return fmt.Errorf("update last_seen: %w", err)
+}
+```
+
+说明：
+
+- 包级 `Ping` / `Exec` / `Query` 是默认实例的便捷包装
+- 若未 `Configure` 且未传显式实例，将返回 `ErrMissingClient`
+- 实例方法的调用体验更自然，优先推荐
+
+## 配置示例
+
+### MySQL
+
+```go
+cfg := &database.Config{
+	Driver:   "mysql",
+	Host:     "127.0.0.1",
+	Port:     3306,
+	Username: "root",
+	Password: "password",
+	Database: "app",
+	LogLevel: "warn",
+}
+```
+
+### PostgreSQL
+
+```go
+cfg := &database.Config{
+	Driver:   "postgres",
+	Host:     "127.0.0.1",
+	Port:     5432,
+	Username: "postgres",
+	Password: "password",
+	Database: "app",
+	SSLMode:  "disable",
+	LogLevel: "warn",
+}
+```
+
+### SQLite
+
+```go
+cfg := &database.Config{
+	Driver:   "sqlite",
+	Database: "test.db",
+	LogLevel: "silent",
+}
+```
+
+### 重试配置
+
+```go
+cfg := &database.Config{
+	Driver:             "mysql",
+	Host:               "127.0.0.1",
+	Port:               3306,
+	Username:           "root",
+	Password:           "password",
+	Database:           "app",
+	RetryEnabled:       true,
+	RetryMaxAttempts:   5,
+	RetryInitialDelay:  500 * time.Millisecond,
+	RetryMaxDelay:      10 * time.Second,
+	RetryBackoffFactor: 1.5,
+	RetryJitterEnabled: true,
+}
+```
+
+显式关闭重试：
+
+```go
+cfg := &database.Config{
+	Driver:          "sqlite",
+	Database:        "test.db",
+	RetryConfigured: true,
+	RetryEnabled:    false,
+}
+```
+
+## 核心 API
+
+### 构造与默认实例
+
+- `New(config *Config) (*Database, error)`
+- `NewWithOptions(config *Config, opts ...Option) (*Database, error)`
+- `Configure(config *Config, opts ...Option) (*Database, error)`
+- `GetClient() *Database`
+- `CloseDefault() error`
+
+### 实例方法
+
+- `Exec(ctx context.Context, query string, args ...interface{}) error`
+- `Query(ctx context.Context, dest interface{}, query string, args ...interface{}) error`
+- `Tx(ctx context.Context, fn func(tx *gorm.DB) error, opts ...*sql.TxOptions) error`
+- `BeginTx(ctx context.Context, opts ...*sql.TxOptions) (*gorm.DB, error)`
+- `Ping() error`
+- `HealthCheck() error`
+- `HealthCheckWithContext(ctx context.Context) *HealthStatus`
+- `GetDB() *gorm.DB`
+- `Raw() *gorm.DB`
+- `SQLDB() (*sql.DB, error)`
+- `Close() error`
+
+### 包级便捷方法
+
+- `Ping(c ...*Database) error`
+- `Exec(ctx context.Context, query string, args []interface{}, c ...*Database) error`
+- `Query(ctx context.Context, dest interface{}, query string, args []interface{}, c ...*Database) error`
+
+## 组件化职责
+
+- `Connector`：负责建连、重试、命名策略、连接池
+- `Executor`：负责 `Exec` / `Query` / `Tx` / `BeginTx`
+- `HealthChecker`：负责 `Ping` / `HealthCheck` / `HealthCheckWithContext`
+
+可通过以下选项替换默认实现：
+
+- `WithConnector`
+- `WithExecutor`
+- `WithHealthChecker`
+- `WithLogger`
+- `WithHooks`
+
+## 高级能力
 
 ### 与 gorm/gen 集成
 
 ```go
-// 假设生成的 query 包路径为 "yourapp/internal/query"
-import (
-    "context"
-    "database/sql"
+q := query.Use(db.GetDB())
 
-    "github.com/tsopia/go-kit/database"
-    "gorm.io/gorm"
-    "yourapp/internal/model" // gorm/gen 生成的 model 包路径
-    "yourapp/internal/query" // gorm/gen 生成的 query 包路径
-)
-
-func main() {
-    cfg := database.NewConfigBuilder().
-        MySQL("127.0.0.1", "root", "password", "app").
-        Build()
-
-    db, err := database.New(cfg)
-    if err != nil {
-        panic(err)
-    }
-    defer db.Close()
-
-    // 将封装后的 *gorm.DB 传给 gorm/gen 生成的 query 层
-    q := query.Use(db.GetDB())
-
-    ctx := context.Background()
-
-    // 在同一个事务中执行多张表的操作（gorm/gen 默认 Transaction 基于 *gorm.DB）
-    err = db.TransactionWithContext(ctx, func(tx *gorm.DB) error {
-        // 将事务会话透传给生成的 query（Use 会克隆 tx，WithContext 传递 ctx）
-        qtx := query.Use(tx).WithContext(ctx)
-
-        if _, err := qtx.User.Create(&model.User{Name: "foo"}); err != nil {
-            return err
-        }
-
-        _, err := qtx.Account.Create(&model.Account{UserID: 1, Balance: 100})
-        return err
-    })
-    if err != nil {
-        panic(err)
-    }
-}
+err := db.TransactionWithContext(ctx, func(tx *gorm.DB) error {
+	qtx := query.Use(tx).WithContext(ctx)
+	_, err := qtx.User.Create(&model.User{Name: "foo"})
+	return err
+})
 ```
 
-> 如果需要指定隔离级别/读写模式，可使用 `BeginTx` 显式开启事务并传入 `sql.TxOptions`：
+### 使用底层 `*sql.DB`
 
 ```go
-tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: false})
-if err != nil {
-    panic(err)
-}
-qtx := query.Use(tx).WithContext(ctx)
-// ...业务 SQL...
-if err := tx.Commit().Error; err != nil {
-    _ = tx.Rollback()
-    panic(err)
-}
-```
-
-### 封装接口与受控逃逸
-
-`Database` 同时实现了 `database.DB` 接口，优先使用封装好的方法，必要时再通过受控逃逸访问底层 `*gorm.DB`：
-
-```go
-cfg := database.NewConfigBuilder().MySQL("127.0.0.1", "root", "pwd", "app").Build()
-
-db, err := database.NewWithOptions(
-    cfg,
-    database.WithLogger(myLogger),
-    database.WithHooks(database.Hooks{BeforeProbe: func(ctx context.Context) error {
-        // 探针前的自定义检查，例如 feature flag
-        return nil
-    }}),
-)
-if err != nil {
-    panic(err)
-}
-defer db.Close()
-
-// 优先使用封装接口
-if err := db.Exec(ctx, "UPDATE users SET last_seen = NOW() WHERE id = ?", userID); err != nil {
-    panic(err)
-}
-var u userModel
-if err := db.Query(ctx, &u, "SELECT * FROM users WHERE id = ?", userID); err != nil {
-    panic(err)
-}
-
-// 需要 gorm 高级能力时，再受控获取
-gormDB := db.Raw()
-
-// 需要专用连接或 driver 原生能力（如 PostgreSQL LISTEN/NOTIFY、pgvector 扩展）
 sqlDB, err := db.SQLDB()
 if err != nil {
-    panic(err)
+	return fmt.Errorf("get sql db: %w", err)
 }
 defer sqlDB.Close()
 ```
 
-### 组件化职责（Phase 1）
-
-数据库封装已拆分为可替换的职责组件，便于按需扩展或接入自定义实现：
-
-- **Connector**：负责配置验证、连接建立与重试、命名策略以及连接池参数配置。
-- **Executor**：承载 `Exec` / `Query` / `Tx` / `BeginTx` 等常规执行能力。
-- **HealthChecker**：实现 `Ping` / `HealthCheck` / `HealthCheckWithContext`，串联探针钩子。
-
-默认实现随 `database.New/NewWithOptions` 一起注入；若需要接入自定义拨号器或观测增强，可以通过 `WithConnector`、`WithExecutor`、`WithHealthChecker` 选项替换对应组件，无需修改业务代码。
-
-### 命名与兼容约定
-
-- `GetDB()` 与 `Raw()` 属于公开 API，保持向后兼容。
-- 内部私有辅助方法可重构或去重，但不应改变导出方法行为与线程安全语义。
-
-### PostgreSQL 高级能力示例
-
-#### LISTEN/NOTIFY（类消息队列）
-GORM 不直接暴露异步通知 API，但可以通过 `SQLDB()` 拿到底层连接，并结合 `pgx` stdlib 驱动访问原生 `*pgconn.PgConn`：
-
-```go
-import (
-    "context"
-    "log"
-
-    "github.com/jackc/pgx/v5/pgconn"
-    "github.com/jackc/pgx/v5/stdlib"
-    "github.com/tsopia/go-kit/database"
-)
-
-db, _ := database.New(database.NewConfigBuilder().
-    PostgreSQL("127.0.0.1", "postgres", "pwd", "app").Build())
-ctx := context.Background()
-
-sqlDB, _ := db.SQLDB()
-conn, _ := sqlDB.Conn(ctx)
-defer conn.Close()
-
-var pgConn *pgconn.PgConn
-_ = conn.Raw(func(dc interface{}) error {
-    stdConn, ok := dc.(*stdlib.Conn)
-    if !ok {
-        return fmt.Errorf("unexpected driver conn %T", dc)
-    }
-    pgConn = stdConn.Conn()
-    return nil
-})
-
-if _, err := pgConn.Exec(ctx, "LISTEN events").ReadAll(); err != nil {
-    log.Fatal(err)
-}
-for {
-    notif, err := pgConn.WaitForNotification(ctx)
-    if err != nil {
-        log.Fatal(err)
-    }
-    log.Printf("channel=%s payload=%s", notif.Channel, notif.Payload)
-}
-```
-
-#### pgvector 嵌入向量
-`pgvector` 需通过扩展启用，创建列时可直接使用 `Raw()`/GORM 声明字段类型：
-
-```go
-import "github.com/pgvector/pgvector-go"
-
-// 启用扩展
-_ = db.Raw().Exec("CREATE EXTENSION IF NOT EXISTS vector").Error
-
-// 定义模型
-type Item struct {
-    ID        int64
-    Embedding pgvector.Vector `gorm:"type:vector(3)"`
-}
-
-// 相似度查询
-var items []Item
-err := db.Raw().
-    Where("embedding <-> ? < 0.3", pgvector.NewVector([]float32{0.1, 0.2, 0.3})).
-    Find(&items).Error
-```
-
-### 高级配置 - 自定义重试策略
-
-```go
-// 自定义重试配置
-config := &database.Config{
-    Driver:   "mysql",
-    Host:     "localhost",
-    Port:     3306,
-    Username: "root",
-    Password: "password",
-    Database: "test",
-    
-    // 自定义重试策略
-    RetryEnabled:       true,
-    RetryMaxAttempts:   5,                    // 最大重试5次
-    RetryInitialDelay:  500 * time.Millisecond, // 初始延迟0.5秒
-    RetryMaxDelay:      10 * time.Second,      // 最大延迟10秒
-    RetryBackoffFactor: 1.5,                   // 退避因子1.5
-    RetryJitterEnabled: true,                  // 启用抖动
-}
-
-db, err := database.New(config)
-if err != nil {
-    log.Fatal(err)
-}
-defer db.Close()
-```
-
-### 禁用重试
-
-```go
-// 禁用重试机制
-config := &database.Config{
-    Driver:   "sqlite",
-    Database: "test.db",
-    
-    // 禁用重试
-    RetryEnabled:     false,
-    RetryMaxAttempts: 1, // 或者设置为1
-}
-```
-
-### 不同数据库的简化配置
-
-```go
-// MySQL - 最简单
-config := database.NewConfigBuilder().
-    MySQL("localhost", "root", "password", "test_db").
-    Build()
-
-// PostgreSQL - 带高级选项
-config := database.NewConfigBuilder().
-    PostgreSQL("localhost", "postgres", "password", "test_db").
-    WithPort(5432).
-    WithSSLMode("disable").
-    WithLogFile("/tmp/pg.log").
-    Build()
-
-// SQLite - 内存数据库
-config := database.NewConfigBuilder().
-    SQLite(":memory:").
-    Build()
-```
-
-### 高级配置
-
-```go
-config := &database.Config{
-    Driver:          "mysql",
-    Host:            "localhost",
-    Port:            3306,
-    Username:        "root",
-    Password:        "password",
-    Database:        "test_db",
-    Charset:         "utf8mb4",
-    Timezone:        "Local",
-    
-    // 连接池配置
-    MaxIdleConns:    10,
-    MaxOpenConns:    100,
-    ConnMaxLifetime: time.Hour,
-    ConnMaxIdleTime: 10 * time.Minute,
-    
-    // 日志配置
-    LogLevel:        "info",
-    SlowThreshold:   200 * time.Millisecond,
-    Colorful:        true,
-    LogOutput:       "file:///var/log/db.log", // 文件日志
-    
-    // 命名策略
-    TablePrefix:     "app_",
-    SingularTable:   true,
-    
-    // 其他配置
-    DisableForeignKey: false,
-    PrepareStmt:       true,
-    DryRun:            false,
-}
-```
-
-## 📋 配置说明
-
-### 基础配置
-
-| 字段 | 类型 | 说明 | 必填 |
-|------|------|------|------|
-| `Driver` | string | 数据库驱动 (mysql/postgres/sqlite) | ✅ |
-| `Host` | string | 数据库主机 | MySQL/PostgreSQL必填 |
-| `Port` | int | 数据库端口 | MySQL/PostgreSQL必填 |
-| `Username` | string | 数据库用户名 | MySQL/PostgreSQL必填 |
-| `Password` | string | 数据库密码 | ❌ |
-| `Database` | string | 数据库名/文件路径 | ✅ |
-
-### 连接池配置
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `MaxIdleConns` | int | 10 | 最大空闲连接数 |
-| `MaxOpenConns` | int | 100 | 最大打开连接数 |
-| `ConnMaxLifetime` | time.Duration | 1小时 | 连接最大生命周期 |
-| `ConnMaxIdleTime` | time.Duration | 10分钟 | 空闲连接最大时间 |
-
-### 日志配置
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `LogLevel` | string | "info" | 日志级别 (silent/error/warn/info) |
-| `SlowThreshold` | time.Duration | 200ms | 慢查询阈值 |
-| `Colorful` | bool | false | 是否彩色输出 |
-| `LogOutput` | string | "" | 日志输出路径 (file:///path/to/log) |
-
-### 重试配置
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `RetryEnabled` | bool | true | 是否启用重试 (当MaxAttempts>1时自动启用) |
-| `RetryMaxAttempts` | int | 3 | 最大重试次数 |
-| `RetryInitialDelay` | time.Duration | 1s | 初始重试延迟 |
-| `RetryMaxDelay` | time.Duration | 30s | 最大重试延迟 |
-| `RetryBackoffFactor` | float64 | 2.0 | 退避因子 (指数退避) |
-| `RetryJitterEnabled` | bool | true | 是否启用抖动 (避免雷群效应) |
-
-## 🔧 API 参考
-
-### Config
-
-```go
-type Config struct {
-    // 基础配置
-    Driver   string
-    Host     string
-    Port     int
-    Username string
-    Password string
-    Database string
-    Charset  string
-    SSLMode  string
-    Timezone string
-    
-    // 连接池配置
-    MaxIdleConns    int
-    MaxOpenConns    int
-    ConnMaxLifetime time.Duration
-    ConnMaxIdleTime time.Duration
-    
-    // 日志配置
-    LogLevel      string
-    SlowThreshold time.Duration
-    Colorful      bool
-    LogOutput     string
-    
-    // 重试配置
-    RetryEnabled       bool
-    RetryMaxAttempts   int
-    RetryInitialDelay  time.Duration
-    RetryMaxDelay      time.Duration
-    RetryBackoffFactor float64
-    RetryJitterEnabled bool
-    
-    // 读写分离配置
-    ReadReplicas  []ReplicaConfig
-    WriteReplicas []ReplicaConfig
-    
-    // 其他配置
-    TablePrefix       string
-    SingularTable     bool
-    DisableForeignKey bool
-    PrepareStmt       bool
-    DryRun            bool
-    Plugins           []string
-    Hooks             map[string]string
-}
-```
-
-### Database
-
-```go
-type Database struct {
-    config *Config
-    db     *gorm.DB
-    mu     sync.RWMutex
-
-    connector     Connector
-    executor      Executor
-    healthChecker HealthChecker
-}
-```
-
-### 主要方法
-
-| 方法 | 说明 |
-|------|------|
-| `New(config *Config) (*Database, error)` | 创建数据库连接 |
-| `GetDB() *gorm.DB` | 获取GORM实例 |
-| `Raw() *gorm.DB` | 获取底层 GORM 实例（需自行控制高级能力） |
-| `SQLDB() (*sql.DB, error)` | 获取底层 *sql.DB，适合 LISTEN/NOTIFY、pgvector 等原生能力 |
-| `Close() error` | 关闭数据库连接 |
-| `Ping() error` | 测试数据库连接 |
-| `Stats() PoolStats` | 获取连接池统计 |
-| `AutoMigrate(dst ...interface{}) error` | 自动迁移表结构 |
-
-> 高级定制：需要替换拨号/执行/探针逻辑时，可通过 `WithConnector`、`WithExecutor`、`WithHealthChecker` 选项注入自定义实现，无需改动业务调用方。
-
-## 🧪 测试
-
-运行测试：
+## 测试
 
 ```bash
-go test ./pkg/database -v
+GOCACHE=/tmp/go-build go test ./database -v
 ```
 
-测试覆盖：
-- ✅ 配置验证
-- ✅ 数据库连接
-- ✅ CRUD操作
-- ✅ 事务处理
-- ✅ 错误处理
-- ✅ 并发访问
+说明：
 
-## 📝 示例
+- 某些环境直接执行 `go test ./...` 可能受仓库已知 `sonic` 基线问题影响
+- 与 `database` 无关时，优先使用包级增量测试验证
 
-### 简化配置示例
-完整示例请参考：[examples/database-simple/main.go](../examples/database-simple/main.go)
+## 注意事项
 
-### 传统配置示例
-完整示例请参考：[examples/database-optimized/main.go](../examples/database-optimized/main.go)
-
-## 🎯 配置简化对比
-
-### 传统方式 vs Builder模式
-
-**传统方式 (20+ 行):**
-```go
-config := &database.Config{
-    Driver:          "mysql",
-    Host:            "localhost",
-    Port:            3306,
-    Username:        "root",
-    Password:        "password",
-    Database:        "test_db",
-    Charset:         "utf8mb4",
-    Timezone:        "Local",
-    MaxIdleConns:    10,
-    MaxOpenConns:    100,
-    ConnMaxLifetime: time.Hour,
-    ConnMaxIdleTime: 10 * time.Minute,
-    LogLevel:        "info",
-    SlowThreshold:   200 * time.Millisecond,
-    Colorful:        true,
-    TablePrefix:     "app_",
-    SingularTable:   true,
-    PrepareStmt:     true,
-    DryRun:          false,
-}
-```
-
-**Builder模式 (5-10 行):**
-```go
-config := database.NewConfigBuilder().
-    MySQL("localhost", "root", "password", "test_db").
-    WithConnectionPool(10, 100, time.Hour, 10*time.Minute).
-    WithLogging("info", 200*time.Millisecond, true).
-    WithTablePrefix("app_").
-    Build()
-```
-
-### 优势总结
-
-| 维度 | 传统方式 | Builder模式 | 改进 |
-|------|----------|-------------|------|
-| **代码行数** | 20+ 行 | 5-10 行 | -70% |
-| **可读性** | 一般 | 优秀 | +50% |
-| **学习成本** | 高 | 低 | -60% |
-| **错误率** | 高 | 低 | -80% |
-| **维护性** | 一般 | 优秀 | +40% |
-
-## 🔄 优化历史
-
-### v1.2.0 (当前版本) - 配置简化
-
-**重大改进：**
-- ✅ **配置简化**: 引入Builder模式，配置代码减少70%
-- ✅ **学习成本降低**: 从20+字段简化为链式调用
-- ✅ **错误率降低**: 类型安全的Builder API
-- ✅ **可读性提升**: 配置意图一目了然
-
-**新增功能：**
-- `NewConfigBuilder()` - 配置构建器
-- `MySQL()/PostgreSQL()/SQLite()` - 数据库类型方法
-- `WithXXX()` - 链式配置方法
-- 合理的默认值，无需记忆所有参数
-
-### v1.1.0 (历史版本)
-
-**优化内容：**
-- ✅ 清理未使用的 `ConnectionPool` 接口
-- ✅ 改进错误信息友好性
-- ✅ 添加副本配置验证
-- ✅ 改进SQLite路径处理
-- ✅ 添加日志自定义支持
-- ✅ 完善测试用例
-
-**新增功能：**
-- 支持文件日志输出 (`LogOutput: "file:///path/to/log"`)
-- SQLite路径验证和目录检查
-- 更详细的错误信息提示
-- 完整的配置验证机制
-
-## 🚨 注意事项
-
-1. **资源管理**: 使用完毕后务必调用 `Close()` 方法
-2. **并发安全**: 支持并发访问，但建议在应用层做适当控制
-3. **配置验证**: 建议在创建连接前调用 `config.Validate()` 进行预校验
-4. **日志输出**: 文件日志路径需要确保目录存在且有写权限
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## �� 许可证
-
-MIT License 
+1. `database` 管理连接资源，使用完毕后应调用 `Close()` 或 `CloseDefault()`
+2. 默认实例适合单库应用；多库场景优先显式实例
+3. 包级 helper 为兼容入口，复杂调用优先实例方法

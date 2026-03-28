@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -42,7 +43,10 @@ func (e *gormExecutor) Tx(ctx context.Context, fn func(tx *gorm.DB) error, opts 
 		if e.logger != nil {
 			e.logger.Error("transaction failed", "error", err)
 		}
-		return tx.Rollback().Error
+		if rollbackErr := tx.Rollback().Error; rollbackErr != nil {
+			return fmt.Errorf("rollback transaction: %w: original error: %v", rollbackErr, err)
+		}
+		return err
 	}
 
 	return tx.Commit().Error
