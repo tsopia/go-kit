@@ -100,7 +100,7 @@ func (c *Config) SetDefaults() {
 	}
 
 	// 重试配置默认值
-	explicitRetryConfig := c.hasExplicitRetryConfig()
+	explicitRetryToggle := c.hasExplicitRetryToggle()
 	if c.RetryMaxAttempts == 0 {
 		c.RetryMaxAttempts = DefaultRetryMaxAttempts
 	}
@@ -114,7 +114,7 @@ func (c *Config) SetDefaults() {
 		c.RetryBackoffFactor = DefaultRetryBackoffFactor
 	}
 	// 未显式提供重试配置时，沿用默认启用策略。
-	if !explicitRetryConfig && c.RetryMaxAttempts > 1 {
+	if !explicitRetryToggle && c.RetryMaxAttempts > 1 {
 		c.RetryEnabled = true
 	}
 	if c.RetryEnabled && !c.RetryJitterEnabled {
@@ -140,12 +140,8 @@ func (c *Config) SetDefaults() {
 	}
 }
 
-func (c *Config) hasExplicitRetryConfig() bool {
-	return c.RetryConfigured ||
-		c.RetryMaxAttempts != 0 ||
-		c.RetryInitialDelay != 0 ||
-		c.RetryMaxDelay != 0 ||
-		c.RetryBackoffFactor != 0
+func (c *Config) hasExplicitRetryToggle() bool {
+	return c.RetryConfigured
 }
 
 // Validate 验证配置
