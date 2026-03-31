@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -274,43 +275,32 @@ func parseMySQLDSN(dsn string) (*Config, error) {
 func parsePostgresDSN(dsn string) (*Config, error) {
 	cfg := &Config{Driver: "postgres", Port: 5432}
 
-	// postgres:// or postgresql://user:pass@host:port/dbname
-	dsn = strings.TrimPrefix(dsn, "postgresql://")
-	dsn = strings.TrimPrefix(dsn, "postgres://")
-
-	parts := strings.Split(dsn, "@")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid PostgreSQL DSN")
+	// Use net/url to properly parse the URL and decode URL-encoded characters
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL DSN: %w", err)
 	}
 
-	// user:pass
-	auth := strings.Split(parts[0], ":")
-	if len(auth) >= 2 {
-		cfg.Username = auth[0]
-		cfg.Password = auth[1]
-	}
-
-	// host:port/dbname
-	addrParts := strings.Split(parts[1], "/")
-	if len(addrParts) >= 1 {
-		hostPort := strings.Split(addrParts[0], ":")
-		cfg.Host = hostPort[0]
-		if len(hostPort) > 1 {
-			fmt.Sscanf(hostPort[1], "%d", &cfg.Port)
+	// Extract credentials (automatically URL-decoded)
+	if u.User != nil {
+		cfg.Username = u.User.Username()
+		if password, ok := u.User.Password(); ok {
+			cfg.Password = password
 		}
 	}
 
-	if len(addrParts) > 1 {
-		// Handle query parameters: dbname?sslmode=require&...
-		dbName := addrParts[1]
-		if idx := strings.Index(dbName, "?"); idx != -1 {
-			cfg.Database = dbName[:idx]
-			// Parse and preserve query parameters
-			query := dbName[idx+1:]
-			cfg.Params = parseQueryParams(query)
-		} else {
-			cfg.Database = dbName
-		}
+	// Extract host and port
+	cfg.Host = u.Hostname()
+	if port := u.Port(); port != "" {
+		fmt.Sscanf(port, "%d", &cfg.Port)
+	}
+
+	// Extract database name (remove leading /)
+	cfg.Database = strings.TrimPrefix(u.Path, "/")
+
+	// Extract query parameters
+	if u.RawQuery != "" {
+		cfg.Params = parseQueryParams(u.RawQuery)
 	}
 
 	return cfg, nil

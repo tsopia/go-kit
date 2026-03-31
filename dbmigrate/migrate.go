@@ -48,6 +48,7 @@ func Up(ctx context.Context, cfg Config) error {
 }
 
 // UpTo migrates up to the specific version.
+// Returns error if target version is less than current version.
 func UpTo(ctx context.Context, cfg Config, version uint) error {
 	dsn, err := buildDSN(cfg.Database)
 	if err != nil {
@@ -62,6 +63,17 @@ func UpTo(ctx context.Context, cfg Config, version uint) error {
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 	defer m.Close()
+
+	// Get current version to prevent accidental down migrations
+	currentVersion, _, err := m.Version()
+	if err != nil && err != migrate.ErrNilVersion {
+		return fmt.Errorf("get current version: %w", err)
+	}
+
+	// UpTo should only migrate up, not down
+	if err != migrate.ErrNilVersion && version < currentVersion {
+		return fmt.Errorf("target version %d must be greater than or equal to current version %d", version, currentVersion)
+	}
 
 	if err := m.Migrate(version); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("migrate to version %d: %w", version, err)
