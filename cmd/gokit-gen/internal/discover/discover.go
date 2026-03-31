@@ -90,12 +90,12 @@ func parseGoFile(filename string) (*Config, error) {
 		// Check if it's database.Config or &database.Config
 		switch t := composit.Type.(type) {
 		case *ast.SelectorExpr:
-			if t.Sel.Name == "Config" {
+			if isDatabaseConfigSelector(t) {
 				found = true
 				extractConfigFields(composit, &cfg)
 			}
 		case *ast.StarExpr:
-			if sel, ok := t.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "Config" {
+			if sel, ok := t.X.(*ast.SelectorExpr); ok && isDatabaseConfigSelector(sel) {
 				found = true
 				extractConfigFields(composit, &cfg)
 			}
@@ -109,6 +109,17 @@ func parseGoFile(filename string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func isDatabaseConfigSelector(sel *ast.SelectorExpr) bool {
+	if sel.Sel.Name != "Config" {
+		return false
+	}
+	// Check if the package name is "database"
+	if ident, ok := sel.X.(*ast.Ident); ok {
+		return ident.Name == "database"
+	}
+	return false
 }
 
 func extractConfigFields(composit *ast.CompositeLit, cfg *Config) {
@@ -128,6 +139,8 @@ func extractConfigFields(composit *ast.CompositeLit, cfg *Config) {
 			cfg.Driver = extractStringValue(kv.Value)
 		case "Host":
 			cfg.Host = extractStringValue(kv.Value)
+		case "Port":
+			cfg.Port = extractIntValue(kv.Value)
 		case "Database":
 			cfg.Database = extractStringValue(kv.Value)
 		case "Username":
@@ -146,6 +159,16 @@ func extractStringValue(expr ast.Expr) string {
 		return v.Name
 	}
 	return ""
+}
+
+func extractIntValue(expr ast.Expr) int {
+	switch v := expr.(type) {
+	case *ast.BasicLit:
+		var val int
+		fmt.Sscanf(v.Value, "%d", &val)
+		return val
+	}
+	return 0
 }
 
 func fromEnvFile() (*Config, error) {
@@ -271,7 +294,12 @@ func parsePostgresDSN(dsn string) (*Config, error) {
 	}
 
 	if len(addrParts) > 1 {
-		cfg.Database = addrParts[1]
+		// Handle query parameters: dbname?sslmode=require
+		dbName := addrParts[1]
+		if idx := strings.Index(dbName, "?"); idx != -1 {
+			dbName = dbName[:idx]
+		}
+		cfg.Database = dbName
 	}
 
 	return cfg, nil

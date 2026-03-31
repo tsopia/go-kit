@@ -8,6 +8,9 @@ import (
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/tsopia/go-kit/database"
 )
 
@@ -184,6 +187,9 @@ func Force(cfg Config, version int) error {
 }
 
 func buildDSN(db *database.Database) (string, error) {
+	if db == nil {
+		return "", fmt.Errorf("database is nil")
+	}
 	cfg := db.GetConfig()
 
 	switch cfg.Driver {
