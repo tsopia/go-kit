@@ -26,17 +26,9 @@ type Config struct {
 
 // Up executes all pending up migrations.
 func Up(ctx context.Context, cfg Config) error {
-	dsn, err := buildDSN(cfg.Database)
+	m, err := createMigrate(cfg)
 	if err != nil {
-		return fmt.Errorf("build dsn: %w", err)
-	}
-
-	m, err := migrate.New(
-		"file://"+cfg.SourcePath,
-		dsn,
-	)
-	if err != nil {
-		return fmt.Errorf("create migrate instance: %w", err)
+		return err
 	}
 	defer m.Close()
 
@@ -74,17 +66,9 @@ func UpTo(ctx context.Context, cfg Config, version uint) error {
 
 // Down executes one down migration (rollback one version).
 func Down(ctx context.Context, cfg Config) error {
-	dsn, err := buildDSN(cfg.Database)
+	m, err := createMigrate(cfg)
 	if err != nil {
-		return fmt.Errorf("build dsn: %w", err)
-	}
-
-	m, err := migrate.New(
-		"file://"+cfg.SourcePath,
-		dsn,
-	)
-	if err != nil {
-		return fmt.Errorf("create migrate instance: %w", err)
+		return err
 	}
 	defer m.Close()
 
@@ -122,17 +106,9 @@ func DownTo(ctx context.Context, cfg Config, version uint) error {
 
 // Version returns the current migration version and dirty state.
 func Version(cfg Config) (version uint, dirty bool, err error) {
-	dsn, err := buildDSN(cfg.Database)
+	m, err := createMigrate(cfg)
 	if err != nil {
-		return 0, false, fmt.Errorf("build dsn: %w", err)
-	}
-
-	m, err := migrate.New(
-		"file://"+cfg.SourcePath,
-		dsn,
-	)
-	if err != nil {
-		return 0, false, fmt.Errorf("create migrate instance: %w", err)
+		return 0, false, err
 	}
 	defer m.Close()
 
@@ -169,17 +145,9 @@ func Status(cfg Config) (string, error) {
 // Force forces the migration version without running migrations.
 // Useful for fixing dirty state.
 func Force(cfg Config, version int) error {
-	dsn, err := buildDSN(cfg.Database)
+	m, err := createMigrate(cfg)
 	if err != nil {
-		return fmt.Errorf("build dsn: %w", err)
-	}
-
-	m, err := migrate.New(
-		"file://"+cfg.SourcePath,
-		dsn,
-	)
-	if err != nil {
-		return fmt.Errorf("create migrate instance: %w", err)
+		return err
 	}
 	defer m.Close()
 
@@ -244,7 +212,7 @@ func getCurrentVersion(m *migrate.Migrate) (uint, error) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get version: %w", err)
 	}
 	return version, nil
 }

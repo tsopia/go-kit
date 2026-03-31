@@ -167,9 +167,9 @@ func extractStringValue(expr ast.Expr) string {
 func extractIntValue(expr ast.Expr) int {
 	switch v := expr.(type) {
 	case *ast.BasicLit:
-		var val int
-		fmt.Sscanf(v.Value, "%d", &val)
-		return val
+		if val, err := strconv.Atoi(v.Value); err == nil {
+			return val
+		}
 	}
 	return 0
 }
