@@ -18,6 +18,11 @@ func connectDatabase(cfg *discover.Config) (*database.Database, error) {
 		cfg = parsedCfg
 	}
 
+	// 校验必需的 driver 字段
+	if cfg.Driver == "" {
+		return nil, fmt.Errorf("database driver is required (provide --driver or config)")
+	}
+
 	// 设置默认端口
 	if cfg.Port == 0 {
 		switch cfg.Driver {

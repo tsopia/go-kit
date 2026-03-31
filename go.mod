@@ -189,4 +189,7 @@ require (
 	gorm.io/plugin/dbresolver v1.5.0 // indirect
 )
 
+// 临时修复：gen v0.3.27 依赖的 dbresolver v1.5.0 与 gorm v1.31.1 不兼容
+// gen 已修复但未发版，等待 v0.3.28 后可移除 replace
+// 详见：https://github.com/go-gorm/gen/issues/1136
 replace gorm.io/plugin/dbresolver => gorm.io/plugin/dbresolver v1.6.1
