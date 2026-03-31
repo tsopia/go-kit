@@ -94,6 +94,7 @@ func Down(ctx context.Context, cfg Config) error {
 }
 
 // DownTo migrates down to the specific version.
+// Returns error if target version is greater than or equal to current version.
 func DownTo(ctx context.Context, cfg Config, version uint) error {
 	dsn, err := buildDSN(cfg.Database)
 	if err != nil {
@@ -108,6 +109,17 @@ func DownTo(ctx context.Context, cfg Config, version uint) error {
 		return fmt.Errorf("create migrate instance: %w", err)
 	}
 	defer m.Close()
+
+	// Get current version to prevent accidental up migrations
+	currentVersion, _, err := m.Version()
+	if err != nil && err != migrate.ErrNilVersion {
+		return fmt.Errorf("get current version: %w", err)
+	}
+
+	// DownTo should only migrate down, not up
+	if err != migrate.ErrNilVersion && version >= currentVersion {
+		return fmt.Errorf("target version %d must be less than current version %d", version, currentVersion)
+	}
 
 	if err := m.Migrate(version); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("migrate down to version %d: %w", version, err)
@@ -202,12 +214,17 @@ func buildDSN(db *database.Database) (string, error) {
 			cfg.Database,
 		), nil
 	case "postgres", "postgresql":
-		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=prefer",
+		sslmode := cfg.SSLMode
+		if sslmode == "" {
+			sslmode = "prefer"
+		}
+		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 			cfg.Username,
 			cfg.Password,
 			cfg.Host,
 			cfg.Port,
 			cfg.Database,
+			sslmode,
 		), nil
 	default:
 		return "", fmt.Errorf("unsupported driver: %s", cfg.Driver)

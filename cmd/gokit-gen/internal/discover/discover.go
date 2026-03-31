@@ -19,7 +19,8 @@ type Config struct {
 	Database string
 	Username string
 	Password string
-	DSN      string // Raw DSN if provided
+	DSN      string            // Raw DSN if provided
+	Params   map[string]string // Additional connection parameters (e.g., sslmode)
 }
 
 // FromProject attempts to discover database configuration from project files.
@@ -224,8 +225,8 @@ func ParseDSN(dsn string) (*Config, error) {
 		return parseMySQLDSN(dsn)
 	}
 
-	// Try to parse PostgreSQL DSN: postgres://user:pass@host:port/dbname
-	if strings.HasPrefix(dsn, "postgres://") {
+	// Try to parse PostgreSQL DSN: postgres:// or postgresql://
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		return parsePostgresDSN(dsn)
 	}
 
@@ -273,7 +274,8 @@ func parseMySQLDSN(dsn string) (*Config, error) {
 func parsePostgresDSN(dsn string) (*Config, error) {
 	cfg := &Config{Driver: "postgres", Port: 5432}
 
-	// postgres://user:pass@host:port/dbname
+	// postgres:// or postgresql://user:pass@host:port/dbname
+	dsn = strings.TrimPrefix(dsn, "postgresql://")
 	dsn = strings.TrimPrefix(dsn, "postgres://")
 
 	parts := strings.Split(dsn, "@")
@@ -299,13 +301,28 @@ func parsePostgresDSN(dsn string) (*Config, error) {
 	}
 
 	if len(addrParts) > 1 {
-		// Handle query parameters: dbname?sslmode=require
+		// Handle query parameters: dbname?sslmode=require&...
 		dbName := addrParts[1]
 		if idx := strings.Index(dbName, "?"); idx != -1 {
-			dbName = dbName[:idx]
+			cfg.Database = dbName[:idx]
+			// Parse and preserve query parameters
+			query := dbName[idx+1:]
+			cfg.Params = parseQueryParams(query)
+		} else {
+			cfg.Database = dbName
 		}
-		cfg.Database = dbName
 	}
 
 	return cfg, nil
+}
+
+func parseQueryParams(query string) map[string]string {
+	params := make(map[string]string)
+	pairs := strings.Split(query, "&")
+	for _, pair := range pairs {
+		if kv := strings.SplitN(pair, "=", 2); len(kv) == 2 {
+			params[kv[0]] = kv[1]
+		}
+	}
+	return params
 }

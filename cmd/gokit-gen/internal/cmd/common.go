@@ -42,5 +42,12 @@ func connectDatabase(cfg *discover.Config) (*database.Database, error) {
 		Password: cfg.Password,
 	}
 
+	// 传递 SSL 模式参数（如果有）
+	if cfg.Params != nil {
+		if sslmode, ok := cfg.Params["sslmode"]; ok {
+			dbCfg.SSLMode = sslmode
+		}
+	}
+
 	return database.New(dbCfg)
 }
