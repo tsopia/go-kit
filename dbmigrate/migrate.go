@@ -202,7 +202,7 @@ func buildDSN(db *database.Database) (string, error) {
 			cfg.Database,
 		), nil
 	case "postgres", "postgresql":
-		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+		return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=prefer",
 			cfg.Username,
 			cfg.Password,
 			cfg.Host,

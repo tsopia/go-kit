@@ -259,7 +259,12 @@ func parseMySQLDSN(dsn string) (*Config, error) {
 	}
 
 	if len(addrParts) > 1 {
-		cfg.Database = addrParts[1]
+		// Handle query parameters: dbname?parseTime=true
+		dbName := addrParts[1]
+		if idx := strings.Index(dbName, "?"); idx != -1 {
+			dbName = dbName[:idx]
+		}
+		cfg.Database = dbName
 	}
 
 	return cfg, nil
