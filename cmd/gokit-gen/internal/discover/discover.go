@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -74,7 +75,7 @@ func fromGoSource() (*Config, error) {
 
 func parseGoFile(filename string) (*Config, error) {
 	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
+	node, err := parser.ParseFile(fset, filename, nil, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +257,9 @@ func parseMySQLDSN(dsn string) (*Config, error) {
 		hostPort := strings.Split(addrParts[0], ":")
 		cfg.Host = hostPort[0]
 		if len(hostPort) > 1 {
-			fmt.Sscanf(hostPort[1], "%d", &cfg.Port)
+			if port, err := strconv.Atoi(hostPort[1]); err == nil {
+				cfg.Port = port
+			}
 		}
 	}
 
@@ -292,7 +295,9 @@ func parsePostgresDSN(dsn string) (*Config, error) {
 	// Extract host and port
 	cfg.Host = u.Hostname()
 	if port := u.Port(); port != "" {
-		fmt.Sscanf(port, "%d", &cfg.Port)
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.Port = p
+		}
 	}
 
 	// Extract database name (remove leading /)
@@ -300,19 +305,16 @@ func parsePostgresDSN(dsn string) (*Config, error) {
 
 	// Extract query parameters
 	if u.RawQuery != "" {
-		cfg.Params = parseQueryParams(u.RawQuery)
+		values, err := url.ParseQuery(u.RawQuery)
+		if err == nil {
+			cfg.Params = make(map[string]string)
+			for key, vals := range values {
+				if len(vals) > 0 {
+					cfg.Params[key] = vals[0]
+				}
+			}
+		}
 	}
 
 	return cfg, nil
-}
-
-func parseQueryParams(query string) map[string]string {
-	params := make(map[string]string)
-	pairs := strings.Split(query, "&")
-	for _, pair := range pairs {
-		if kv := strings.SplitN(pair, "=", 2); len(kv) == 2 {
-			params[kv[0]] = kv[1]
-		}
-	}
-	return params
 }
