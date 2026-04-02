@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	mysqlcfg "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -167,15 +168,29 @@ func calculateRetryDelay(config *Config, attempt int) time.Duration {
 }
 
 func buildMySQLDSN(config *Config) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=%s",
-		config.Username,
-		config.Password,
-		config.Host,
-		config.Port,
-		config.Database,
-		config.Charset,
-		config.Timezone,
-	)
+	cfg := mysqlcfg.Config{
+		User:                 config.Username,
+		Passwd:               config.Password,
+		Net:                  "tcp",
+		Addr:                 fmt.Sprintf("%s:%d", config.Host, config.Port),
+		DBName:               config.Database,
+		ParseTime:            true,
+		Loc:                  getTimeLocation(config.Timezone),
+		AllowNativePasswords: true,
+		Params:               map[string]string{"charset": config.Charset},
+	}
+	return cfg.FormatDSN()
+}
+
+func getTimeLocation(tz string) *time.Location {
+	if tz == "" {
+		tz = "Local"
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.Local
+	}
+	return loc
 }
 
 func buildPostgresDSN(config *Config) string {
