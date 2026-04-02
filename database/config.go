@@ -2,12 +2,15 @@ package database
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	mysqlcfg "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm/logger"
 )
 
@@ -43,6 +46,7 @@ type Config struct {
 	Username string `mapstructure:"username" json:"username" yaml:"username"`
 	Password string `mapstructure:"password" json:"password" yaml:"password"`
 	Database string `mapstructure:"database" json:"database" yaml:"database"`
+	DSN      string `mapstructure:"dsn" json:"dsn" yaml:"dsn"`
 	Charset  string `mapstructure:"charset" json:"charset" yaml:"charset"`
 	SSLMode  string `mapstructure:"ssl_mode" json:"ssl_mode" yaml:"ssl_mode"`
 	Timezone string `mapstructure:"timezone" json:"timezone" yaml:"timezone"`
@@ -80,6 +84,11 @@ type Config struct {
 
 // SetDefaults 设置默认值
 func (c *Config) SetDefaults() {
+	// 如果提供了 DSN，优先从 DSN 解析填充字段
+	if c.DSN != "" {
+		c.fillFromDSN()
+	}
+
 	if c.LogLevel == "" {
 		c.LogLevel = DefaultLogLevel
 	}
@@ -362,4 +371,87 @@ func isValidPostgreSQLSSLMode(sslMode string) bool {
 func isValidDatabaseName(name string) bool {
 	matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]+$`, name)
 	return matched && len(name) <= 64
+}
+
+func (c *Config) fillFromDSN() {
+	if strings.HasPrefix(c.DSN, "postgres://") || strings.HasPrefix(c.DSN, "postgresql://") {
+		c.fillFromPostgresDSN()
+	} else if strings.Contains(c.DSN, "@tcp(") {
+		c.fillFromMySQLDSN()
+	}
+}
+
+func (c *Config) fillFromMySQLDSN() {
+	cfg, err := mysqlcfg.ParseDSN(c.DSN)
+	if err != nil {
+		return
+	}
+	if c.Driver == "" {
+		c.Driver = "mysql"
+	}
+	if c.Username == "" {
+		c.Username = cfg.User
+	}
+	if c.Password == "" {
+		c.Password = cfg.Passwd
+	}
+	if c.Database == "" {
+		c.Database = cfg.DBName
+	}
+	if c.Host == "" || c.Port == 0 {
+		host, port := parseAddrFromDSN(cfg.Addr)
+		if c.Host == "" {
+			c.Host = host
+		}
+		if c.Port == 0 {
+			c.Port = port
+		}
+	}
+}
+
+func parseAddrFromDSN(addr string) (host string, port int) {
+	parts := strings.Split(addr, ":")
+	host = parts[0]
+	if len(parts) > 1 {
+		if p, err := strconv.Atoi(parts[1]); err == nil {
+			port = p
+		}
+	}
+	return
+}
+
+func (c *Config) fillFromPostgresDSN() {
+	u, err := url.Parse(c.DSN)
+	if err != nil {
+		return
+	}
+	if c.Driver == "" {
+		c.Driver = "postgres"
+	}
+	if u.User != nil {
+		if c.Username == "" {
+			c.Username = u.User.Username()
+		}
+		if pw, ok := u.User.Password(); ok && c.Password == "" {
+			c.Password = pw
+		}
+	}
+	if c.Host == "" {
+		c.Host = u.Hostname()
+	}
+	if c.Port == 0 {
+		if p := u.Port(); p != "" {
+			if port, err := strconv.Atoi(p); err == nil {
+				c.Port = port
+			}
+		}
+	}
+	if c.Database == "" {
+		c.Database = strings.TrimPrefix(u.Path, "/")
+	}
+	if c.SSLMode == "" {
+		if v := u.Query().Get("sslmode"); v != "" {
+			c.SSLMode = v
+		}
+	}
 }
