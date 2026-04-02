@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"net/url"
 	"time"
 
 	mysqlcfg "github.com/go-sql-driver/mysql"
@@ -194,15 +195,14 @@ func getTimeLocation(tz string) *time.Location {
 }
 
 func buildPostgresDSN(config *Config) string {
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		config.Host,
-		config.Port,
-		config.Username,
-		config.Password,
-		config.Database,
-		config.SSLMode,
-		config.Timezone,
-	)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(config.Username, config.Password),
+		Host:     fmt.Sprintf("%s:%d", config.Host, config.Port),
+		Path:     config.Database,
+		RawQuery: fmt.Sprintf("sslmode=%s&TimeZone=%s", config.SSLMode, config.Timezone),
+	}
+	return u.String()
 }
 
 func buildNamingStrategy(config *Config) schema.NamingStrategy {
