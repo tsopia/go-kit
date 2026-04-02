@@ -33,6 +33,8 @@ func LoadDatabaseConfig(opts LoadOptions) (*database.Config, error) {
 	// 来源 2：配置文件
 	if dbCfg, err := loadFromConfigFile(opts.ConfigPath); err == nil {
 		return dbCfg, nil
+	} else if opts.ConfigPath != "" {
+		return nil, fmt.Errorf("加载配置文件 %s 失败: %w", opts.ConfigPath, err)
 	}
 
 	// 来源 3：Go 源码发现

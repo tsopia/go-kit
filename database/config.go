@@ -398,6 +398,26 @@ func (c *Config) fillFromMySQLDSN() {
 	if c.Database == "" {
 		c.Database = cfg.DBName
 	}
+	if c.Host == "" || c.Port == 0 {
+		host, port := parseAddrFromDSN(cfg.Addr)
+		if c.Host == "" {
+			c.Host = host
+		}
+		if c.Port == 0 {
+			c.Port = port
+		}
+	}
+}
+
+func parseAddrFromDSN(addr string) (host string, port int) {
+	parts := strings.Split(addr, ":")
+	host = parts[0]
+	if len(parts) > 1 {
+		if p, err := strconv.Atoi(parts[1]); err == nil {
+			port = p
+		}
+	}
+	return
 }
 
 func (c *Config) fillFromPostgresDSN() {
