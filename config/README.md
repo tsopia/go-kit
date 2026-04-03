@@ -12,7 +12,7 @@
 | `config.GetStringWithDefault(key, def)` | `cfg.GetString(key, def)` |
 | `config.GetIntWithDefault(key, def)` | `cfg.GetInt(key, def)` |
 | `config.GetBoolWithDefault(key, def)` | `cfg.GetBool(key, def)` |
-| `config.GetClient()` | `cfg.Default()` |
+| `config.GetClient()` | `cfg.Default()`（返回 `Provider` 接口，非 `*viper.Viper`；如需 Viper 原生能力请直接 import viper） |
 
 ## 主要区别
 
