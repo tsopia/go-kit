@@ -92,6 +92,7 @@ resp, err := cli.NewRequest(http.MethodPost, "/users").
 | Pool IdleConnTimeout | 90s |
 | CircuitBreaker FailureThreshold | 5 |
 | CircuitBreaker SuccessThreshold | 1 |
+| CircuitBreaker MaxRequests | 1 |
 | CircuitBreaker Timeout | 30s |
 
 ## 核心 API

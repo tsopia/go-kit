@@ -16,9 +16,9 @@
 
 ## 主要区别
 
-- `cfg` 提供线程安全的 `Manager` 实例，支持多配置源
+- `cfg` 提供线程安全的 `Provider` 实例，支持多配置源
 - `cfg` 入口为 `New()` / `NewWithPrefix()` 创建实例，或 `Init()` / `InitWithPrefix()` 初始化全局实例
 - `cfg` 使用可选参数（`defaultValue ...T`）替代 `WithDefault` 后缀
-- `cfg` 导出明确的错误变量（`ErrNotLoaded`、`ErrNotFound`、`ErrTypeMismatch`）
+- `cfg` 导出明确的错误变量（`ErrNotInitialized`、`ErrNotFound`、`ErrTypeMismatch`）
 
 详细文档见 [`cfg/README.md`](../cfg/README.md)。

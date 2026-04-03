@@ -88,7 +88,8 @@ import "github.com/tsopia/go-kit/dbmigrate"
 // Run migrations on startup
 err := dbmigrate.Up(ctx, dbmigrate.Config{
     SourcePath: "migrations",
-    Database:   db,
+    DB:         db,
+    DriverName: "mysql",
 })
 ```
 
