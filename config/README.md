@@ -8,7 +8,7 @@
 
 | 旧版 (config) | 新版 (cfg) |
 |---------------|------------|
-| `config.LoadConfig(&c)` | `cfg.Load(&c)` |
+| `config.LoadConfig(&c)` | `cfg.Init()` + `cfg.Default()` |
 | `config.GetStringWithDefault(key, def)` | `cfg.GetString(key, def)` |
 | `config.GetIntWithDefault(key, def)` | `cfg.GetInt(key, def)` |
 | `config.GetBoolWithDefault(key, def)` | `cfg.GetBool(key, def)` |
@@ -17,6 +17,7 @@
 ## 主要区别
 
 - `cfg` 提供线程安全的 `Manager` 实例，支持多配置源
+- `cfg` 入口为 `New()` / `NewWithPrefix()` 创建实例，或 `Init()` / `InitWithPrefix()` 初始化全局实例
 - `cfg` 使用可选参数（`defaultValue ...T`）替代 `WithDefault` 后缀
 - `cfg` 导出明确的错误变量（`ErrNotLoaded`、`ErrNotFound`、`ErrTypeMismatch`）
 

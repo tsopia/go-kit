@@ -14,7 +14,7 @@
 ### 安装
 
 ```bash
-go install github.com/tsoria/go-kit/cmd/gokit@latest
+go install github.com/tsopia/go-kit/cmd/gokit@latest
 ```
 
 ### 命令
@@ -80,7 +80,7 @@ gokit update
 ### 安装
 
 ```bash
-go install github.com/tsoria/go-kit/cmd/gokit-gen@latest
+go install github.com/tsopia/go-kit/cmd/gokit-gen@latest
 ```
 
 ### 命令
@@ -99,8 +99,8 @@ go install github.com/tsoria/go-kit/cmd/gokit-gen@latest
 |------|------|
 | `--dsn` | 数据库 DSN（跳过自动发现） |
 | `--driver` | 驱动：mysql / postgres |
-| `--migrate-source` | 迁移文件目录（默认 migrations） |
-| `--out` | 输出目录（默认 internal/dal） |
+| `--migration-path` | 迁移文件目录（默认 migrations） |
+| `--out` | 输出目录（默认 internal/model） |
 | `--tables` | 指定生成的表（逗号分隔） |
 
 ### 示例
@@ -110,7 +110,7 @@ go install github.com/tsoria/go-kit/cmd/gokit-gen@latest
 gokit-gen sync
 
 # 指定输出目录
-gokit-gen sync --out ./pkg/model
+gokit-gen sync --out ./pkg/models
 
 # 指定表和连接
 gokit-gen gen --tables user,order --driver mysql --dsn "root:pass@tcp(localhost:3306)/mydb"
