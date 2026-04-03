@@ -36,8 +36,8 @@ gokit-gen gen                 # Generate models from database
 ```
 --dsn              Database DSN (skips auto-discovery)
 --driver           Database driver: mysql, postgres
---migrate-source   Migrations directory (default: migrations)
---out              Output directory (default: internal/dal)
+--migration-path   Migrations directory (default: migrations)
+--out              Output directory (default: internal/model)
 --tables           Comma-separated tables to generate
 ```
 
@@ -57,7 +57,7 @@ gokit-gen gen --tables user,order,product
 gokit-gen sync --driver mysql --dsn "root:pass@tcp(localhost:3306)/mydb"
 
 # Custom migrations path
-gokit-gen migrate up --migrate-source ./db/migrations
+gokit-gen migrate up --migration-path ./db/migrations
 ```
 
 ## Configuration Auto-Discovery
@@ -74,8 +74,8 @@ If auto-discovery fails, provide `--dsn` and `--driver`.
 
 | Item | Default | Override |
 |------|---------|----------|
-| Migrations | `migrations/` | `--migrate-source` |
-| Generated code | `internal/dal/` | `--out` |
+| Migrations | `migrations/` | `--migration-path` |
+| Generated code | `internal/model/` | `--out` |
 | Tables | All tables | `--tables` |
 
 ## dbmigrate Package
@@ -88,7 +88,8 @@ import "github.com/tsopia/go-kit/dbmigrate"
 // Run migrations on startup
 err := dbmigrate.Up(ctx, dbmigrate.Config{
     SourcePath: "migrations",
-    Database:   db,
+    DB:         db,
+    DriverName: "mysql",
 })
 ```
 
@@ -103,5 +104,5 @@ err := dbmigrate.Up(ctx, dbmigrate.Config{
 gokit-gen sync
 
 # 3. Use generated models in your code
-# internal/dal/query/user.gen.go
+# internal/model/query/user.gen.go
 ```
