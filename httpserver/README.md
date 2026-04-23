@@ -366,6 +366,25 @@ srv := httpserver.NewServer(&httpserver.Config{
 - `ReadinessPath`，默认 `/readyz`
 - `LivenessPath`，默认 `/livez`
 
+### 中间件与健康检查路由
+
+**重要**：当 `HealthCheckPort == 0`（共享主端口，默认值）时，`/health`、`/readyz`、`/livez` 在 `NewServer` 内部就已注册到 Gin engine 上。由于 Gin 的 `Use()` 只影响后续注册的路由，之后通过 `srv.Use(...)` 添加的中间件（如 `AccessLog`、`Recovery`、`RequestID` 等）**不会**应用到这些健康检查路由。
+
+这意味着：
+
+- 健康检查请求不会产生 AccessLog
+- 健康检查请求不会经过 Recovery、RequestID、TraceID 等中间件
+- `preset.NewProductionServer()` 和 `preset.NewDevelopmentServer()` 添加的中间件同样不影响健康检查路由
+
+如果你需要健康检查路由也经过完整的中间件链，推荐使用独立健康检查端口：
+
+```go
+srv := httpserver.NewServer(&httpserver.Config{
+	EnableHealthCheck: true,
+	HealthCheckPort:   18080, // 独立端口，不受主 engine 中间件链影响
+})
+```
+
 如果你需要自定义 `HealthCheckPath`，应优先在 `Config` 中传入，或在健康检查路由尚未注册前调用 `SetHealthCheckPath(...)`。一旦 health/readiness/liveness 路由已经注册，`SetHealthCheckPath(...)` 会返回错误，避免配置值与真实路由脱节。
 
 如果你需要在预热完成后再接流量，可以通过 `httpserver.WithManualReadiness()` 关闭自动 ready，然后在合适时机调用 `srv.MarkReady()`。`MarkReady()` / `MarkDraining()` 现在会在非法状态迁移时返回 `error`，而不是 panic。
