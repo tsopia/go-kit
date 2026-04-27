@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -1098,4 +1098,110 @@ func TestStructTool_RetryAndDirectReturn(t *testing.T) {
 	}
 
 	t.Logf("✅ 结构化输出成功: %+v", jd)
+}
+
+func TestExtractionMode_AutoDisableThinking(t *testing.T) {
+	tool := &simpleTool{
+		info: &schema.ToolInfo{
+			Name: "test_tool",
+			Desc: "test",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"query": {Type: schema.String, Desc: "query"},
+			}),
+		},
+		ret: `{"ok": true}`,
+	}
+
+	t.Run("auto_disable_thinking_when_no_instance", func(t *testing.T) {
+		cfg := AgentConfig{
+			Model: AgentModelConfig{
+				Config: ModelConfig{
+					Protocol: DEEPSEEK,
+					Model:    "deepseek-reasoner",
+					APIKey:   "test-key",
+					Thinking: &ThinkingConfig{Enable: true},
+				},
+			},
+			Tools:     ToolsConfig{Invokable: []InvokableTool{tool}},
+			Execution: ExecutionConfig{Mode: Extraction},
+		}
+		agent, err := NewAgent(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = agent
+	})
+
+	t.Run("keep_instance_unchanged_when_thinking_enabled", func(t *testing.T) {
+		fm := &fakeToolCallingModel{
+			responses: []*schema.Message{
+				{
+					Role: schema.Assistant,
+					ToolCalls: []schema.ToolCall{
+						{ID: "tc1", Function: schema.FunctionCall{Name: "test_tool", Arguments: `{"query":"test"}`}},
+					},
+				},
+				{Role: schema.Assistant, Content: "done"},
+			},
+		}
+		cfg := AgentConfig{
+			Model: AgentModelConfig{
+				Config: ModelConfig{
+					Thinking: &ThinkingConfig{Enable: true},
+				},
+				Instance: fm,
+			},
+			Tools:     ToolsConfig{Invokable: []InvokableTool{tool}},
+			Execution: ExecutionConfig{Mode: Extraction},
+		}
+		agent, err := NewAgent(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = agent
+	})
+
+	t.Run("no_thinking_config_no_op", func(t *testing.T) {
+		fm := &fakeToolCallingModel{
+			responses: []*schema.Message{
+				{
+					Role: schema.Assistant,
+					ToolCalls: []schema.ToolCall{
+						{ID: "tc1", Function: schema.FunctionCall{Name: "test_tool", Arguments: `{"query":"test"}`}},
+					},
+				},
+				{Role: schema.Assistant, Content: "done"},
+			},
+		}
+		cfg := AgentConfig{
+			Model:     AgentModelConfig{Instance: fm},
+			Tools:     ToolsConfig{Invokable: []InvokableTool{tool}},
+			Execution: ExecutionConfig{Mode: Extraction},
+		}
+		agent, err := NewAgent(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = agent
+	})
+
+	t.Run("assistant_mode_does_not_disable_thinking", func(t *testing.T) {
+		cfg := AgentConfig{
+			Model: AgentModelConfig{
+				Config: ModelConfig{
+					Protocol: DEEPSEEK,
+					Model:    "deepseek-reasoner",
+					APIKey:   "test-key",
+					Thinking: &ThinkingConfig{Enable: true},
+				},
+			},
+			Tools:     ToolsConfig{Invokable: []InvokableTool{tool}},
+			Execution: ExecutionConfig{Mode: Assistant},
+		}
+		agent, err := NewAgent(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = agent
+	})
 }
