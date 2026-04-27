@@ -110,7 +110,10 @@ func NewServer(config *Config, opts ...Option) *Server {
 		state:         StateNew,
 	}
 
-	// 如果启用了健康检查，自动注册健康检查路由
+	// 如果启用了健康检查，自动注册健康检查路由。
+	// 注意：这些路由直接注册在 engine 上，此时还没有任何中间件。
+	// 后续 srv.Use() 添加的中间件不会影响这些路由（Gin 的快照语义）。
+	// 如需健康检查路由也经过中间件链，请使用独立 HealthCheckPort。
 	if config.EnableHealthCheck {
 		server.EnableHealthCheck()
 		server.registerProbeRoutes()

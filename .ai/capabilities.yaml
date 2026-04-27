@@ -222,28 +222,57 @@ capabilities:
     dependencies: []
 
   - name: llm
-    description: 大模型客户端统一封装（Eino 兼容）
+    description: 大模型 Agent 统一封装（Eino 兼容，多协议路由，思考模式控制）
     import: github.com/tsopia/go-kit/llm
     scenarios:
-      - name: 创建 LLM 客户端
+      - name: 创建模型
         snippet: |
-          client, err := llm.New(llm.Config{
-              Provider: llm.ProviderOpenAI,
-              APIKey:   os.Getenv("OPENAI_API_KEY"),
+          model, err := llm.NewModel(ctx, llm.ModelConfig{
+              Protocol: llm.DEEPSEEK,
+              Model:    "deepseek-reasoner",
+              APIKey:   "sk-xxx",
           })
-      - name: 发送聊天请求
+      - name: 开启思考模式
         snippet: |
-          resp, err := client.Chat(ctx, llm.ChatRequest{
-              Messages: []llm.Message{
-                  {Role: llm.RoleUser, Content: "Hello"},
+          model, err := llm.NewModel(ctx, llm.ModelConfig{
+              Protocol: llm.CLAUDE,
+              Model:    "claude-sonnet-4-20250514",
+              APIKey:   "sk-xxx",
+              Thinking: &llm.ThinkingConfig{Enable: true, BudgetTokens: 10000},
+          })
+      - name: 显式关闭思考
+        snippet: |
+          model, err := llm.NewModel(ctx, llm.ModelConfig{
+              Protocol: llm.DEEPSEEK,
+              Model:    "deepseek-reasoner",
+              APIKey:   "sk-xxx",
+              Thinking: &llm.ThinkingConfig{Enable: false},
+          })
+      - name: 透传额外请求参数
+        snippet: |
+          model, err := llm.NewModel(ctx, llm.ModelConfig{
+              Protocol:    llm.OPENAI,
+              Model:       "gpt-4o",
+              APIKey:      "sk-xxx",
+              ExtraFields: map[string]any{"future_param": "value"},
+          })
+      - name: 创建 Extraction Agent
+        snippet: |
+          agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+              Model: llm.AgentModelConfig{Config: cfg},
+              Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
+              Execution: llm.ExecutionConfig{
+                  Mode:              llm.Extraction,
+                  DirectReturnTools: map[string]struct{}{"my_tool": {}},
               },
           })
-      - name: 流式响应
+      - name: 创建 Assistant Agent
         snippet: |
-          stream, err := client.ChatStream(ctx, request)
-          for chunk := range stream {
-              fmt.Print(chunk.Content)
-          }
+          agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+              Model:     llm.AgentModelConfig{Config: cfg},
+              Tools:     llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
+              Execution: llm.ExecutionConfig{Mode: llm.Assistant},
+          })
     dependencies: [kit]
 
   - name: pgmq

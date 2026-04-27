@@ -63,6 +63,16 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("compile runtime spec: %w", err)
 	}
 
+	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
+		if spec.Model.Config.Thinking != nil && spec.Model.Config.Thinking.Enable {
+			if spec.Model.Instance == nil {
+				thinkingCopy := *spec.Model.Config.Thinking
+				thinkingCopy.Enable = false
+				spec.Model.Config.Thinking = &thinkingCopy
+			}
+		}
+	}
+
 	built, err := buildPromptAndTools(ctx, spec)
 	if err != nil {
 		return nil, fmt.Errorf("build prompt and tools: %w", err)

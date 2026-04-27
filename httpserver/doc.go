@@ -74,6 +74,8 @@
 //   - `middleware.CORS(middleware.CORSConfig{})` 表示不启用 CORS
 //   - 浏览器 WebSocket 握手默认拒绝，必须显式配置 `WithWSAllowedOrigins(...)` 或 `WithWSOriginChecker(...)`
 //   - 如果挂了 `middleware.AccessLog(...)`，SSE/WS 会额外输出 `stream_connect` / `stream_disconnect` / `ws_upgrade_failed`
+//   - 共享主端口（HealthCheckPort == 0）时，/health、/readyz、/livez 在 NewServer 内部就已注册，
+//     后续 srv.Use() 添加的中间件不会应用到这些路由；如需完整中间件链，请使用独立 HealthCheckPort
 //
 // 可观测性扩展：
 //
