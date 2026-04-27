@@ -1159,6 +1159,12 @@ func TestExtractionMode_AutoDisableThinking(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = agent
+		if cfg.Model.Config.Thinking == nil || !cfg.Model.Config.Thinking.Enable {
+			t.Fatal("original cfg.Thinking should remain unchanged when Instance is provided")
+		}
+		if fm.calls != 0 {
+			t.Fatalf("instance should not be called during NewAgent, got %d calls", fm.calls)
+		}
 	})
 
 	t.Run("no_thinking_config_no_op", func(t *testing.T) {
