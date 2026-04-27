@@ -152,6 +152,9 @@ database/
 | HTTP 客户端 | `httpclient` | `httpclient.Get(ctx, url)` |
 | 对象存储 | `storage` | `storage.Upload(ctx, "file", reader)`, `storage.AuthorizeDirectUpload(ctx, req)` |
 | 加解密/JWT | `crypto` | `crypto.EncryptAES(data)`, `crypto.SignJWT(claims)` |
+| LLM Agent | `llm` | `llm.NewAgent(ctx, llm.AgentConfig{...})` |
+| LLM 模型创建 | `llm` | `llm.NewModel(ctx, llm.ModelConfig{Protocol, Model, APIKey, Thinking, ExtraFields})` |
+| LLM 思考模式 | `llm` | `Thinking: &llm.ThinkingConfig{Enable: true, BudgetTokens: 10000}` |
 
 ## 项目迁移指南
 

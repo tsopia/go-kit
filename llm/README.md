@@ -61,7 +61,64 @@ fmt.Println(msg.Content)
 
 ## 🛠 高级功能
 
-### 0. 执行模式与配置约束
+### 0. 思考模式 (Thinking)
+
+部分模型支持"思考"模式（如 Claude Extended Thinking、DeepSeek R1、Qwen3 思考模式）。通过 `ModelConfig.Thinking` 统一控制：
+
+```go
+cfg := llm.ModelConfig{
+    Protocol: llm.CLAUDE,
+    Model:    "claude-sonnet-4-20250514",
+    APIKey:   "sk-xxx",
+    Thinking: &llm.ThinkingConfig{
+        Enable:       true,
+        BudgetTokens: 10000, // 仅 Claude 支持
+    },
+}
+```
+
+**供应商映射**：
+
+| 供应商 | 映射方式 |
+|--------|---------|
+| Claude | `Config.Thinking{Enable, BudgetTokens}` |
+| OpenAI / Kimi | `ExtraFields["thinking"] = {"type": "enabled"}` |
+| Qwen | `Config.EnableThinking` |
+| DeepSeek | `Config.ThinkingConfig{Type: "enabled"}` |
+| Gemini | `Config.ThinkingConfig{IncludeThoughts, ThinkingBudget}` |
+| Ollama | `Config.Thinking{Value: true}` |
+| Ark | `Config.Thinking{Type: "enabled"}` |
+
+**语义约定**：
+
+- `Thinking == nil`（默认）：不传参数，使用模型自身默认行为
+- `Thinking.Enable = true`：显式开启思考
+- `Thinking.Enable = false`：显式关闭（用于关闭默认开启思考的模型，如 DeepSeek R1）
+
+**Extraction 模式自动关闭**：
+
+当使用 `Extraction` 模式（强制 tool call）时，思考模式会自动关闭。因为 Qwen/DeepSeek 等模型的思考模式与 `tool_choice: required` 不兼容，同时使用会导致 API 报错。
+
+### 1. 额外参数透传 (ExtraFields)
+
+通过 `ModelConfig.ExtraFields` 可以透传任意参数到请求 JSON 的第一层：
+
+```go
+cfg := llm.ModelConfig{
+    Protocol:    llm.OPENAI,
+    Model:       "gpt-4o",
+    APIKey:      "sk-xxx",
+    ExtraFields: map[string]any{
+        "custom_param": "value",
+    },
+}
+```
+
+支持透传的供应商：Claude（`AdditionalRequestFields`）、OpenAI/Kimi（`ExtraFields`）、Qwen（继承 OpenAI）。DeepSeek 暂不支持 config 级透传。
+
+**优先级**：用户 `ExtraFields` 优先于 `ThinkingConfig` 自动生成的字段，可用于覆盖默认映射。
+
+### 2. 执行模式与配置约束
 
 推荐优先使用 `Execution.Mode` 描述 Agent 行为：
 
@@ -76,7 +133,7 @@ fmt.Println(msg.Content)
 - `Assistant` 不允许配置 `MaxRetries`
 - `DirectReturnTools` 中的工具名必须真实存在，否则 `NewAgent` 会直接返回错误
 
-### 1. 可观测性 (Observability)
+### 3. 可观测性 (Observability)
 
 `llm` 现在有两条互补的观测链路：
 
@@ -160,7 +217,7 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 3. 如果有 `tool.start` 但没有 `tool.success`，继续看 `tool.error` 的 `retryable` / `terminal`
 4. 如果工具成功但结果不像最终回答，检查 `direct_return` 是否命中，或者是否仍回到了模型总结
 
-### 2. Extraction 模式与失败修复
+### 4. Extraction 模式与失败修复
 
 ```go
 agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
@@ -174,7 +231,7 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 
 `MaxRetries` 只在 `Extraction` 模式下有效；如果放到 `Conversation` 或 `Assistant`，`NewAgent` 会直接报错。
 
-### 3. 工具结果直接返回 (Direct Return)
+### 5. 工具结果直接返回 (Direct Return)
 
 某些场景下（如搜索），工具执行后不需要模型再通过 LLM 总结，直接返回工具结果可节省 Token：
 
@@ -192,7 +249,7 @@ agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
 
 `DirectReturnTools` 只能填写已经注册到 `Tools.Standard`、`Tools.Invokable` 或 MCP 中的工具名。
 
-### 4. 运行时动态控制 (Runtime Options)
+### 6. 运行时动态控制 (Runtime Options)
 
 在 `Generate` 或 `Stream` 时动态修改行为，不影响 Agent 实例。
 
