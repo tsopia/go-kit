@@ -1167,6 +1167,26 @@ func TestExtractionMode_AutoDisableThinking(t *testing.T) {
 		}
 	})
 
+	t.Run("auto_disable_thinking_when_thinking_nil", func(t *testing.T) {
+		cfg := AgentConfig{
+			Model: AgentModelConfig{
+				Config: ModelConfig{
+					Protocol: DEEPSEEK,
+					Model:    "deepseek-reasoner",
+					APIKey:   "test-key",
+					// Thinking 未配置 (nil)
+				},
+			},
+			Tools:     ToolsConfig{Invokable: []InvokableTool{tool}},
+			Execution: ExecutionConfig{Mode: Extraction},
+		}
+		agent, err := NewAgent(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = agent
+	})
+
 	t.Run("no_thinking_config_no_op", func(t *testing.T) {
 		fm := &fakeToolCallingModel{
 			responses: []*schema.Message{

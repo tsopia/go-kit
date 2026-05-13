@@ -64,8 +64,10 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 	}
 
 	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
-		if spec.Model.Config.Thinking != nil && spec.Model.Config.Thinking.Enable {
-			if spec.Model.Instance == nil {
+		if spec.Model.Instance == nil {
+			if spec.Model.Config.Thinking == nil {
+				spec.Model.Config.Thinking = &ThinkingConfig{Enable: false}
+			} else if spec.Model.Config.Thinking.Enable {
 				thinkingCopy := *spec.Model.Config.Thinking
 				thinkingCopy.Enable = false
 				spec.Model.Config.Thinking = &thinkingCopy
