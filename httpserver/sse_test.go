@@ -273,6 +273,96 @@ func TestServer_SSE_withHeartbeat(t *testing.T) {
 	}
 }
 
+func TestServer_SSEPost_routeRegistered(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	server.SSEPost("/events", func(stream SSEStream) {
+		<-stream.Context().Done()
+	})
+
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/stream/events" && r.Method == "POST" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("SSEPost route not registered")
+	}
+}
+
+func TestSSESender_Get(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set("user_id", "123")
+	c.Set("count", 42)
+
+	sender := &sseSender{ginCtx: c}
+
+	val, ok := sender.Get("user_id")
+	if !ok || val != "123" {
+		t.Errorf("Get(user_id) = (%v, %v), want (123, true)", val, ok)
+	}
+
+	val, ok = sender.Get("count")
+	if !ok || val != 42 {
+		t.Errorf("Get(count) = (%v, %v), want (42, true)", val, ok)
+	}
+
+	_, ok = sender.Get("missing")
+	if ok {
+		t.Error("Get(missing) should return ok=false")
+	}
+}
+
+func TestSSESender_Get_nilGinCtx(t *testing.T) {
+	sender := &sseSender{ginCtx: nil}
+	val, ok := sender.Get("key")
+	if ok || val != nil {
+		t.Errorf("Get with nil ginCtx = (%v, %v), want (nil, false)", val, ok)
+	}
+}
+
+func TestSSESender_GetString(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set("user_id", "abc")
+	c.Set("count", 42)
+
+	sender := &sseSender{ginCtx: c}
+
+	str, ok := sender.GetString("user_id")
+	if !ok || str != "abc" {
+		t.Errorf("GetString(user_id) = (%q, %v), want (abc, true)", str, ok)
+	}
+
+	_, ok = sender.GetString("count")
+	if ok {
+		t.Error("GetString(count) should return ok=false for non-string value")
+	}
+
+	_, ok = sender.GetString("missing")
+	if ok {
+		t.Error("GetString(missing) should return ok=false")
+	}
+}
+
+func TestSSESender_GetString_nilGinCtx(t *testing.T) {
+	sender := &sseSender{ginCtx: nil}
+	str, ok := sender.GetString("key")
+	if ok || str != "" {
+		t.Errorf("GetString with nil ginCtx = (%q, %v), want (empty, false)", str, ok)
+	}
+}
+
 func TestSplitLines(t *testing.T) {
 	tests := []struct {
 		name  string
