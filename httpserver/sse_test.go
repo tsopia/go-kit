@@ -273,6 +273,30 @@ func TestServer_SSE_withHeartbeat(t *testing.T) {
 	}
 }
 
+func TestServer_SSEPost_routeRegistered(t *testing.T) {
+	server := NewServer(&Config{Port: 8080})
+	server.SetGroups(
+		server.Engine().Group("/api"),
+		server.Engine().Group("/stream"),
+	)
+
+	server.SSEPost("/events", func(stream SSEStream) {
+		<-stream.Context().Done()
+	})
+
+	routes := server.Engine().Routes()
+	found := false
+	for _, r := range routes {
+		if r.Path == "/stream/events" && r.Method == "POST" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("SSEPost route not registered")
+	}
+}
+
 func TestSplitLines(t *testing.T) {
 	tests := []struct {
 		name  string

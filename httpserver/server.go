@@ -186,16 +186,26 @@ func (s *Server) Use(middleware ...gin.HandlerFunc) {
 	s.engine.Use(middleware...)
 }
 
-// SSE 注册一个 Server-Sent Events 路由。
+// SSE 注册一个 Server-Sent Events 路由（GET 方法）。
 // 自动设置 SSE 响应头，清除 WriteDeadline，使用 streamingGroup（无 Timeout 中间件）。
 func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOption) {
-	// 应用选项
+	s.sseRegister("GET", relativePath, handler, opts...)
+}
+
+// SSEPost 注册一个 Server-Sent Events 路由（POST 方法）。
+// 行为与 SSE 相同，但使用 POST 方法注册，支持通过 request body 传递较长输入。
+func (s *Server) SSEPost(relativePath string, handler SSEHandlerFunc, opts ...SSEOption) {
+	s.sseRegister("POST", relativePath, handler, opts...)
+}
+
+// sseRegister 是 SSE/SSEPost 的共用注册逻辑。
+func (s *Server) sseRegister(method, relativePath string, handler SSEHandlerFunc, opts ...SSEOption) {
 	cfg := &sseConfig{}
 	for _, opt := range opts {
 		opt.apply(cfg)
 	}
 
-	s.getStreamingGroup().GET(relativePath, func(c *gin.Context) {
+	ginHandler := func(c *gin.Context) {
 		startedAt := time.Now()
 
 		// 清除 WriteDeadline。SSE 是长连接，deadline 只做 best effort，
@@ -231,7 +241,14 @@ func (s *Server) SSE(relativePath string, handler SSEHandlerFunc, opts ...SSEOpt
 
 		// 连接断开时打印日志
 		stream.logDisconnect(ctx)
-	})
+	}
+
+	switch method {
+	case "POST":
+		s.getStreamingGroup().POST(relativePath, ginHandler)
+	default:
+		s.getStreamingGroup().GET(relativePath, ginHandler)
+	}
 }
 
 // WS 注册一个 WebSocket 路由。
