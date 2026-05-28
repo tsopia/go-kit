@@ -49,6 +49,8 @@ type SSEStream interface {
 	Context() context.Context
 	Request() *http.Request
 	Param(name string) string
+	Get(key string) (any, bool)
+	GetString(key string) (string, bool)
 }
 
 // SSEHandlerFunc 是 SSE handler 的函数签名。
@@ -81,6 +83,22 @@ func (s *sseSender) Param(name string) string {
 		return ""
 	}
 	return s.ginCtx.Param(name)
+}
+
+func (s *sseSender) Get(key string) (any, bool) {
+	if s.ginCtx == nil {
+		return nil, false
+	}
+	return s.ginCtx.Get(key)
+}
+
+func (s *sseSender) GetString(key string) (string, bool) {
+	val, ok := s.Get(key)
+	if !ok {
+		return "", false
+	}
+	str, ok := val.(string)
+	return str, ok
 }
 
 func (s *sseSender) Event(name string, data any) error {
