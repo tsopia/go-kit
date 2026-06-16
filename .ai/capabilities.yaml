@@ -273,6 +273,27 @@ capabilities:
               Tools:     llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
               Execution: llm.ExecutionConfig{Mode: llm.Assistant},
           })
+      - name: 创建 ADK Agent（v0.9 ADK 后端）
+        snippet: |
+          agent, err := llm.NewADKAgent(ctx, llm.AgentConfig{
+              Model:     llm.AgentModelConfig{Config: cfg},
+              Tools:     llm.ToolsConfig{Invokable: []llm.InvokableTool{myTool}},
+              Execution: llm.ExecutionConfig{Mode: llm.Assistant},
+          })
+      - name: 并发控制（Agent 调用级信号量）
+        snippet: |
+          agent, err := llm.NewADKAgent(ctx, llm.AgentConfig{
+              Model:       llm.AgentModelConfig{Config: cfg},
+              Concurrency: llm.ConcurrencyConfig{MaxConcurrency: 3},
+          })
+      - name: 创建 Deep Agent（复杂任务规划+文件操作）
+        snippet: |
+          agent, err := llm.NewDeepAgent(ctx, llm.DeepAgentConfig{
+              Model:        llm.AgentModelConfig{Config: cfg},
+              Name:         "research-agent",
+              Backend:      filesystem.NewInMemoryBackend(),
+              Concurrency:  llm.ConcurrencyConfig{MaxConcurrency: 2},
+          })
     dependencies: [kit]
 
   - name: pgmq

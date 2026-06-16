@@ -88,7 +88,7 @@ func TestInspectDeepSeekStream(t *testing.T) {
 			fmt.Printf("  FinishReason: %q\n", msg.ResponseMeta.FinishReason)
 			if msg.ResponseMeta.Usage != nil {
 				fmt.Printf("  Usage:        %+v\n", msg.ResponseMeta.Usage)
-				if msg.ResponseMeta.Usage.CompletionTokensDetails != nil {
+				if msg.ResponseMeta.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
 					fmt.Printf("  ReasoningTok: %d\n", msg.ResponseMeta.Usage.CompletionTokensDetails.ReasoningTokens)
 				}
 			}
@@ -170,7 +170,7 @@ func TestInspectQwenStream(t *testing.T) {
 			fmt.Printf("  FinishReason: %q\n", msg.ResponseMeta.FinishReason)
 			if msg.ResponseMeta.Usage != nil {
 				fmt.Printf("  Usage:        %+v\n", msg.ResponseMeta.Usage)
-				if msg.ResponseMeta.Usage.CompletionTokensDetails != nil {
+				if msg.ResponseMeta.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
 					fmt.Printf("  ReasoningTok: %d\n", msg.ResponseMeta.Usage.CompletionTokensDetails.ReasoningTokens)
 				}
 			}

@@ -73,4 +73,13 @@ type AgentConfig struct {
 	Execution     ExecutionConfig
 	Streaming     StreamingConfig
 	Observability ObservabilityConfig
+	Concurrency   ConcurrencyConfig
+}
+
+// ConcurrencyConfig 控制单个 Agent 实例的最大并发调用数。
+type ConcurrencyConfig struct {
+	// MaxConcurrency 限制同一 Agent 实例上 Generate/Stream 的并发数。
+	// 0 表示不限制（默认）。到达上限后新的调用会阻塞等待已有调用释放名额，
+	// 等待中的调用可被 context 取消打断。
+	MaxConcurrency int
 }

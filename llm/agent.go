@@ -23,6 +23,7 @@ type Agent struct {
 	extraction *extractionRuntime
 	cleanup    func() error
 	logs       *structuredLogger
+	guard      *concurrencyGuard
 	mode       ExecutionMode
 	toolCount  int
 }
@@ -140,6 +141,7 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		extraction: extraction,
 		cleanup:    built.Cleanup,
 		logs:       structuredLogs,
+		guard:      newConcurrencyGuard(spec.Concurrency.MaxConcurrency),
 		mode:       spec.Execution.Mode,
 		toolCount:  len(built.Tools),
 	}, nil
@@ -148,6 +150,10 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 // Generate 非流式调用 Agent。
 // 模型会自动处理工具调用循环，直到返回最终答案。
 func (a *Agent) Generate(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (msg *schema.Message, err error) {
+	if err := a.guard.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer a.guard.release()
 	ctx = withInvocationID(ctx)
 	if a.cfg.Observability.StructuredLogs != nil {
 		ctx = withToolLogSession(ctx)
@@ -244,6 +250,9 @@ type agentControl struct {
 // Stream 流式调用 Agent。
 // 完整支持流式 tool call：模型推理 → 工具调用 → 再推理，全程流式。
 func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...agent.AgentOption) (*schema.StreamReader[*schema.Message], error) {
+	if err := a.guard.acquire(ctx); err != nil {
+		return nil, err
+	}
 	ctx = withInvocationID(ctx)
 	if a.cfg.Observability.StructuredLogs != nil {
 		ctx = withToolLogSession(ctx)
@@ -256,17 +265,13 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 
 	sr, err := a.inner.Stream(ctx, messages, opts...)
 	if err != nil {
+		a.guard.release()
 		return nil, err
 	}
 
-	// 对于 Stream 模式，如果需要 direct return，我们需要包装 StreamReader
-	if a.extraction != nil && len(a.cfg.Execution.DirectReturnTools) > 0 {
-		// Stream 模式下暂时不介入 ToolReturnDirectly，让模型总结照常输出。
-		// 如果用户真的需要 direct return，推荐使用 Generate 方法。
-		return sr, nil
-	}
-
-	return sr, nil
+	// Stream 模式下 release 延迟到流消费结束
+	// Extraction + DirectReturn 在 Stream 模式下不介入（让模型总结照常输出）
+	return wrapStreamWithGuard(sr, a.guard), nil
 }
 
 func (a *Agent) Close() error {

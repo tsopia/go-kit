@@ -13,6 +13,7 @@ type RuntimeSpec struct {
 	Execution     RuntimeExecutionSpec
 	Streaming     StreamingConfig
 	Observability ObservabilityConfig
+	Concurrency   ConcurrencyConfig
 }
 
 type RuntimeExecutionSpec struct {
@@ -39,6 +40,7 @@ func compileRuntimeSpec(cfg AgentConfig) (RuntimeSpec, error) {
 		Tools:         cfg.Tools,
 		Streaming:     cfg.Streaming,
 		Observability: cfg.Observability,
+		Concurrency:   cfg.Concurrency,
 		Execution: RuntimeExecutionSpec{
 			Mode:              mode,
 			MaxStep:           cfg.Execution.MaxStep,
