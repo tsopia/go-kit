@@ -94,4 +94,19 @@ func TestErrorToTextMiddleware_PassThroughOnSuccess(t *testing.T) {
 	}
 }
 
+func TestErrorToTextMiddleware_RecoversPanic(t *testing.T) {
+	mw := errorToTextMiddleware()
+	endpoint := mw.Invokable(func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
+		panic("kaboom")
+	})
+
+	out, err := endpoint(context.Background(), &compose.ToolInput{Name: "t", Arguments: "{}"})
+	if err != nil {
+		t.Fatalf("panic should be converted to text, got err=%v", err)
+	}
+	if out == nil || !strings.Contains(out.Result, "kaboom") {
+		t.Fatalf("expected result text containing panic value, got %+v", out)
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }

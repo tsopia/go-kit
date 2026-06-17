@@ -29,10 +29,17 @@ func observeStreamDecision(
 		var chunks []*schema.Message
 		defer func() {
 			sr.Close()
-			sw.Close()
-			if msg, err := schema.ConcatMessages(chunks); err == nil && msg != nil {
+			// 先记录决策日志，再关闭写端：这样消费者"读到 EOF"即蕴含
+			// "日志已写"，对读到 EOF 的调用方建立 happens-before（避免测试 flaky）。
+			if msg, err := schema.ConcatMessages(chunks); err != nil {
+				logs.logError(ctx, "model.decision",
+					"streaming", true,
+					"error", "concat stream chunks failed: "+err.Error(),
+				)
+			} else if msg != nil {
 				logStreamDecision(ctx, logs, mode, toolChoice, msg)
 			}
+			sw.Close()
 		}()
 		for {
 			chunk, err := sr.Recv()

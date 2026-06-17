@@ -49,7 +49,8 @@ weatherTool := llm.NewStructTool[WeatherResult]("extract_weather", "提取天气
 ### 3. 创建 Agent 并运行
 
 ```go
-agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+// 主推 NewADKAgent（基于 eino adk.ChatModelAgent）。配置与 legacy NewAgent 完全兼容。
+agent, _ := llm.NewADKAgent(ctx, llm.AgentConfig{
     Model: llm.AgentModelConfig{Config: cfg},
     Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{weatherTool}},
     Prompt: llm.PromptConfig{
@@ -294,13 +295,17 @@ agent.Generate(ctx, input, logOpt)
 为支持图片/音频的模型（GPT-4o / Claude 3+ / Gemini 等）构造多模态用户消息。
 URL 支持 HTTP(S) 链接或 `data:` URI：
 
+URL 仅允许 `http` / `https` / `data`（base64 data URI）协议，其它（如 `file://`）
+返回 `llm.ErrUnsupportedContentURLScheme`（防本地文件读取 / SSRF 纵深防御）：
+
 ```go
 // 单图 + 文本
-msg := llm.UserImageMessage("https://example.com/cat.png", "这是什么动物？")
+msg, err := llm.UserImageMessage("https://example.com/cat.png", "这是什么动物？")
+if err != nil { /* 处理非法 URL 协议 */ }
 // 多图 + 文本（顺序保留）
-msg = llm.UserImageMessages([]string{urlA, urlB}, "对比这两张图")
+msg, _ = llm.UserImageMessages([]string{urlA, urlB}, "对比这两张图")
 // 音频 + 文本
-msg = llm.UserAudioMessage("https://example.com/a.wav", "转写这段音频")
+msg, _ = llm.UserAudioMessage("https://example.com/a.wav", "转写这段音频")
 
 resp, _ := agent.Generate(ctx, []*schema.Message{msg})
 ```

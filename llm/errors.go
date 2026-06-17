@@ -29,4 +29,8 @@ var (
 
 	// ErrUnknownMCPProtocol 未知的 MCP 协议（仅支持 "stdio" / "sse"）。
 	ErrUnknownMCPProtocol = errors.New("llm: unknown mcp protocol")
+
+	// ErrUnsupportedContentURLScheme 多模态内容 URL 使用了不允许的协议。
+	// 仅允许 http / https / data，拒绝 file:// 等以防本地文件读取 / SSRF。
+	ErrUnsupportedContentURLScheme = errors.New("llm: unsupported content url scheme")
 )

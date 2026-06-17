@@ -50,10 +50,13 @@ type ToolsConfig struct {
 	// 若为 nil，参数原样透传。
 	ArgumentsFixer func(ctx context.Context, name, arguments string) (string, error)
 
-	// ErrorToText 为 true 时，工具执行错误被转为 ToolResult 文本回传给模型，
-	// 而非中断 Agent 流程（生产推荐）。
-	// 注意：为保持向后兼容，**默认（nil）为关闭**，行为与现状一致；
-	// 需显式设置 true 开启。开启后该工具调用在结构化日志中记为成功。
+	// ErrorToText 为 true 时，工具执行错误（含 panic）被转为 ToolResult 文本回传给
+	// 模型，而非中断 Agent 流程（生产推荐）。
+	// 注意：为保持向后兼容，**默认（nil）为关闭**，行为与现状一致；需显式设置 true 开启。
+	//
+	// 安全提示：错误文本会原样发给模型（并可能出现在最终回复中），原始 error 若含
+	// 内部细节（数据库字段、内网地址、堆栈等）存在泄露风险。如工具错误可能携带敏感
+	// 信息，应在工具内部先脱敏，或不开启本选项而自行处理错误。
 	ErrorToText *bool
 }
 

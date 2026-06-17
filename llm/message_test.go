@@ -1,14 +1,17 @@
 package llm
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
 )
 
 func TestUserImageMessage(t *testing.T) {
-	msg := UserImageMessage("https://example.com/cat.png", "这是什么动物？")
-
+	msg, err := UserImageMessage("https://example.com/cat.png", "这是什么动物？")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if msg.Role != schema.User {
 		t.Fatalf("role = %v, want User", msg.Role)
 	}
@@ -29,7 +32,10 @@ func TestUserImageMessage(t *testing.T) {
 }
 
 func TestUserImageMessage_EmptyTextOmitsTextPart(t *testing.T) {
-	msg := UserImageMessage("https://example.com/cat.png", "")
+	msg, err := UserImageMessage("https://example.com/cat.png", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(msg.UserInputMultiContent) != 1 {
 		t.Fatalf("parts = %d, want 1 (image only)", len(msg.UserInputMultiContent))
 	}
@@ -38,10 +44,36 @@ func TestUserImageMessage_EmptyTextOmitsTextPart(t *testing.T) {
 	}
 }
 
+func TestUserImageMessage_AcceptsDataURI(t *testing.T) {
+	msg, err := UserImageMessage("data:image/png;base64,iVBORw0KGgo=", "")
+	if err != nil {
+		t.Fatalf("data URI should be accepted: %v", err)
+	}
+	if len(msg.UserInputMultiContent) != 1 {
+		t.Fatalf("parts = %d, want 1", len(msg.UserInputMultiContent))
+	}
+}
+
+func TestUserImageMessage_RejectsDisallowedScheme(t *testing.T) {
+	cases := []string{
+		"file:///etc/passwd",
+		"gopher://internal/x",
+		"ftp://host/file",
+		"relative/path.png", // 无协议
+	}
+	for _, c := range cases {
+		if _, err := UserImageMessage(c, "x"); !errors.Is(err, ErrUnsupportedContentURLScheme) {
+			t.Errorf("UserImageMessage(%q): want ErrUnsupportedContentURLScheme, got %v", c, err)
+		}
+	}
+}
+
 func TestUserImageMessages_PreservesOrder(t *testing.T) {
 	urls := []string{"https://a.png", "https://b.png", "https://c.png"}
-	msg := UserImageMessages(urls, "compare")
-
+	msg, err := UserImageMessages(urls, "compare")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(msg.UserInputMultiContent) != 4 {
 		t.Fatalf("parts = %d, want 4 (3 images + text)", len(msg.UserInputMultiContent))
 	}
@@ -60,8 +92,18 @@ func TestUserImageMessages_PreservesOrder(t *testing.T) {
 	}
 }
 
+func TestUserImageMessages_RejectsAnyDisallowedScheme(t *testing.T) {
+	_, err := UserImageMessages([]string{"https://ok.png", "file:///etc/passwd"}, "x")
+	if !errors.Is(err, ErrUnsupportedContentURLScheme) {
+		t.Errorf("want ErrUnsupportedContentURLScheme when any url is disallowed, got %v", err)
+	}
+}
+
 func TestUserAudioMessage(t *testing.T) {
-	msg := UserAudioMessage("https://example.com/a.wav", "转写")
+	msg, err := UserAudioMessage("https://example.com/a.wav", "转写")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(msg.UserInputMultiContent) != 2 {
 		t.Fatalf("parts = %d, want 2", len(msg.UserInputMultiContent))
 	}
@@ -71,5 +113,11 @@ func TestUserAudioMessage(t *testing.T) {
 	}
 	if a.Audio == nil || a.Audio.URL == nil || *a.Audio.URL != "https://example.com/a.wav" {
 		t.Errorf("audio url not set: %+v", a.Audio)
+	}
+}
+
+func TestUserAudioMessage_RejectsDisallowedScheme(t *testing.T) {
+	if _, err := UserAudioMessage("file:///tmp/x.wav", ""); !errors.Is(err, ErrUnsupportedContentURLScheme) {
+		t.Errorf("want ErrUnsupportedContentURLScheme, got %v", err)
 	}
 }
