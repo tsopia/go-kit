@@ -175,21 +175,43 @@ func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message) (*sch
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
+	// panic 安全：streamADK panic 或提前返回时释放 guard
+	released := false
+	defer func() {
+		if !released {
+			a.guard.release()
+		}
+	}()
+
 	ctx = withInvocationID(ctx)
+
+	var onEnd func()
 	if a.logs != nil && a.logs.enabled() {
+		started := time.Now()
 		a.logs.logInfo(ctx, "agent.start",
 			"execution_mode", string(a.mode),
 			"tool_count", a.toolCount,
 			"streaming", true,
 			"message_count", len(messages),
 		)
+		onEnd = func() {
+			a.logs.logInfo(ctx, "agent.end",
+				"execution_mode", string(a.mode),
+				"tool_count", a.toolCount,
+				"latency_ms", time.Since(started).Milliseconds(),
+				"status", "stream_completed",
+			)
+		}
 	}
+
 	sr, err := streamADK(a.streamRunner, ctx, messages, a.cfg.Observability.Callbacks)
 	if err != nil {
-		a.guard.release()
 		return nil, err
 	}
-	return wrapStreamWithGuard(sr, a.guard), nil
+
+	// 成功：release + agent.end 延迟到流消费结束
+	released = true
+	return wrapStreamWithGuard(sr, a.guard, onEnd), nil
 }
 
 // Close 释放 Agent 持有的资源（如 MCP 工具连接）。

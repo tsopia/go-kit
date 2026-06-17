@@ -44,18 +44,24 @@ func (g *concurrencyGuard) release() {
 }
 
 // wrapStreamWithGuard 包装 StreamReader，在流消费结束（EOF/error）
-// 或读端提前 Close 时自动 release 名额。
+// 或读端提前 Close 时自动 release 名额并执行 onEnd 回调。
 // 用于 Stream 模式下延迟释放并发名额——acquire 在 Stream 入口，
 // release 延迟到调用方消费完流。
-func wrapStreamWithGuard(sr *schema.StreamReader[*schema.Message], guard *concurrencyGuard) *schema.StreamReader[*schema.Message] {
-	if guard == nil {
+func wrapStreamWithGuard(sr *schema.StreamReader[*schema.Message], guard *concurrencyGuard, onEnd func()) *schema.StreamReader[*schema.Message] {
+	if guard == nil && onEnd == nil {
 		return sr
 	}
 	newSr, sw := schema.Pipe[*schema.Message](1)
 	go func() {
 		defer func() {
+			sr.Close() // 关闭原始 stream，避免底层资源泄漏
 			sw.Close()
-			guard.release()
+			if guard != nil {
+				guard.release()
+			}
+			if onEnd != nil {
+				onEnd()
+			}
 		}()
 		for {
 			msg, err := sr.Recv()

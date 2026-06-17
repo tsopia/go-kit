@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/cloudwego/eino/adk"
@@ -71,6 +72,10 @@ type DeepAgentConfig struct {
 //   - NewADKAgent：通用工具调用 Agent，你给什么工具用什么
 //   - NewDeepAgent：内置规划/子Agent委派/文件系统/Shell 的全家桶
 func NewDeepAgent(ctx context.Context, cfg DeepAgentConfig) (*ADKAgent, error) {
+	if cfg.Shell != nil && cfg.StreamingShell != nil {
+		return nil, errors.New("deep agent: Shell and StreamingShell are mutually exclusive")
+	}
+
 	// 创建模型
 	var chatModel model.BaseChatModel
 	if cfg.Model.Instance != nil {

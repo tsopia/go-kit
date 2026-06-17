@@ -253,6 +253,14 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
+	// panic 安全：streamADK panic 或提前返回时释放 guard
+	released := false
+	defer func() {
+		if !released {
+			a.guard.release()
+		}
+	}()
+
 	ctx = withInvocationID(ctx)
 	if a.cfg.Observability.StructuredLogs != nil {
 		ctx = withToolLogSession(ctx)
@@ -265,13 +273,12 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 
 	sr, err := a.inner.Stream(ctx, messages, opts...)
 	if err != nil {
-		a.guard.release()
 		return nil, err
 	}
 
-	// Stream 模式下 release 延迟到流消费结束
-	// Extraction + DirectReturn 在 Stream 模式下不介入（让模型总结照常输出）
-	return wrapStreamWithGuard(sr, a.guard), nil
+	// 成功：release 延迟到流消费结束
+	released = true
+	return wrapStreamWithGuard(sr, a.guard, nil), nil
 }
 
 func (a *Agent) Close() error {
