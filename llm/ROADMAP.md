@@ -156,7 +156,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | Kimi（Moonshot） | ✅ | `Protocol: KIMI` | 复用 OpenAI 组件 |
 | 自定义模型实例注入 | ✅ | `AgentModelConfig.Instance` | 跳过 `NewModel` 工厂 |
 | 思考模式（Thinking）统一映射 | ✅ | `ModelConfig.Thinking` | Extraction 模式自动关闭 |
-| 请求级模型参数调整 | 📋 | `Agent.Generate(..., opts...)` | 仅 `NewAgent` 支持，待对齐（O-004） |
+| 请求级模型参数调整 | ✅ | `ADKAgent.Generate(..., WithTemperature/WithMaxTokens/WithTopP)` | 两路均支持；仅参数，运行时换模型不做（O-004） |
 | 多模态输入（Image/Audio） | ✅ | `llm.UserImageMessage(s)` / `llm.UserAudioMessage` | 基于 eino `UserInputMultiContent`（O-002）；Video/File 待需求 |
 
 ### 4.2 Agent 层
@@ -178,7 +178,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 自定义 `StreamToolCallChecker` | ✅ | `Streaming.ToolCallChecker` | 流式 tool call 检测 |
 | `ExportGraph`（嵌入更大 compose 图） | 🟡 | `Agent.ExportGraph` | **仅 react 路径**；ADK 无等价能力，是 react→ADK 迁移的已知缺口（见 O-007，影响阶段 2 编排） |
 | ADK Middleware 注册 | ✅ | `AgentConfig.Middlewares` | 用户 Middleware 先于包内注册（O-005） |
-| ADK 运行时 Option | 📋 | `ADKAgent.Generate(ctx, msgs, opts...)` | 待实现（O-004） |
+| ADK 运行时 Option | ✅ | `ADKAgent.Generate(ctx, msgs, opts...)` | 经 `adk.WithChatModelOptions` 透传（O-004） |
 | Interrupt / Resume | 📋 | （远期） | 阶段 4 评估 |
 | Checkpoint 持久化 | 📋 | （远期） | 阶段 4 评估 |
 
@@ -235,7 +235,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 - ✅ O-001：导出 sentinel errors（P0）
 - ✅ O-002：多模态输入 API（P0）
 - ✅ O-003：工具层防御机制（P0）
-- 📋 O-004：ADKAgent 运行时 Option（P1）
+- ✅ O-004：ADKAgent 运行时 Option（P1，仅参数调整）
 - ✅ O-005：暴露 ADK Middleware 注册入口（P1）
 - 📋 O-006：doc.go / README 标记 `NewAgent` 为 Legacy（P1，依赖 O-007）
 - ✅ O-007：NewADKAgent 能力对齐核查（**P0 门禁**，产出 [`CAPABILITY_DIFF.md`](./CAPABILITY_DIFF.md)：能力实质对齐，DR-001 成立）

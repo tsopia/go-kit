@@ -143,12 +143,13 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 
 // Generate 非流式调用 Agent。
 // 内部消费 ADK 事件流，取最终 assistant 消息。
-func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message) (msg *schema.Message, err error) {
+func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message, opts ...GenerateOption) (msg *schema.Message, err error) {
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
 	defer a.guard.release()
 	ctx = withInvocationID(ctx)
+	runOpts := buildGenerateConfig(opts).runOptions()
 
 	if a.logs != nil && a.logs.enabled() {
 		started := time.Now()
@@ -172,12 +173,12 @@ func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message) (ms
 		}()
 	}
 
-	return runADK(a.runner, ctx, messages, a.cfg.Observability.Callbacks)
+	return runADK(a.runner, ctx, messages, a.cfg.Observability.Callbacks, runOpts...)
 }
 
 // Stream 流式调用 Agent。
 // 返回最终模型输出的流式 StreamReader；并发名额在流消费结束时释放。
-func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
+func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message, opts ...GenerateOption) (*schema.StreamReader[*schema.Message], error) {
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
@@ -210,7 +211,8 @@ func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message) (*sch
 		}
 	}
 
-	sr, err := streamADK(a.streamRunner, ctx, messages, a.cfg.Observability.Callbacks)
+	runOpts := buildGenerateConfig(opts).runOptions()
+	sr, err := streamADK(a.streamRunner, ctx, messages, a.cfg.Observability.Callbacks, runOpts...)
 	if err != nil {
 		return nil, err
 	}

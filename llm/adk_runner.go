@@ -11,8 +11,8 @@ import (
 
 // runADK 驱动非流式 runner，消费事件流，取最终 assistant 消息。
 // 适配 adk 的事件迭代器模型为同步 Generate API。
-func runADK(runner *adk.Runner, ctx context.Context, messages []*schema.Message, handlers []callbacks.Handler) (*schema.Message, error) {
-	iter := runner.Run(ctx, messages, toRunOptions(handlers)...)
+func runADK(runner *adk.Runner, ctx context.Context, messages []*schema.Message, handlers []callbacks.Handler, extra ...adk.AgentRunOption) (*schema.Message, error) {
+	iter := runner.Run(ctx, messages, append(toRunOptions(handlers), extra...)...)
 	var finalMsg *schema.Message
 	for {
 		event, ok := iter.Next()
@@ -39,8 +39,8 @@ func runADK(runner *adk.Runner, ctx context.Context, messages []*schema.Message,
 
 // streamADK 驱动流式 runner，找到流式 MessageStream 并返回。
 // 工具调用等中间事件被跳过，最终模型的流式输出直接返回给调用方。
-func streamADK(runner *adk.Runner, ctx context.Context, messages []*schema.Message, handlers []callbacks.Handler) (*schema.StreamReader[*schema.Message], error) {
-	iter := runner.Run(ctx, messages, toRunOptions(handlers)...)
+func streamADK(runner *adk.Runner, ctx context.Context, messages []*schema.Message, handlers []callbacks.Handler, extra ...adk.AgentRunOption) (*schema.StreamReader[*schema.Message], error) {
+	iter := runner.Run(ctx, messages, append(toRunOptions(handlers), extra...)...)
 	for {
 		event, ok := iter.Next()
 		if !ok {
