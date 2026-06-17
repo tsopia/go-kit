@@ -49,7 +49,8 @@ weatherTool := llm.NewStructTool[WeatherResult]("extract_weather", "提取天气
 ### 3. 创建 Agent 并运行
 
 ```go
-agent, _ := llm.NewAgent(ctx, llm.AgentConfig{
+// 主推 NewADKAgent（基于 eino adk.ChatModelAgent）。配置与 legacy NewAgent 完全兼容。
+agent, _ := llm.NewADKAgent(ctx, llm.AgentConfig{
     Model: llm.AgentModelConfig{Config: cfg},
     Tools: llm.ToolsConfig{Invokable: []llm.InvokableTool{weatherTool}},
     Prompt: llm.PromptConfig{

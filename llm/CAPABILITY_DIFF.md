@@ -4,7 +4,7 @@
 > 用途：在 DR-001（主推 `NewADKAgent`、`NewAgent` 标 go-kit legacy）落地前，
 > 核查 `NewADKAgent` 是否已覆盖 `NewAgent` 的全部能力，识别并处置缺口。
 >
-> 结论：**除"运行时 Option"（→ O-004 已规划补齐）外，能力已对齐；ExportGraph 为接受缺口。**
+> 结论：**能力已对齐（运行时 Option 由 O-004 补齐完成）；ExportGraph 为接受缺口。**
 > 因此 DR-001 / O-006（标 Legacy）可以执行。
 
 ---
@@ -13,8 +13,8 @@
 
 | 方法 | NewAgent（react，`agent.go`） | NewADKAgent（adk，`adk_agent.go`） | 状态 |
 |------|------------------------------|-----------------------------------|------|
-| `Generate(ctx, msgs, ...)` | ✅ 含 `opts ...agent.AgentOption` | ✅（基础版）→ O-004 补 `...GenerateOption` | 🟡 待 O-004 |
-| `Stream(ctx, msgs, ...)` | ✅ 含 `opts ...agent.AgentOption` | ✅（基础版）→ O-004 补 `...GenerateOption` | 🟡 待 O-004 |
+| `Generate(ctx, msgs, ...)` | ✅ 含 `opts ...agent.AgentOption` | ✅ 含 `...GenerateOption`（参数调整） | ✅（O-004 已完成） |
+| `Stream(ctx, msgs, ...)` | ✅ 含 `opts ...agent.AgentOption` | ✅ 含 `...GenerateOption`（参数调整） | ✅（O-004 已完成） |
 | `Close() error` | ✅ | ✅ | ✅ |
 | `ExportGraph()` | ✅ | ❌（adk 无等价能力） | 🚫 接受缺口（见三） |
 | `Agent() adk.Agent` | ❌ | ✅（暴露底层、用于子 Agent / DeepAgent） | ADK 独有，非缺口 |
