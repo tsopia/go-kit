@@ -2,6 +2,14 @@
 
 基于 [Eino](https://github.com/cloudwego/eino) 框架的生产级 LLM 工具调用与 Agent 封装库。本 README 旨在为 AI 编程助手提供完整的上下文索引。
 
+> ℹ️ **路径选择**
+>
+> - 新项目请使用 `NewADKAgent`（go-kit 主推，基于 eino `adk.ChatModelAgent`）；复杂任务用 `NewDeepAgent`。
+> - `NewAgent`（基于 `react.Agent`）为 **go-kit legacy**，仅维护向后兼容、不再演进。
+> - 「legacy」是 go-kit 自身取向（顺应 eino 把核心能力投入 ADK），**非** eino 已废弃 react。
+> - 切换成本：仅改函数名，`AgentConfig` 完全兼容。
+> - 能力对照见 [`CAPABILITY_DIFF.md`](./CAPABILITY_DIFF.md)，演进决策见 [`ROADMAP.md`](./ROADMAP.md)。
+
 ## 🌟 核心特性
 
 - **多协议统一路由**：一键切换 OpenAI / Claude / DeepSeek / Gemini / Ollama / Moonshot(Kimi) 等模型协议。
@@ -270,6 +278,55 @@ go func() {
     for { msg, _ := stream.Recv(); fmt.Println("中间状态:", msg) }
 }()
 agent.Generate(ctx, input, logOpt)
+```
+
+> **ADK 路径（`NewADKAgent` / `NewDeepAgent`）的运行时参数**：使用 go-kit 选项，
+> 仅支持参数调整（运行时换模型请新建 Agent 实例）：
+>
+> ```go
+> agent.Generate(ctx, input, llm.WithTemperature(0.1), llm.WithMaxTokens(512), llm.WithTopP(0.9))
+> // 高级：透传任意 eino model.Option
+> agent.Generate(ctx, input, llm.WithModelOptions(model.WithStop([]string{"\n"})))
+> ```
+
+### 7. 多模态输入 (Multimodal)
+
+为支持图片/音频的模型（GPT-4o / Claude 3+ / Gemini 等）构造多模态用户消息。
+URL 支持 HTTP(S) 链接或 `data:` URI：
+
+```go
+// 单图 + 文本
+msg := llm.UserImageMessage("https://example.com/cat.png", "这是什么动物？")
+// 多图 + 文本（顺序保留）
+msg = llm.UserImageMessages([]string{urlA, urlB}, "对比这两张图")
+// 音频 + 文本
+msg = llm.UserAudioMessage("https://example.com/a.wav", "转写这段音频")
+
+resp, _ := agent.Generate(ctx, []*schema.Message{msg})
+```
+
+### 8. 工具层防御 (Tool Defense)
+
+应对模型幻觉工具名、坏参数 JSON、工具执行报错，避免 Agent 流程中断。
+四项均为可选，未配置时行为不变；react 与 ADK 两路均生效：
+
+```go
+errToText := true
+tools := llm.ToolsConfig{
+    Invokable: []llm.InvokableTool{myTool},
+    // 工具名别名：模型输出别名 → 路由到规范工具名
+    Aliases: map[string][]string{"search": {"find", "query_tool"}},
+    // 模型调用未注册工具时的兜底（返回文本让模型纠错）
+    UnknownHandler: func(ctx context.Context, name, input string) (string, error) {
+        return "unknown tool: " + name + "，请改用已注册的工具", nil
+    },
+    // 执行前修复参数 JSON
+    ArgumentsFixer: func(ctx context.Context, name, args string) (string, error) {
+        return sanitizeJSON(args), nil
+    },
+    // 工具报错转文本回传模型（默认关闭，生产推荐开启）
+    ErrorToText: &errToText,
+}
 ```
 
 ## 📦 架构说明
