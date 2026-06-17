@@ -99,6 +99,7 @@ func (o *adkObservedModel) logDecision(ctx context.Context, msg *schema.Message)
 	if reasoningTokens >= 0 {
 		attrs = append(attrs, "reasoning_tokens", reasoningTokens)
 	}
+	attrs = appendUsageAttrs(attrs, msg)
 	o.logs.logInfo(ctx, "model.decision", attrs...)
 }
 

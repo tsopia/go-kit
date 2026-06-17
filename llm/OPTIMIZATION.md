@@ -17,8 +17,8 @@
 | [O-005](#o-005暴露-adk-middleware-注册入口) | 暴露 ADK Middleware 注册入口 | P1 | ✅ | 0.5 天 | 无 |
 | [O-006](#o-006文档标记-newagent-为-legacy) | 文档标记 NewAgent 为 Legacy | P1 | ✅ | 0.5 天 | O-007 |
 | [O-007](#o-007newadkagent-能力对齐核查) | NewADKAgent 能力对齐核查 | **P0（门禁）** | ✅ | 1 天 | 无 |
-| [O-008](#o-008流式-modeldecision-补记) | 流式 model.decision 补记 | P1 | 📋 | 1 天 | 无 |
-| [O-009](#o-009tokenusage-用量聚合) | Token/Usage 用量聚合 | P1 | 📋 | 1.5 天 | 无 |
+| [O-008](#o-008流式-modeldecision-补记) | 流式 model.decision 补记 | P1 | ✅ | 1 天 | 无 |
+| [O-009](#o-009tokenusage-用量聚合) | Token/Usage 用量聚合 | P1 | 🟡 | 1.5 天 | 无 |
 
 **并行性**：O-001 / O-002 / O-003 / O-005 / O-007 / O-008 / O-009 完全独立，可并行执行。  
 **串行性**：O-006 依赖 O-007（核查完成后才能确定文档措辞）。  
@@ -774,14 +774,17 @@ package llm
 
 ### 验收标准
 
-- [ ] 流式调用结束后产生与非流式同字段的 `model.decision`
-- [ ] 不影响流的实时性（边转发边累积，不缓冲整流再吐）
-- [ ] react / ADK 两路均覆盖
-- [ ] ROADMAP 4.4 对应行 🟡 → ✅
+- [x] 流式调用结束后产生与非流式同字段的 `model.decision`（含 `streaming=true`）
+- [x] 不影响流的实时性（`observeStreamDecision` 边转发边累积，不缓冲整流）
+- [x] react / ADK 两路均覆盖
+- [x] ROADMAP 4.4 对应行 🟡 → ✅
 
-### 风险
+### 实现说明
 
-**中**。需正确处理流拼接与提前 Close；测试需覆盖 EOF / error / 读端提前关闭三种收尾。
+- 实现于 `stream_decision.go`：`observeStreamDecision` 包装最终输出流，EOF 时
+  `schema.ConcatMessageStream` 等价（`ConcatMessages`）还原完整消息并补记 `model.decision`。
+- logs 关闭时原样返回原 stream（零开销）。已过 `-race`。
+- 收尾覆盖：EOF / error / 读端提前 Close（defer 中尽力记录已累积内容）。
 
 ---
 
@@ -814,13 +817,22 @@ type Usage struct {
 
 ### 验收标准
 
-- [ ] 多轮 + 流式 + 非流式均能正确聚合
-- [ ] 至少在 `agent.end` 暴露 total/prompt/completion tokens
-- [ ] ROADMAP 4.4 对应行 📋 → ✅
+- [x] 每条 `model.decision`（流式 + 非流式）携带 `prompt/completion/total_tokens`（`appendUsageAttrs`）
+- [ ] **未做**：跨工具轮求和到单条 `agent.end` 总计 / `OnUsage` 回调
+- [x] eino 字段已确认：`schema.Message.ResponseMeta.Usage{PromptTokens,CompletionTokens,TotalTokens}`
+
+### 实现状态（🟡 部分完成）
+
+**已落地**：`appendUsageAttrs` 给每条 `model.decision`（两路、流式 + 非流式）附加 token 用量，
+配合 `invocation_id` 可在日志侧按调用聚合。
+
+**未落地（需后续）**：单一 `agent.end` 总计 / `ObservabilityConfig.OnUsage` 回调。
+跨工具轮求和需在模型层（每次 model 调用）累加并在 `AfterAgent` 输出，属更大改动，
+拆为后续优化项；当前以"每轮 usage + invocation_id"满足成本核算的基本需求。
 
 ### 风险
 
-**中**。各 provider 的 usage 字段命名与是否在流末返回不一致，需 Step 0 核查 eino schema 与各 eino-ext 实现。
+**低**（已落地部分）。剩余的跨轮总计为增量增强，不阻断现有能力。
 
 ---
 

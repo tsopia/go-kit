@@ -205,8 +205,8 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 结构化日志（LogClient） | ✅ | `Observability.StructuredLogs` | 与 `kit.Logger` 兼容 |
 | 结构化日志：`agent.start/end` | ✅ | 自动 | |
 | 结构化日志：`tool.start/end` | ✅ | 自动 | react 路径 |
-| 结构化日志：`model.decision` | 🟡 | 自动 | **流式下不记录**，已知缺口（react/ADK 两路 Stream 均透传），待实现（O-008） |
-| Token / Usage 用量聚合 | 📋 | （按 invocation 聚合 prompt/completion/reasoning tokens） | 待实现（O-009），生产成本核算刚需 |
+| 结构化日志：`model.decision` | ✅ | 自动 | 流式（`streaming=true`）与非流式两路均记录（O-008） |
+| Token / Usage 用量聚合 | 🟡 | 每条 `model.decision` 附 `prompt/completion/total_tokens` | 已按调用记录（O-009）；跨轮单一总计 / `OnUsage` 回调待后续 |
 | 按 Callback 节点精准注入 | 📋 | （远期） | 依赖编排能力 |
 
 ### 4.5 错误与防御
@@ -239,8 +239,8 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 - ✅ O-005：暴露 ADK Middleware 注册入口（P1）
 - ✅ O-006：doc.go / README 标记 `NewAgent` 为 Legacy（P1，措辞按 DR-001 边界）
 - ✅ O-007：NewADKAgent 能力对齐核查（**P0 门禁**，产出 [`CAPABILITY_DIFF.md`](./CAPABILITY_DIFF.md)：能力实质对齐，DR-001 成立）
-- 📋 O-008：流式 `model.decision` 补记（P1）
-- 📋 O-009：Token/Usage 用量聚合（P1）
+- ✅ O-008：流式 `model.decision` 补记（P1）
+- 🟡 O-009：Token/Usage 用量聚合（P1，每轮已记录；跨轮总计待后续）
 
 **触发下一阶段的条件**：阶段 0 全部 ✅，且业务出现"需要多个 Agent 协作"的场景。
 

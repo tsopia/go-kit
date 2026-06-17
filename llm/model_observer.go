@@ -71,6 +71,7 @@ func (m *observedToolCallingModel) logDecision(ctx context.Context, msg *schema.
 	if reasoningTokens >= 0 {
 		attrs = append(attrs, "reasoning_tokens", reasoningTokens)
 	}
+	attrs = appendUsageAttrs(attrs, msg)
 	m.logs.logInfo(ctx, "model.decision", attrs...)
 }
 

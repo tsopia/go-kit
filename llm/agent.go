@@ -278,6 +278,9 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 		return nil, err
 	}
 
+	// 流式 model.decision + usage 补记（O-008/O-009）；logs 关闭时原样透传。
+	sr = observeStreamDecision(ctx, sr, a.logs, a.mode, toolChoiceForMode(a.mode))
+
 	// 成功：release 延迟到流消费结束
 	released = true
 	return wrapStreamWithGuard(sr, a.guard, nil), nil
