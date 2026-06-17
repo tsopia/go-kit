@@ -99,6 +99,8 @@ func NewAgent(ctx context.Context, cfg AgentConfig) (*Agent, error) {
 		Tools: built.Tools,
 	}
 	toolsConfig.ToolCallMiddlewares = append(toolsConfig.ToolCallMiddlewares, newToolObserverMiddleware(structuredLogs, spec.Execution.DirectReturnTools))
+	// 工具层防御（别名/未知工具/参数修复/错误转文本），未配置时零影响。
+	applyToolDefenses(&toolsConfig, spec.Tools)
 
 	// 4. 处理 Extraction 模式下的强制工具调用和修复机制
 	var extraction *extractionRuntime
@@ -275,6 +277,9 @@ func (a *Agent) Stream(ctx context.Context, messages []*schema.Message, opts ...
 	if err != nil {
 		return nil, err
 	}
+
+	// 流式 model.decision + usage 补记（O-008/O-009）；logs 关闭时原样透传。
+	sr = observeStreamDecision(ctx, sr, a.logs, a.mode, toolChoiceForMode(a.mode))
 
 	// 成功：release 延迟到流消费结束
 	released = true

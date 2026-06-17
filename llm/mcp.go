@@ -88,7 +88,7 @@ func NewMCPTools(ctx context.Context, cfg MCPConfig) ([]tool.BaseTool, func() er
 		cli = c
 	default:
 		cancel()
-		return nil, nil, fmt.Errorf("unsupported MCP protocol: %s", cfg.Protocol)
+		return nil, nil, fmt.Errorf("%w: %s", ErrUnknownMCPProtocol, cfg.Protocol)
 	}
 
 	// 2. 初始化握手

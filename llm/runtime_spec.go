@@ -61,7 +61,7 @@ func compileRuntimeSpec(cfg AgentConfig) (RuntimeSpec, error) {
 			spec.Execution.RepairMaxAttempts = 3
 		}
 	default:
-		return RuntimeSpec{}, fmt.Errorf("unsupported execution mode: %q", mode)
+		return RuntimeSpec{}, fmt.Errorf("%w: unsupported execution mode %q", ErrInvalidConfig, mode)
 	}
 
 	return spec, nil
@@ -82,7 +82,7 @@ func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 			case schema.ToolChoiceForced:
 				return Extraction, nil
 			default:
-				return "", fmt.Errorf("unknown tool choice: %q", *cfg.Execution.ToolChoice)
+				return "", fmt.Errorf("%w: unknown tool choice %q", ErrInvalidConfig, *cfg.Execution.ToolChoice)
 			}
 		}
 		if !hasConfiguredTools(cfg.Tools) {
@@ -92,7 +92,7 @@ func normalizeExecutionMode(cfg AgentConfig) (ExecutionMode, error) {
 	case Conversation, Assistant, Extraction:
 		return cfg.Execution.Mode, nil
 	default:
-		return "", fmt.Errorf("unknown execution mode: %q", cfg.Execution.Mode)
+		return "", fmt.Errorf("%w: unknown execution mode %q", ErrInvalidConfig, cfg.Execution.Mode)
 	}
 }
 
@@ -100,17 +100,17 @@ func validateExecutionConfig(cfg AgentConfig, mode ExecutionMode) error {
 	switch mode {
 	case Conversation:
 		if cfg.Execution.Mode == Conversation && hasConfiguredTools(cfg.Tools) {
-			return fmt.Errorf("conversation mode does not allow tools")
+			return fmt.Errorf("%w: conversation mode does not allow tools", ErrInvalidConfig)
 		}
 		if cfg.Execution.MaxRetries > 0 {
-			return fmt.Errorf("conversation mode does not allow max retries")
+			return fmt.Errorf("%w: conversation mode does not allow max retries", ErrInvalidConfig)
 		}
 		if len(cfg.Execution.DirectReturnTools) > 0 {
-			return fmt.Errorf("conversation mode does not allow direct return tools")
+			return fmt.Errorf("%w: conversation mode does not allow direct return tools", ErrInvalidConfig)
 		}
 	case Assistant:
 		if cfg.Execution.MaxRetries > 0 {
-			return fmt.Errorf("assistant mode does not allow max retries")
+			return fmt.Errorf("%w: assistant mode does not allow max retries", ErrInvalidConfig)
 		}
 	}
 	return nil

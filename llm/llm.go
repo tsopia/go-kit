@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -70,13 +69,13 @@ type InvokableTool interface {
 // NewModel 根据 Protocol 创建对应的 eino-ext ToolCallingChatModel。
 func NewModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel, error) {
 	if cfg.Model == "" {
-		return nil, errors.New("model is required")
+		return nil, ErrMissingModel
 	}
 	if isCompatProtocol(cfg.Protocol) && cfg.BaseURL == "" {
-		return nil, errors.New("base url is required for compat protocol")
+		return nil, fmt.Errorf("%w (protocol=%s)", ErrMissingBaseURL, cfg.Protocol)
 	}
 	if cfg.Protocol != OLLAMA && cfg.Protocol != QIANFAN && cfg.APIKey == "" {
-		return nil, fmt.Errorf("API Key is required for protocol %s", cfg.Protocol)
+		return nil, fmt.Errorf("%w (protocol=%s)", ErrMissingAPIKey, cfg.Protocol)
 	}
 
 	var (
@@ -105,7 +104,7 @@ func NewModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel,
 	case QWEN:
 		m, err = newQwenModel(ctx, cfg)
 	default:
-		return nil, fmt.Errorf("unsupported protocol: %s", cfg.Protocol)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedProtocol, cfg.Protocol)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create %s model: %w", cfg.Protocol, err)

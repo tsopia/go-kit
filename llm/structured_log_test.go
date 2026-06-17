@@ -360,7 +360,7 @@ func TestStructuredLogs_ToolLifecycle(t *testing.T) {
 				`"terminal":true`,
 				`"attempt":2`,
 			},
-			wantErr: `max retries (2) exceeded`,
+			wantErr: `extraction retries exhausted`,
 		},
 	}
 

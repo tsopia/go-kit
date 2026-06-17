@@ -1,10 +1,21 @@
 // Package llm 提供大模型 Agent 的统一封装。
 //
-// 支持两种 Agent 后端，共享配置层（AgentConfig）和模型工厂（NewModel）：
+// 路径选择：
 //
-//   - [NewAgent]: 基于 eino react.Agent（v0.8 路径，保留向后兼容）
-//   - [NewADKAgent]: 基于 eino adk.ChatModelAgent（v0.9 ADK 路径）
+//   - 新代码请使用 [NewADKAgent]（基于 eino adk.ChatModelAgent，go-kit 主推路径）。
+//   - [NewDeepAgent] 用于复杂任务（内置规划/子Agent委派/文件系统/Shell 的预置应用）。
+//   - [NewAgent]（基于 eino react.Agent）为 go-kit legacy 路径，仅维护向后兼容、
+//     不再演进；新能力只在 ADK 路径实现。
+//
+// 说明：「legacy」是 go-kit 自身的产品取向（顺应 eino 把核心能力投入 ADK 的方向），
+// 并不代表 eino 已废弃 react —— 截至 eino v0.9.8，flow/agent/react 仍在维护。
+// 切换成本：仅改函数名，AgentConfig 配置完全兼容。
+//
+// 三个工厂共享配置层（AgentConfig）和模型工厂（NewModel）：
+//
+//   - [NewADKAgent]: 基于 eino adk.ChatModelAgent（v0.9 ADK 路径，主推）
 //   - [NewDeepAgent]: 基于 eino adk.DeepAgent（内置规划/子Agent委派/文件系统/Shell）
+//   - [NewAgent]: 基于 eino react.Agent（legacy，向后兼容）
 //
 // 核心能力：
 //

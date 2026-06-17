@@ -82,6 +82,8 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 	toolsConfig := adk.ToolsConfig{
 		ToolsNodeConfig: compose.ToolsNodeConfig{Tools: built.Tools},
 	}
+	// 工具层防御（别名/未知工具/参数修复/错误转文本），未配置时零影响。
+	applyToolDefenses(&toolsConfig.ToolsNodeConfig, spec.Tools)
 	// Extraction 的 DirectReturn：ADK 原生 ReturnDirectly（替代 react 的 context.Cancel）
 	if len(spec.Execution.DirectReturnTools) > 0 {
 		toolsConfig.ReturnDirectly = make(map[string]bool, len(spec.Execution.DirectReturnTools))
@@ -97,6 +99,10 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 	}
 	if spec.Execution.MaxStep > 0 {
 		agentCfg.MaxIterations = spec.Execution.MaxStep
+	}
+	// 用户自定义 middleware 先注册，便于其拦截/观察包内 middleware 行为。
+	if len(cfg.Middlewares) > 0 {
+		agentCfg.Handlers = append(agentCfg.Handlers, cfg.Middlewares...)
 	}
 	// Extraction 模式：注入强制 toolcall + 修复重试 middleware（最外层）
 	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
@@ -137,12 +143,13 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 
 // Generate 非流式调用 Agent。
 // 内部消费 ADK 事件流，取最终 assistant 消息。
-func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message) (msg *schema.Message, err error) {
+func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message, opts ...GenerateOption) (msg *schema.Message, err error) {
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
 	defer a.guard.release()
 	ctx = withInvocationID(ctx)
+	runOpts := buildGenerateConfig(opts).runOptions()
 
 	if a.logs != nil && a.logs.enabled() {
 		started := time.Now()
@@ -166,12 +173,12 @@ func (a *ADKAgent) Generate(ctx context.Context, messages []*schema.Message) (ms
 		}()
 	}
 
-	return runADK(a.runner, ctx, messages, a.cfg.Observability.Callbacks)
+	return runADK(a.runner, ctx, messages, a.cfg.Observability.Callbacks, runOpts...)
 }
 
 // Stream 流式调用 Agent。
 // 返回最终模型输出的流式 StreamReader；并发名额在流消费结束时释放。
-func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
+func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message, opts ...GenerateOption) (*schema.StreamReader[*schema.Message], error) {
 	if err := a.guard.acquire(ctx); err != nil {
 		return nil, err
 	}
@@ -204,10 +211,14 @@ func (a *ADKAgent) Stream(ctx context.Context, messages []*schema.Message) (*sch
 		}
 	}
 
-	sr, err := streamADK(a.streamRunner, ctx, messages, a.cfg.Observability.Callbacks)
+	runOpts := buildGenerateConfig(opts).runOptions()
+	sr, err := streamADK(a.streamRunner, ctx, messages, a.cfg.Observability.Callbacks, runOpts...)
 	if err != nil {
 		return nil, err
 	}
+
+	// 流式 model.decision + usage 补记（O-008/O-009）；logs 关闭时原样透传。
+	sr = observeStreamDecision(ctx, sr, a.logs, a.mode, toolChoiceForMode(a.mode))
 
 	// 成功：release + agent.end 延迟到流消费结束
 	released = true

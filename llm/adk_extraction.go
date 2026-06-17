@@ -64,7 +64,7 @@ func (m *adkExtractionMiddleware) WrapInvokableToolCall(_ context.Context, ep ad
 		}
 		m.state.recordFailure()
 		if m.state.retriesExhausted() {
-			return "", fmt.Errorf("tool %s: max retries (%d) exceeded: %w", tCtx.Name, m.state.maxRetries, err)
+			return "", fmt.Errorf("%w: tool %s (%d attempts): %w", ErrExtractionRetriesExhausted, tCtx.Name, m.state.maxRetries, err)
 		}
 		return fmt.Sprintf("工具执行失败: %v\n请分析错误原因，调整参数后重新调用工具。", err), nil
 	}, nil
