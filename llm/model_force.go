@@ -94,7 +94,7 @@ func newExtractionRetryMiddleware(state *extractionState) compose.ToolMiddleware
 						logState.markError(err, !retriesExhausted, retriesExhausted)
 					}
 					if retriesExhausted {
-						return nil, fmt.Errorf("tool %s: max retries (%d) exceeded: %w", input.Name, state.maxRetries, err)
+						return nil, fmt.Errorf("%w: tool %s (%d attempts): %w", ErrExtractionRetriesExhausted, input.Name, state.maxRetries, err)
 					}
 					return &compose.ToolOutput{
 						Result: fmt.Sprintf("工具执行失败: %v\n请分析错误原因，调整参数后重新调用工具。", err),

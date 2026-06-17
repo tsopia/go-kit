@@ -215,7 +215,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 |------|------|------|------|
 | `context.Context` 传播 | ✅ | 全部公开 API 首参 | |
 | `fmt.Errorf("%w", err)` 错误包装 | ✅ | 内部统一风格 | |
-| 导出 sentinel error | 📋 | `llm.ErrInvalidProtocol` 等 | 待实现（O-001） |
+| 导出 sentinel error | ✅ | `llm.ErrMissingModel` / `ErrUnsupportedProtocol` 等（`errors.go`） | 支持 `errors.Is`（O-001） |
 | 模型调用重试（内置） | ✅ | Extraction 模式 `MaxRetries` | 仅 Extraction |
 | 通用模型重试 Middleware | 📋 | （ADK 透传） | 阶段 1 评估 |
 | 模型 Failover | 📋 | （ADK 透传） | 阶段 1 评估 |
@@ -232,7 +232,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 
 **范围**：
 
-- 📋 O-001：导出 sentinel errors（P0）
+- ✅ O-001：导出 sentinel errors（P0）
 - 📋 O-002：多模态输入 API（P0）
 - 📋 O-003：工具层防御机制（P0）
 - 📋 O-004：ADKAgent 运行时 Option（P1）

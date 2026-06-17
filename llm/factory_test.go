@@ -25,12 +25,12 @@ func TestNewModelValidation(t *testing.T) {
 		{
 			name:    "missing api key non-ollama",
 			cfg:     ModelConfig{Protocol: DEEPSEEK, Model: "deepseek-chat"},
-			wantErr: "API Key is required",
+			wantErr: "api key is required",
 		},
 		{
 			name:    "unsupported protocol",
 			cfg:     ModelConfig{Protocol: "FOO", APIKey: "key", Model: "m"},
-			wantErr: "unsupported protocol",
+			wantErr: "unsupported model protocol",
 		},
 	}
 

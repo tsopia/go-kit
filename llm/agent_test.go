@@ -742,7 +742,7 @@ func TestExtractionRetryMiddleware(t *testing.T) {
 			next: func(_ context.Context, _ *compose.ToolInput) (*compose.ToolOutput, error) {
 				return nil, errors.New("tool execution failed")
 			},
-			wantErr:          "tool extract: max retries (1) exceeded: tool execution failed",
+			wantErr:          "llm: extraction retries exhausted: tool extract (1 attempts): tool execution failed",
 			wantFailureCount: 1,
 		},
 		{
@@ -920,7 +920,7 @@ func TestNewAgent_ExtractionMode_RetryExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected retry exhausted error")
 	}
-	if !strings.Contains(err.Error(), "max retries (2) exceeded") {
+	if !strings.Contains(err.Error(), "extraction retries exhausted") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if ft.calls != 2 {
