@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -74,6 +75,14 @@ type AgentConfig struct {
 	Streaming     StreamingConfig
 	Observability ObservabilityConfig
 	Concurrency   ConcurrencyConfig
+
+	// Middlewares 是用户自定义的 ADK ChatModelAgentMiddleware，仅 NewADKAgent
+	// 路径生效（NewAgent legacy 路径忽略）。可用于接入 Eino 生态的内置
+	// Middleware（如 ModelRetry / ModelFailover）或任意自定义钩子。
+	//
+	// 执行顺序：用户 Middleware 先于包内 Middleware（extraction / observability）
+	// 注册，因此用户钩子可观察/拦截到包内行为。
+	Middlewares []adk.ChatModelAgentMiddleware
 }
 
 // ConcurrencyConfig 控制单个 Agent 实例的最大并发调用数。

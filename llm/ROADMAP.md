@@ -177,7 +177,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 自定义 `RewriteHistory` | ✅ | `Prompt.RewriteHistory` | 历史消息修改 |
 | 自定义 `StreamToolCallChecker` | ✅ | `Streaming.ToolCallChecker` | 流式 tool call 检测 |
 | `ExportGraph`（嵌入更大 compose 图） | 🟡 | `Agent.ExportGraph` | **仅 react 路径**；ADK 无等价能力，是 react→ADK 迁移的已知缺口（见 O-007，影响阶段 2 编排） |
-| ADK Middleware 注册 | 📋 | `AgentConfig.Middlewares` | 待实现（O-005） |
+| ADK Middleware 注册 | ✅ | `AgentConfig.Middlewares` | 用户 Middleware 先于包内注册（O-005） |
 | ADK 运行时 Option | 📋 | `ADKAgent.Generate(ctx, msgs, opts...)` | 待实现（O-004） |
 | Interrupt / Resume | 📋 | （远期） | 阶段 4 评估 |
 | Checkpoint 持久化 | 📋 | （远期） | 阶段 4 评估 |
@@ -236,7 +236,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 - 📋 O-002：多模态输入 API（P0）
 - 📋 O-003：工具层防御机制（P0）
 - 📋 O-004：ADKAgent 运行时 Option（P1）
-- 📋 O-005：暴露 ADK Middleware 注册入口（P1）
+- ✅ O-005：暴露 ADK Middleware 注册入口（P1）
 - 📋 O-006：doc.go / README 标记 `NewAgent` 为 Legacy（P1，依赖 O-007）
 - ✅ O-007：NewADKAgent 能力对齐核查（**P0 门禁**，产出 [`CAPABILITY_DIFF.md`](./CAPABILITY_DIFF.md)：能力实质对齐，DR-001 成立）
 - 📋 O-008：流式 `model.decision` 补记（P1）

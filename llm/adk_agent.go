@@ -98,6 +98,10 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 	if spec.Execution.MaxStep > 0 {
 		agentCfg.MaxIterations = spec.Execution.MaxStep
 	}
+	// 用户自定义 middleware 先注册，便于其拦截/观察包内 middleware 行为。
+	if len(cfg.Middlewares) > 0 {
+		agentCfg.Handlers = append(agentCfg.Handlers, cfg.Middlewares...)
+	}
 	// Extraction 模式：注入强制 toolcall + 修复重试 middleware（最外层）
 	if spec.Execution.ToolChoice == schema.ToolChoiceForced {
 		agentCfg.Handlers = append(agentCfg.Handlers, newADKExtractionMiddleware(spec.Execution.RepairMaxAttempts))

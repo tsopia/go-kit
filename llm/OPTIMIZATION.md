@@ -14,7 +14,7 @@
 | [O-002](#o-002多模态输入-api) | 多模态输入 API | P0 | 📋 | 1 天 | 无 |
 | [O-003](#o-003工具层防御机制) | 工具层防御机制 | P0 | 📋 | 1.5 天 | 无 |
 | [O-004](#o-004adkagent-运行时-option) | ADKAgent 运行时 Option | P1 | 📋 | 1 天 | 无 |
-| [O-005](#o-005暴露-adk-middleware-注册入口) | 暴露 ADK Middleware 注册入口 | P1 | 📋 | 0.5 天 | 无 |
+| [O-005](#o-005暴露-adk-middleware-注册入口) | 暴露 ADK Middleware 注册入口 | P1 | ✅ | 0.5 天 | 无 |
 | [O-006](#o-006文档标记-newagent-为-legacy) | 文档标记 NewAgent 为 Legacy | P1 | 📋 | 0.5 天 | O-007 |
 | [O-007](#o-007newadkagent-能力对齐核查) | NewADKAgent 能力对齐核查 | **P0（门禁）** | ✅ | 1 天 | 无 |
 | [O-008](#o-008流式-modeldecision-补记) | 流式 model.decision 补记 | P1 | 📋 | 1 天 | 无 |
