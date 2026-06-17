@@ -191,10 +191,10 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 结构化输出工具 | ✅ | `NewStructTool[T]` | JSON Schema 校验 + 触发 Extraction 重试 |
 | MCP 工具（stdio） | ✅ | `ToolsConfig.MCPServers` | `MCPConfig.Protocol: "stdio"` |
 | MCP 工具（SSE） | ✅ | `ToolsConfig.MCPServers` | `MCPConfig.Protocol: "sse"` |
-| 工具别名（Aliases） | 📋 | `ToolsConfig.Aliases` | 待实现（O-003） |
-| 未知工具兜底（UnknownHandler） | 📋 | `ToolsConfig.UnknownHandler` | 待实现（O-003） |
-| 参数修复（ArgumentsFixer） | 📋 | `ToolsConfig.ArgumentsFixer` | 待实现（O-003） |
-| 工具错误转文本 Middleware | 📋 | （内置默认） | 待实现（O-003） |
+| 工具别名（Aliases） | ✅ | `ToolsConfig.Aliases` | 两路接入（O-003） |
+| 未知工具兜底（UnknownHandler） | ✅ | `ToolsConfig.UnknownHandler` | 两路接入（O-003） |
+| 参数修复（ArgumentsFixer） | ✅ | `ToolsConfig.ArgumentsFixer` | 两路接入（O-003） |
+| 工具错误转文本 Middleware | ✅ | `ToolsConfig.ErrorToText` | **opt-in（默认关闭，保向后兼容）**（O-003） |
 
 ### 4.4 可观测性（Observability）
 
@@ -234,7 +234,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 
 - ✅ O-001：导出 sentinel errors（P0）
 - ✅ O-002：多模态输入 API（P0）
-- 📋 O-003：工具层防御机制（P0）
+- ✅ O-003：工具层防御机制（P0）
 - 📋 O-004：ADKAgent 运行时 Option（P1）
 - ✅ O-005：暴露 ADK Middleware 注册入口（P1）
 - 📋 O-006：doc.go / README 标记 `NewAgent` 为 Legacy（P1，依赖 O-007）

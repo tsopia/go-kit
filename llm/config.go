@@ -36,6 +36,25 @@ type ToolsConfig struct {
 	Standard   []tool.BaseTool
 	Invokable  []InvokableTool
 	MCPServers []MCPConfig
+
+	// Aliases 工具名别名：key=规范工具名，value=别名列表。
+	// 当模型输出别名（如旧工具名）时，会被解析回规范工具名。
+	Aliases map[string][]string
+
+	// UnknownHandler 处理模型调用了未注册工具（幻觉工具名）的情况。
+	// 返回的字符串作为 ToolResult 回传给模型，让 Agent 自行纠错；
+	// 若为 nil，调用未知工具会返回错误（现有行为）。
+	UnknownHandler func(ctx context.Context, name, input string) (string, error)
+
+	// ArgumentsFixer 在工具执行前修复/改写参数 JSON（如去除 trailing comma）。
+	// 若为 nil，参数原样透传。
+	ArgumentsFixer func(ctx context.Context, name, arguments string) (string, error)
+
+	// ErrorToText 为 true 时，工具执行错误被转为 ToolResult 文本回传给模型，
+	// 而非中断 Agent 流程（生产推荐）。
+	// 注意：为保持向后兼容，**默认（nil）为关闭**，行为与现状一致；
+	// 需显式设置 true 开启。开启后该工具调用在结构化日志中记为成功。
+	ErrorToText *bool
 }
 
 type ExecutionConfig struct {

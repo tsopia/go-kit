@@ -82,6 +82,8 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 	toolsConfig := adk.ToolsConfig{
 		ToolsNodeConfig: compose.ToolsNodeConfig{Tools: built.Tools},
 	}
+	// 工具层防御（别名/未知工具/参数修复/错误转文本），未配置时零影响。
+	applyToolDefenses(&toolsConfig.ToolsNodeConfig, spec.Tools)
 	// Extraction 的 DirectReturn：ADK 原生 ReturnDirectly（替代 react 的 context.Cancel）
 	if len(spec.Execution.DirectReturnTools) > 0 {
 		toolsConfig.ReturnDirectly = make(map[string]bool, len(spec.Execution.DirectReturnTools))

@@ -12,7 +12,7 @@
 |----|------|--------|------|-----------|------|
 | [O-001](#o-001导出-sentinel-errors) | 导出 sentinel errors | P0 | ✅ | 0.5 天 | 无 |
 | [O-002](#o-002多模态输入-api) | 多模态输入 API | P0 | ✅ | 1 天 | 无 |
-| [O-003](#o-003工具层防御机制) | 工具层防御机制 | P0 | 📋 | 1.5 天 | 无 |
+| [O-003](#o-003工具层防御机制) | 工具层防御机制 | P0 | ✅ | 1.5 天 | 无 |
 | [O-004](#o-004adkagent-运行时-option) | ADKAgent 运行时 Option | P1 | 📋 | 1 天 | 无 |
 | [O-005](#o-005暴露-adk-middleware-注册入口) | 暴露 ADK Middleware 注册入口 | P1 | ✅ | 0.5 天 | 无 |
 | [O-006](#o-006文档标记-newagent-为-legacy) | 文档标记 NewAgent 为 Legacy | P1 | 📋 | 0.5 天 | O-007 |
@@ -389,15 +389,22 @@ func (t *errorToTextTool) Invoke(ctx context.Context, args string) (string, erro
 
 ### 验收标准
 
-- [ ] 四项配置字段全部生效
-- [ ] `ErrorToText` 默认开启（与 Eino 推荐一致）
-- [ ] 现有测试不受影响（不传新字段时行为完全一致）
-- [ ] README 增加「工具层防御」章节
-- [ ] 测试覆盖所有新增分支
+- [x] 四项配置字段全部生效（`tool_defense.go`）
+- [x] ~~`ErrorToText` 默认开启~~ → **决策变更：默认关闭（nil）**，见下方「实现说明」
+- [x] 现有测试不受影响（不传新字段时行为完全一致）
+- [ ] README 增加「工具层防御」章节（O-006 文档轮一并补）
+- [x] 测试覆盖所有新增分支（`tool_defense_test.go`）
+
+### 实现说明（与原方案的偏离）
+
+1. **ErrorToText 默认改为关闭（nil）**：原方案"默认开启"与"现有行为不变"冲突——默认开启会把 Assistant 模式下"工具报错中断"变成"返回文本"，属行为破坏。依据"不破坏现有 API / 最小变更"原则，改为 `*bool` 且 nil=关闭，生产需显式 `ErrorToText: &true` 开启。
+2. **两路实现统一**：react 与 ADK **都基于 `compose.ToolsNodeConfig`**，故四项防御由单一 `applyToolDefenses(*compose.ToolsNodeConfig, ToolsConfig)` 同时服务两路，无需两套 API（优于原方案预估）。
+3. **eino 实际 API**：防御能力是 `ToolsNodeConfig` 的结构体字段（`ToolAliases`/`UnknownToolsHandler`/`ToolArgumentsHandler`/`ToolCallMiddlewares`），非 `WithXxx` Option。别名用 `ToolAliasConfig.NameAliases`（go-kit 暴露简化的 `map[string][]string`）。
+4. **日志一致性**：ErrorToText 吞错时同步 `markError` 到 react 的 toolLogState，保证结构化日志仍记录失败。
 
 ### 风险
 
-**中**。需要在 react 路径（`compose.ToolsNodeOption`）和 ADK 路径（`adk.ToolsConfig.ToolsNodeConfig`）都接入；两套配置 API 略有不同。
+**已落地**。两路均基于 `compose.ToolsNodeConfig`，单函数接入；ErrorToText 默认关闭，无回归。
 
 ### 依赖
 
