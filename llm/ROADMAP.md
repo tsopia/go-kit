@@ -157,7 +157,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 自定义模型实例注入 | ✅ | `AgentModelConfig.Instance` | 跳过 `NewModel` 工厂 |
 | 思考模式（Thinking）统一映射 | ✅ | `ModelConfig.Thinking` | Extraction 模式自动关闭 |
 | 请求级模型参数调整 | 📋 | `Agent.Generate(..., opts...)` | 仅 `NewAgent` 支持，待对齐（O-004） |
-| 多模态输入（Image/Audio/Video） | 📋 | `llm.UserImageMessage(...)` | 待实现（O-002） |
+| 多模态输入（Image/Audio） | ✅ | `llm.UserImageMessage(s)` / `llm.UserAudioMessage` | 基于 eino `UserInputMultiContent`（O-002）；Video/File 待需求 |
 
 ### 4.2 Agent 层
 
@@ -233,7 +233,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 **范围**：
 
 - ✅ O-001：导出 sentinel errors（P0）
-- 📋 O-002：多模态输入 API（P0）
+- ✅ O-002：多模态输入 API（P0）
 - 📋 O-003：工具层防御机制（P0）
 - 📋 O-004：ADKAgent 运行时 Option（P1）
 - ✅ O-005：暴露 ADK Middleware 注册入口（P1）
