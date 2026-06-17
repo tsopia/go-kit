@@ -36,18 +36,30 @@ func applyToolDefenses(tnc *compose.ToolsNodeConfig, cfg ToolsConfig) {
 func errorToTextMiddleware() compose.ToolMiddleware {
 	return compose.ToolMiddleware{
 		Invokable: func(next compose.InvokableToolEndpoint) compose.InvokableToolEndpoint {
-			return func(ctx context.Context, input *compose.ToolInput) (*compose.ToolOutput, error) {
+			return func(ctx context.Context, input *compose.ToolInput) (out *compose.ToolOutput, retErr error) {
+				// 兜 panic：工具实现 panic 时也转为文本，兑现"不中断流程"契约。
+				defer func() {
+					if r := recover(); r != nil {
+						out, retErr = errorToTextResult(ctx, fmt.Errorf("工具 panic: %v", r)), nil
+					}
+				}()
 				output, err := next(ctx, input)
 				if err == nil {
 					return output, nil
 				}
-				if st := toolLogStateFromContext(ctx); st != nil {
-					st.markError(err, false, true)
-				}
-				return &compose.ToolOutput{
-					Result: fmt.Sprintf("工具执行失败: %v\n请调整参数或改用其他工具后重试。", err),
-				}, nil
+				return errorToTextResult(ctx, err), nil
 			}
 		},
+	}
+}
+
+// errorToTextResult 把工具错误转为回传模型的文本结果，并同步标记 toolLogState
+// （保证 react 结构化日志仍记录到真实失败）。
+func errorToTextResult(ctx context.Context, err error) *compose.ToolOutput {
+	if st := toolLogStateFromContext(ctx); st != nil {
+		st.markError(err, false, true)
+	}
+	return &compose.ToolOutput{
+		Result: fmt.Sprintf("工具执行失败: %v\n请调整参数或改用其他工具后重试。", err),
 	}
 }
