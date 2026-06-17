@@ -25,7 +25,10 @@
 //   - 并发控制（[ConcurrencyConfig.MaxConcurrency]，Agent 调用级信号量，
 //     多实例互不影响）
 //   - 思考模式统一配置（[ThinkingConfig]，Extraction 模式自动关闭）
+//   - 多模态输入（[UserImageMessage]/[UserImageMessages]/[UserAudioMessage]，
+//     http/https/data URL 协议白名单）
 //   - MCP 工具集成
+//   - 工具防御层（[ToolsConfig] 的 Aliases / UnknownHandler / ArgumentsFixer / ErrorToText）
 //   - 可观测性（Langfuse callback、结构化日志）
 //
 // Extraction 模式下强制工具调用时会自动关闭思考模式，

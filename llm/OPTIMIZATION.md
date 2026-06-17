@@ -97,6 +97,10 @@ var (
     // ErrUnknownMCPProtocol 未知的 MCP 协议（仅支持 "stdio" / "sse"）。
     ErrUnknownMCPProtocol = errors.New("llm: unknown mcp protocol")
 
+    // ErrUnsupportedContentURLScheme 多模态内容 URL 使用了非白名单协议
+    //（仅允许 http / https / data）。F-4 新增。
+    ErrUnsupportedContentURLScheme = errors.New("llm: unsupported content url scheme")
+
     // ErrMCPConnectFailed MCP 服务器连接失败。
     ErrMCPConnectFailed = errors.New("llm: mcp connect failed")
 )
@@ -201,57 +205,87 @@ resp, _ := agent.Generate(ctx, []*schema.Message{msg})
 
 ### 实现方案
 
+实际落地代码见 `llm/message.go`。关键差异：
+
+- 函数返回 `(*schema.Message, error)`，URL 校验失败时返回 `ErrUnsupportedContentURLScheme`。
+- 使用 eino v0.9 的 `schema.MessageInputPart` + `schema.UserInputMultiContent`（旧 `MultiContent` 已 Deprecated）。
+- 仅允许 `http` / `https` / `data` 三种 URL scheme，防止 `file://` 等引发 SSRF。
+
 ```go
 package llm
 
 import (
+    "fmt"
+    "net/url"
+    "strings"
+
     "github.com/cloudwego/eino/schema"
 )
 
-// UserImageMessage 构造一个包含单张图片 + 文本提示的用户消息。
-//
-// imageURL 支持以下格式：
-//   - HTTP(S) URL："https://example.com/cat.png"
-//   - Base64 Data URI："data:image/png;base64,iVBORw0..."
-//
-// text 为可选的文本提示，传空字符串则仅发送图片。
-func UserImageMessage(imageURL, text string) *schema.Message {
-    parts := []schema.UserContent{
-        &schema.ImageURL{URL: imageURL},
+// allowedContentURLSchemes 是多模态内容 URL 允许的协议白名单。
+var allowedContentURLSchemes = map[string]bool{"http": true, "https": true, "data": true}
+
+// UserImageMessage 构造一条「图片 + 文本」用户消息。text 为空时仅含图片。
+func UserImageMessage(imageURL, text string) (*schema.Message, error) {
+    if err := validateContentURL(imageURL); err != nil {
+        return nil, err
     }
-    if text != "" {
-        parts = append(parts, schema.TextContent{Content: text, Type: schema.ContentTypeText})
-    }
-    return &schema.Message{
-        Role:     schema.User,
-        MultiContent: parts,
-    }
+    parts := appendTextPart([]schema.MessageInputPart{imageInputPart(imageURL)}, text)
+    return &schema.Message{Role: schema.User, UserInputMultiContent: parts}, nil
 }
 
-// UserImageMessages 构造一个包含多张图片 + 文本提示的用户消息。
-func UserImageMessages(imageURLs []string, text string) *schema.Message {
-    parts := make([]schema.UserContent, 0, len(imageURLs)+1)
+// UserImageMessages 构造一条「多图 + 文本」用户消息，图片顺序保留。
+func UserImageMessages(imageURLs []string, text string) (*schema.Message, error) {
+    parts := make([]schema.MessageInputPart, 0, len(imageURLs)+1)
     for _, u := range imageURLs {
-        parts = append(parts, &schema.ImageURL{URL: u})
+        if err := validateContentURL(u); err != nil {
+            return nil, err
+        }
+        parts = append(parts, imageInputPart(u))
     }
-    if text != "" {
-        parts = append(parts, schema.TextContent{Content: text, Type: schema.ContentTypeText})
+    return &schema.Message{Role: schema.User, UserInputMultiContent: appendTextPart(parts, text)}, nil
+}
+
+// UserAudioMessage 构造一条「音频 + 文本」用户消息（如 Gemini / GPT-4o-audio）。
+func UserAudioMessage(audioURL, text string) (*schema.Message, error) {
+    if err := validateContentURL(audioURL); err != nil {
+        return nil, err
     }
-    return &schema.Message{
-        Role:     schema.User,
-        MultiContent: parts,
+    part := schema.MessageInputPart{
+        Type:  schema.ChatMessagePartTypeAudioURL,
+        Audio: &schema.MessageInputAudio{MessagePartCommon: schema.MessagePartCommon{URL: &audioURL}},
+    }
+    return &schema.Message{Role: schema.User, UserInputMultiContent: appendTextPart([]schema.MessageInputPart{part}, text)}, nil
+}
+
+// validateContentURL 校验内容 URL 协议在白名单内（http/https/data）。
+func validateContentURL(raw string) error {
+    u, err := url.Parse(raw)
+    if err != nil {
+        return fmt.Errorf("%w: %q: %v", ErrUnsupportedContentURLScheme, raw, err)
+    }
+    if !allowedContentURLSchemes[strings.ToLower(u.Scheme)] {
+        return fmt.Errorf("%w: %q (allowed: http/https/data)", ErrUnsupportedContentURLScheme, u.Scheme)
+    }
+    return nil
+}
+
+func imageInputPart(u string) schema.MessageInputPart {
+    return schema.MessageInputPart{
+        Type:  schema.ChatMessagePartTypeImageURL,
+        Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{URL: &u}},
     }
 }
 
-// UserAudioMessage 构造一个包含音频 + 文本的用户消息（支持的模型：Gemini / GPT-4o-audio）。
-func UserAudioMessage(audioURL, text string) *schema.Message {
-    // 实现待 eino schema 提供 AudioURL 后填充
-    // 暂时返回未实现错误或封装在 schema.UserContent 扩展中
-    // ...
+func appendTextPart(parts []schema.MessageInputPart, text string) []schema.MessageInputPart {
+    if text == "" {
+        return parts
+    }
+    return append(parts, schema.MessageInputPart{Type: schema.ChatMessagePartTypeText, Text: text})
 }
 ```
 
-**注意**：实现时需先调研 Eino 当前 `schema` 包的多模态字段实际类型（`schema.ImageURL` vs `schema.ChatMessageImagePart`），不同版本可能不同。Step 1 必须是阅读 eino 当前版本源码确认 API。
+**注意**：`UserInputMultiContent` 是 eino v0.9 引入的新字段，旧的 `schema.Message.MultiContent` 已被标记 Deprecated，本包跟随上游使用新字段。
 
 ### 测试方案
 
@@ -401,6 +435,7 @@ func (t *errorToTextTool) Invoke(ctx context.Context, args string) (string, erro
 2. **两路实现统一**：react 与 ADK **都基于 `compose.ToolsNodeConfig`**，故四项防御由单一 `applyToolDefenses(*compose.ToolsNodeConfig, ToolsConfig)` 同时服务两路，无需两套 API（优于原方案预估）。
 3. **eino 实际 API**：防御能力是 `ToolsNodeConfig` 的结构体字段（`ToolAliases`/`UnknownToolsHandler`/`ToolArgumentsHandler`/`ToolCallMiddlewares`），非 `WithXxx` Option。别名用 `ToolAliasConfig.NameAliases`（go-kit 暴露简化的 `map[string][]string`）。
 4. **日志一致性**：ErrorToText 吞错时同步 `markError` 到 react 的 toolLogState，保证结构化日志仍记录失败。
+5. **ErrorToText 同时 recover panic**：`errorToTextMiddleware` 内部用 `defer recover()` 捕获工具调用 panic（包括用户工具自身 panic 和 Eino 内部 panic），将其转为文本结果回传模型，避免单工具 panic 拖垮整个 Agent 调用。
 
 ### 风险
 
@@ -869,6 +904,24 @@ Week 2：
 - [ ] 相关文档（doc.go / README.md / ROADMAP.md）同步更新
 - [ ] 状态从 📋 更新为 ✅
 - [ ] 单独 commit，message 格式：`llm: implement O-NNN <title>`
+
+---
+
+## 附录：Review 修复轮（F-1~F-7）
+
+stage-0 O 轮代码合并后，review 发现若干实现与文档、观测或安全预期不一致的问题，本轮集中修复。
+
+| ID | Commit | 修复内容 | 严重度 |
+|----|--------|---------|--------|
+| F-1 | `4336b50` | 流式 `model.decision` 日志在 EOF 之前记录，避免 EOF 后仍写日志导致顺序混乱或丢失 | 中 |
+| F-2 | `4336b50` | `schema.ConcatMessageStream` 拼接错误显式返回，不再吞掉 concat 失败 | 中 |
+| F-3 | `40b784b` | README quick-start 改用 `NewADKAgent`；`CAPABILITY_DIFF.md` 同步 O-004 运行时 Option 状态 | 低 |
+| F-4 | `088b1cb` | 多模态内容 URL 增加协议白名单（仅 http/https/data），非法协议返回 `ErrUnsupportedContentURLScheme` | 高 |
+| F-5 | `3a375c1` | `ErrorToText` 中间件增加 `recover()`，把工具调用 panic 转为文本回传模型 | 高 |
+| F-6 | `8f03228` | 补齐 react 路径流式决策回归测试；新增运行时 Option 并发 `-race` 测试 | 高 |
+| F-7 | `3a375c1` | 在文档中警示 `ErrorToText` 默认关闭、开启后可能泄露工具内部错误给模型的风险 | 中 |
+
+本轮引入或加固的能力包括：URL 协议白名单与 SSRF 纵深防御、工具调用 panic recover、flaky 流式决策测试修复、README 与能力差异文档同步、react 路径流式决策回归测试、并发运行时选项的 `-race` 覆盖，以及对 `ErrorToText` 开启后可能向模型泄露内部错误的安全提示。
 
 ---
 

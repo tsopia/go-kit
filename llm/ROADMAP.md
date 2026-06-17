@@ -157,7 +157,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 自定义模型实例注入 | ✅ | `AgentModelConfig.Instance` | 跳过 `NewModel` 工厂 |
 | 思考模式（Thinking）统一映射 | ✅ | `ModelConfig.Thinking` | Extraction 模式自动关闭 |
 | 请求级模型参数调整 | ✅ | `ADKAgent.Generate(..., WithTemperature/WithMaxTokens/WithTopP)` | 两路均支持；仅参数，运行时换模型不做（O-004） |
-| 多模态输入（Image/Audio） | ✅ | `llm.UserImageMessage(s)` / `llm.UserAudioMessage` | 基于 eino `UserInputMultiContent`（O-002）；Video/File 待需求 |
+| 多模态输入（Image/Audio） | ✅ | `llm.UserImageMessage(s)` / `llm.UserAudioMessage` | 返回 `(*schema.Message, error)`；基于 eino `UserInputMultiContent`（O-002）；含 http/https/data 协议白名单；Video/File 待需求 |
 
 ### 4.2 Agent 层
 
@@ -194,7 +194,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | 工具别名（Aliases） | ✅ | `ToolsConfig.Aliases` | 两路接入（O-003） |
 | 未知工具兜底（UnknownHandler） | ✅ | `ToolsConfig.UnknownHandler` | 两路接入（O-003） |
 | 参数修复（ArgumentsFixer） | ✅ | `ToolsConfig.ArgumentsFixer` | 两路接入（O-003） |
-| 工具错误转文本 Middleware | ✅ | `ToolsConfig.ErrorToText` | **opt-in（默认关闭，保向后兼容）**（O-003） |
+| 工具错误转文本 Middleware | ✅ | `ToolsConfig.ErrorToText` | 默认关闭（opt-in）；同时 recover panic 转 text（O-003） |
 
 ### 4.4 可观测性（Observability）
 
@@ -215,7 +215,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 |------|------|------|------|
 | `context.Context` 传播 | ✅ | 全部公开 API 首参 | |
 | `fmt.Errorf("%w", err)` 错误包装 | ✅ | 内部统一风格 | |
-| 导出 sentinel error | ✅ | `llm.ErrMissingModel` / `ErrUnsupportedProtocol` 等（`errors.go`） | 支持 `errors.Is`（O-001） |
+| 导出 sentinel error | ✅ | `llm.ErrMissingModel` / `ErrUnsupportedProtocol` / `ErrUnsupportedContentURLScheme` 等（`errors.go`） | 支持 `errors.Is`（O-001） |
 | 模型调用重试（内置） | ✅ | Extraction 模式 `MaxRetries` | 仅 Extraction |
 | 通用模型重试 Middleware | 📋 | （ADK 透传） | 阶段 1 评估 |
 | 模型 Failover | 📋 | （ADK 透传） | 阶段 1 评估 |
