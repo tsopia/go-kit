@@ -109,6 +109,18 @@ func NewADKAgent(ctx context.Context, cfg AgentConfig) (*ADKAgent, error) {
 		agentCfg.Handlers = append(agentCfg.Handlers, newADKExtractionMiddleware(spec.Execution.RepairMaxAttempts))
 	}
 
+	// 模型调用自动重试（429/502/503 等暂态错误），使用 eino 原生 ModelRetryConfig。
+	if r := cfg.Resilience.ModelRetry; r.MaxRetries > 0 {
+		isRetryAble := r.IsRetryAble
+		if isRetryAble == nil {
+			isRetryAble = isTransientModelError
+		}
+		agentCfg.ModelRetryConfig = &adk.ModelRetryConfig{
+			MaxRetries:  r.MaxRetries,
+			IsRetryAble: func(ctx context.Context, err error) bool { return isRetryAble(err) },
+		}
+	}
+
 	// 可观测性 + MessageModifier 适配（内层，记录真实工具调用结果）
 	structuredLogs := newStructuredLogger(spec.Observability.StructuredLogs)
 	if structuredLogs.enabled() || spec.Prompt.PrepareMessages != nil || spec.Prompt.RewriteHistory != nil {

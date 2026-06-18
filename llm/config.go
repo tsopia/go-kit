@@ -89,6 +89,22 @@ type StructuredLogConfig struct {
 	MaxFieldLength   int
 }
 
+// ModelRetryConfig 控制 ADKAgent 模型调用的自动重试。
+// 仅 NewADKAgent 路径生效；NewAgent（react）不受影响。
+type ModelRetryConfig struct {
+	// MaxRetries 最大重试次数（不含首次调用）。0 表示不重试。
+	MaxRetries int
+	// IsRetryAble 判断错误是否值得重试。
+	// nil 时使用内置规则：429 / 502 / 503 / rate limit / too many requests；
+	// 不重试 context 取消/超时及 4xx 客户端错误。
+	IsRetryAble func(error) bool
+}
+
+// ResilienceConfig 控制 ADKAgent 的容错行为。
+type ResilienceConfig struct {
+	ModelRetry ModelRetryConfig
+}
+
 type AgentConfig struct {
 	Model         AgentModelConfig
 	Prompt        PromptConfig
@@ -97,6 +113,7 @@ type AgentConfig struct {
 	Streaming     StreamingConfig
 	Observability ObservabilityConfig
 	Concurrency   ConcurrencyConfig
+	Resilience    ResilienceConfig
 
 	// Middlewares 是用户自定义的 ADK ChatModelAgentMiddleware，仅 NewADKAgent
 	// 路径生效（NewAgent legacy 路径忽略）。可用于接入 Eino 生态的内置
