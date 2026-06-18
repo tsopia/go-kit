@@ -334,6 +334,44 @@ tools := llm.ToolsConfig{
 }
 ```
 
+### 9. 模型调用自动重试 (Model Retry)
+
+当模型 API 返回限速（429）、服务不可用（502/503）等暂态错误时，自动重试，无需业务层处理。
+
+仅 `NewADKAgent` 路径生效；`NewAgent`（legacy）不受影响。
+
+```go
+agent, _ := llm.NewADKAgent(ctx, llm.AgentConfig{
+    Model: llm.AgentModelConfig{Config: cfg},
+    Resilience: llm.ResilienceConfig{
+        ModelRetry: llm.ModelRetryConfig{
+            MaxRetries: 3, // 最多重试 3 次（不含首次调用）
+        },
+    },
+})
+```
+
+内置重试规则（默认 `IsRetryAble`）：
+
+| 触发重试 | 不触发 |
+|---------|--------|
+| 429 / rate limit / too many requests | `context.Canceled` / `context.DeadlineExceeded` |
+| 502 Bad Gateway | 400 / 401 / 403 / 404（客户端错误） |
+| 503 Service Unavailable | 其他未知错误 |
+
+退避策略由 eino 内置实现：首次 100ms，指数增长，上限 10s，含随机抖动。
+
+**自定义重试规则**：
+
+```go
+ModelRetry: llm.ModelRetryConfig{
+    MaxRetries: 3,
+    IsRetryAble: func(err error) bool {
+        return strings.Contains(err.Error(), "upstream connect error")
+    },
+},
+```
+
 ## 📦 架构说明
 
 `llm` 包是对 CloudWeGo Eino 框架的 Opinionated 封装：

@@ -217,7 +217,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | `fmt.Errorf("%w", err)` 错误包装 | ✅ | 内部统一风格 | |
 | 导出 sentinel error | ✅ | `llm.ErrMissingModel` / `ErrUnsupportedProtocol` / `ErrUnsupportedContentURLScheme` 等（`errors.go`） | 支持 `errors.Is`（O-001） |
 | 模型调用重试（内置） | ✅ | Extraction 模式 `MaxRetries` | 仅 Extraction |
-| 通用模型重试 Middleware | 📋 | （ADK 透传） | 阶段 1 评估 |
+| 通用模型重试（429/502/503） | ✅ | `Resilience.ModelRetry.MaxRetries` | 仅 ADK 路径；内置指数退避；可自定义 `IsRetryAble` |
 | 模型 Failover | 📋 | （ADK 透传） | 阶段 1 评估 |
 
 ---

@@ -24,6 +24,8 @@
 //     Extraction（强制工具调用 + 失败修复重试）
 //   - 并发控制（[ConcurrencyConfig.MaxConcurrency]，Agent 调用级信号量，
 //     多实例互不影响）
+//   - 模型调用自动重试（[ResilienceConfig.ModelRetry]，429/502/503 等暂态错误，
+//     仅 ADK 路径，内置退避；可自定义 IsRetryAble 规则）
 //   - 思考模式统一配置（[ThinkingConfig]，Extraction 模式自动关闭）
 //   - 多模态输入（[UserImageMessage]/[UserImageMessages]/[UserAudioMessage]，
 //     http/https/data URL 协议白名单）

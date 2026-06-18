@@ -18,6 +18,7 @@
 | `Close() error` | ✅ | ✅ | ✅ |
 | `ExportGraph()` | ✅ | ❌（adk 无等价能力） | 🚫 接受缺口（见三） |
 | `Agent() adk.Agent` | ❌ | ✅（暴露底层、用于子 Agent / DeepAgent） | ADK 独有，非缺口 |
+| 模型调用自动重试（429/502/503） | ❌ | ✅（`Resilience.ModelRetry`，eino 原生 `ModelRetryConfig`） | ADK 独有；react legacy 路径自行处理 |
 
 ---
 
