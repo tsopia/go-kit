@@ -107,6 +107,11 @@ type AgentConfig struct {
 	Middlewares []adk.ChatModelAgentMiddleware
 }
 
+// ErrorToTextEnabled 返回一个指向 true 的 *bool，便于内联配置 ToolsConfig.ErrorToText：
+//
+//	Tools: llm.ToolsConfig{ErrorToText: llm.ErrorToTextEnabled()}
+func ErrorToTextEnabled() *bool { v := true; return &v }
+
 // ConcurrencyConfig 控制单个 Agent 实例的最大并发调用数。
 type ConcurrencyConfig struct {
 	// MaxConcurrency 限制同一 Agent 实例上 Generate/Stream 的并发数。

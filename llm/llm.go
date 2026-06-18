@@ -82,6 +82,14 @@ func NewModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel,
 		m   model.ToolCallingChatModel
 		err error
 	)
+	// KIMI 是 OpenAI 协议的别名，内部归并到 OPENAI_COMPAT 路径。
+	if cfg.Protocol == KIMI {
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "https://api.moonshot.cn/v1"
+		}
+		cfg.Protocol = OPENAI_COMPAT
+	}
+
 	switch cfg.Protocol {
 	case OPENAI, OPENAI_COMPAT:
 		m, err = newOpenAIModel(ctx, cfg)
@@ -97,8 +105,6 @@ func NewModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel,
 		m, err = newGeminiModel(ctx, cfg)
 	case OLLAMA:
 		m, err = newOllamaModel(ctx, cfg)
-	case KIMI:
-		m, err = newKimiModel(ctx, cfg)
 	case QIANFAN:
 		m, err = newQianfanModel(ctx, cfg)
 	case QWEN:
@@ -247,7 +253,14 @@ func newDeepSeekModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingCh
 			Type: thinkingTypeString(cfg.Thinking.Enable),
 		}
 	}
-	return einodeepseek.NewChatModel(ctx, c)
+	m, err := einodeepseek.NewChatModel(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg.ExtraFields) > 0 {
+		return &defaultOptsModel{inner: m, opts: []model.Option{einodeepseek.WithExtraFields(cfg.ExtraFields)}}, nil
+	}
+	return m, nil
 }
 
 func newGeminiModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel, error) {
@@ -290,6 +303,15 @@ func newQianfanModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingCha
 	if cfg.Temperature != nil {
 		c.Temperature = cfg.Temperature
 	}
+	if cfg.TopP != nil {
+		c.TopP = cfg.TopP
+	}
+	if cfg.Stop != nil {
+		c.Stop = cfg.Stop
+	}
+	if cfg.MaxTokens != nil {
+		c.MaxCompletionTokens = cfg.MaxTokens
+	}
 	return einoqianfan.NewChatModel(ctx, c)
 }
 
@@ -314,26 +336,13 @@ func newQwenModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatMo
 		enabled := cfg.Thinking.Enable
 		c.EnableThinking = &enabled
 	}
-	return einoqwen.NewChatModel(ctx, c)
+	m, err := einoqwen.NewChatModel(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if len(cfg.ExtraFields) > 0 {
+		return &defaultOptsModel{inner: m, opts: []model.Option{einoqwen.WithExtraFields(cfg.ExtraFields)}}, nil
+	}
+	return m, nil
 }
 
-func newKimiModel(ctx context.Context, cfg ModelConfig) (model.ToolCallingChatModel, error) {
-	c := &einoopenai.ChatModelConfig{
-		Model:       cfg.Model,
-		APIKey:      cfg.APIKey,
-		Timeout:     cfg.Timeout,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
-		TopP:        cfg.TopP,
-		Stop:        cfg.Stop,
-	}
-	if cfg.BaseURL != "" {
-		c.BaseURL = cfg.BaseURL
-	} else {
-		c.BaseURL = "https://api.moonshot.cn/v1"
-	}
-	if extra := mergeOpenAIExtraFields(cfg.Thinking, cfg.ExtraFields); len(extra) > 0 {
-		c.ExtraFields = extra
-	}
-	return einoopenai.NewChatModel(ctx, c)
-}

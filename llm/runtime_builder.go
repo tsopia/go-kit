@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -100,13 +101,14 @@ func onceCleanup(cleanups []func() error) func() error {
 }
 
 func runCleanups(cleanups []func() error) error {
+	var errs []error
 	for _, cleanup := range cleanups {
 		if cleanup == nil {
 			continue
 		}
 		if err := cleanup(); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

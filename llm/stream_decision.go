@@ -26,12 +26,14 @@ func observeStreamDecision(
 
 	newSr, sw := schema.Pipe[*schema.Message](1)
 	go func() {
-		var chunks []*schema.Message
+		// 仅累积 ToolCalls 和 ResponseMeta 字段（decision 日志所需），
+		// 丢弃 Content/MultiContent，避免长响应把全部文本内容堆在内存。
+		var metaChunks []*schema.Message
 		defer func() {
 			sr.Close()
 			// 先记录决策日志，再关闭写端：这样消费者"读到 EOF"即蕴含
 			// "日志已写"，对读到 EOF 的调用方建立 happens-before（避免测试 flaky）。
-			if msg, err := schema.ConcatMessages(chunks); err != nil {
+			if msg, err := schema.ConcatMessages(metaChunks); err != nil {
 				logs.logError(ctx, "model.decision",
 					"streaming", true,
 					"error", "concat stream chunks failed: "+err.Error(),
@@ -49,7 +51,15 @@ func observeStreamDecision(
 				}
 				return
 			}
-			chunks = append(chunks, chunk)
+			// 只保留 decision 日志需要的字段（ToolCalls / ResponseMeta），
+			// 流式 tool call 按 Index 累积仍能正确合并。
+			if chunk != nil && (len(chunk.ToolCalls) > 0 || chunk.ResponseMeta != nil) {
+				metaChunks = append(metaChunks, &schema.Message{
+					Role:         chunk.Role,
+					ToolCalls:    chunk.ToolCalls,
+					ResponseMeta: chunk.ResponseMeta,
+				})
+			}
 			// 读端提前 Close 时退出，已累积的 chunk 仍会在 defer 中尽力记录。
 			if sw.Send(chunk, nil) {
 				return

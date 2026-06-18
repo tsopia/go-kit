@@ -44,6 +44,32 @@ func (r *extractionRuntime) directReturnMessage(directReturnTools map[string]str
 	}, true
 }
 
+// ── defaultOptsModel 把固定 model.Option 绑定到模型 ──────────────────
+//
+// 用于把 ModelConfig.ExtraFields 在 config 层绑定到只支持 request-level option
+// 的供应商（DeepSeek / Qwen）：构造时把 ExtraFields 转为对应的 model.Option，
+// 每次 Generate/Stream 自动注入，用户运行时传入的同名 option 会覆盖默认值。
+type defaultOptsModel struct {
+	inner model.ToolCallingChatModel
+	opts  []model.Option
+}
+
+func (m *defaultOptsModel) Generate(ctx context.Context, msgs []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return m.inner.Generate(ctx, msgs, append(m.opts, opts...)...)
+}
+
+func (m *defaultOptsModel) Stream(ctx context.Context, msgs []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return m.inner.Stream(ctx, msgs, append(m.opts, opts...)...)
+}
+
+func (m *defaultOptsModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	inner, err := m.inner.WithTools(tools)
+	if err != nil {
+		return nil, err
+	}
+	return &defaultOptsModel{inner: inner, opts: m.opts}, nil
+}
+
 // ── extractionToolChoiceModel 动态切换 ToolChoice 的模型包装器 ───────
 //
 // 行为：

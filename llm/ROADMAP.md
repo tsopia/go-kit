@@ -148,7 +148,7 @@ callbacks               ✅ 通过 ObservabilityConfig 暴露
 | OpenAI / OpenAI 兼容 | ✅ | `Protocol: OPENAI` / `OPENAI_COMPAT` | |
 | Claude / Claude 兼容 | ✅ | `Protocol: CLAUDE` / `CLAUDE_COMPAT` | |
 | Ark / ArkBot | ✅ | `Protocol: ARK` / `ARKBOT` | |
-| DeepSeek | ✅ | `Protocol: DEEPSEEK` | 不支持 config 级 `ExtraFields` |
+| DeepSeek | ✅ | `Protocol: DEEPSEEK` | `ExtraFields` 经 `defaultOptsModel` 透传（request-level option） |
 | Gemini | ✅ | `Protocol: GEMINI` | 使用 `genai.ThinkingConfig` |
 | Ollama | ✅ | `Protocol: OLLAMA` | 本地模型 |
 | Qianfan | ✅ | `Protocol: QIANFAN` | `Thinking` 被忽略（厂商不支持） |

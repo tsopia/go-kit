@@ -14,7 +14,7 @@ import (
 //
 // 它利用 Tool Call 的 JSON Schema 约束模型输出格式：
 //   - 模型按 Schema 生成 JSON 参数
-//   - Invoke 内部做 json.Unmarshal 校验
+//   - Invoke 内部做 json.Unmarshal 校验 + required 字段存在性检查
 //   - 成功 → 返回合法 JSON
 //   - 失败 → 返回 error，触发自动重试
 //
@@ -43,9 +43,10 @@ import (
 //	var jd JD
 //	json.Unmarshal([]byte(msg.Content), &jd)
 type StructTool[T any] struct {
-	name string
-	desc string
-	info *schema.ToolInfo
+	name     string
+	desc     string
+	info     *schema.ToolInfo
+	required []string // 顶层 required:"true" 字段的 JSON 名，构造时提取
 }
 
 // NewStructTool 创建一个结构化输出提取工具。
@@ -53,8 +54,9 @@ type StructTool[T any] struct {
 func NewStructTool[T any](name, desc string) *StructTool[T] {
 	params := structToParams[T]()
 	return &StructTool[T]{
-		name: name,
-		desc: desc,
+		name:     name,
+		desc:     desc,
+		required: topLevelRequiredFields[T](),
 		info: &schema.ToolInfo{
 			Name:        name,
 			Desc:        desc,
@@ -71,6 +73,20 @@ func (s *StructTool[T]) Invoke(_ context.Context, args string) (string, error) {
 	var v T
 	if err := json.Unmarshal([]byte(args), &v); err != nil {
 		return "", fmt.Errorf("参数校验失败: %w。请严格按照 JSON Schema 重新生成参数", err)
+	}
+	// 检查顶层 required 字段是否在 JSON 中存在（json.Unmarshal 对缺失字段只填零值，不报错）
+	if len(s.required) > 0 {
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(args), &raw)
+		var missing []string
+		for _, f := range s.required {
+			if _, ok := raw[f]; !ok {
+				missing = append(missing, f)
+			}
+		}
+		if len(missing) > 0 {
+			return "", fmt.Errorf("参数校验失败: 缺少必填字段 %v。请严格按照 JSON Schema 重新生成参数", missing)
+		}
 	}
 	// 重新序列化，确保输出格式标准化
 	out, err := json.Marshal(v)
@@ -124,7 +140,7 @@ func typeToParams(t reflect.Type) (map[string]*schema.ParameterInfo, *schema.Par
 
 			// 处理根据 json tag 获取字段名
 			jsonName := jsonTag
-			if idx := findChar(jsonName, ','); idx >= 0 {
+			if idx := strings.IndexByte(jsonName, ','); idx >= 0 {
 				jsonName = jsonName[:idx]
 			}
 
@@ -195,11 +211,35 @@ func goTypeToSchemaType(t reflect.Type) schema.DataType {
 	}
 }
 
-func findChar(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
+// topLevelRequiredFields 提取结构体 T 顶层标有 required:"true" 的字段的 JSON 名。
+// 仅检查一层，不递归嵌套结构（嵌套字段的 required 由模型 Schema 层约束）。
+func topLevelRequiredFields[T any]() []string {
+	var zero T
+	t := reflect.TypeOf(zero)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
 	}
-	return -1
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var required []string
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() || field.Tag.Get("required") != "true" {
+			continue
+		}
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+		name := jsonTag
+		if idx := strings.IndexByte(name, ','); idx >= 0 {
+			name = name[:idx]
+		}
+		if name == "" {
+			name = field.Name
+		}
+		required = append(required, name)
+	}
+	return required
 }
