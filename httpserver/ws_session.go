@@ -12,6 +12,7 @@ type wsSession struct {
 	ctx             context.Context
 	request         *http.Request
 	params          gin.Params
+	keys            map[string]any
 	recv            <-chan WSMessage
 	send            chan WSMessage
 	closeFn         func(int, string) error
@@ -33,6 +34,20 @@ func (s *wsSession) Request() *http.Request {
 
 func (s *wsSession) Param(name string) string {
 	return s.params.ByName(name)
+}
+
+func (s *wsSession) Get(key string) (any, bool) {
+	v, ok := s.keys[key]
+	return v, ok
+}
+
+func (s *wsSession) GetString(key string) (string, bool) {
+	v, ok := s.keys[key]
+	if !ok {
+		return "", false
+	}
+	str, ok := v.(string)
+	return str, ok
 }
 
 func (s *wsSession) Recv() <-chan WSMessage {
