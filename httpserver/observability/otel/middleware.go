@@ -4,7 +4,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tsopia/go-kit/utils"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
@@ -47,6 +49,16 @@ func Middleware(config Config) gin.HandlerFunc {
 
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
+
+		if transport := c.GetString(utils.StreamingKey); transport != "" {
+			span.SetAttributes(attribute.String("stream.transport", transport))
+			if len(c.Errors) > 0 {
+				lastErr := c.Errors.Last().Err
+				span.RecordError(lastErr)
+				span.SetStatus(codes.Error, lastErr.Error())
+			}
+			return
+		}
 
 		if len(c.Errors) > 0 {
 			lastErr := c.Errors.Last().Err

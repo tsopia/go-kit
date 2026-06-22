@@ -77,6 +77,8 @@ type WSSession interface {
 	Context() context.Context
 	Request() *http.Request
 	Param(name string) string
+	Get(key string) (any, bool)
+	GetString(key string) (string, bool)
 	Recv() <-chan WSMessage
 	Send(msg WSMessage) error
 	TrySend(msg WSMessage) bool

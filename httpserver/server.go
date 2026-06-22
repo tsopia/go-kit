@@ -230,6 +230,12 @@ func (s *Server) sseRegister(method, relativePath string, handler SSEHandlerFunc
 		stream := &sseSender{ginCtx: c, ctx: ctx, config: cfg, startedAt: startedAt}
 		stream.logConnect()
 
+		c.Set(utils.StreamingKey, "sse")
+		if obs, ok := httpmiddleware.StreamObserverFromContext(c.Request.Context()); ok && obs != nil {
+			obs.OnConnect("sse")
+			defer obs.OnDisconnect("sse")
+		}
+
 		// 启动心跳（如果配置了）
 		stopHeartbeat := stream.startHeartbeat(ctx)
 
@@ -274,6 +280,13 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			return
 		}
 		logStreamEvent(c, "info", "stream_connect", "ws", time.Time{}, nil)
+
+		c.Set(utils.StreamingKey, "ws")
+		if obs, ok := httpmiddleware.StreamObserverFromContext(c.Request.Context()); ok && obs != nil {
+			obs.OnConnect("ws")
+			defer obs.OnDisconnect("ws")
+		}
+
 		defer func() {
 			if err := conn.Close(); err != nil {
 				slog.Debug("websocket close failed",
@@ -334,6 +347,7 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			ctx:     ctx,
 			request: c.Request,
 			params:  c.Params,
+			keys:    cloneGinKeys(c.Keys),
 			recv:    recv,
 			send:    send,
 			closeFn: closeConn,
@@ -695,4 +709,19 @@ func GetRequestID(c *gin.Context) string {
 //	logger.Info("处理用户请求") // 自动包含 trace_id 和 request_id
 func ContextFromGin(c *gin.Context) context.Context {
 	return c.Request.Context()
+}
+
+// cloneGinKeys 复制 gin.Context.Keys 快照，供 WS pump goroutine 安全读取。
+// gin.Context.Keys 的 key 类型为 any，此处只保留 string key。
+func cloneGinKeys(src map[any]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		if sk, ok := k.(string); ok {
+			dst[sk] = v
+		}
+	}
+	return dst
 }

@@ -3,6 +3,9 @@ package middleware
 import (
 	"context"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tsopia/go-kit/utils"
 )
 
 // StreamLogConfig 描述流式连接日志行为。
@@ -58,4 +61,42 @@ func CaptureAllowedRequestHeaders(headers http.Header, allowlist []string) map[s
 		result[headerName] = cloned
 	}
 	return result
+}
+
+// StreamObserver 观测流式连接的建立与断开。
+// 实现方（如 observability/prometheus）通过 WithStreamObserver 注入 context，
+// SSE/WS handler 在连接建立/断开时回调，从而在不反向依赖 observability 子包的
+// 前提下维护活跃连接指标。
+type StreamObserver interface {
+	OnConnect(transport string)
+	OnDisconnect(transport string)
+}
+
+type streamObserverKey struct{}
+
+// WithStreamObserver 将 StreamObserver 写入 context。
+func WithStreamObserver(ctx context.Context, obs StreamObserver) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, streamObserverKey{}, obs)
+}
+
+// StreamObserverFromContext 从 context 读取 StreamObserver。
+func StreamObserverFromContext(ctx context.Context) (StreamObserver, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	obs, ok := ctx.Value(streamObserverKey{}).(StreamObserver)
+	return obs, ok
+}
+
+// MarkStreaming 返回一个把流式标记写入 gin.Context 的中间件，
+// 供通过 srv.StreamingGroup() 自定义注册的流式路由使用。
+// SSE/SSEPost/WS 便利方法已自动打标，无需再用此中间件。
+func MarkStreaming(transport string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(utils.StreamingKey, transport)
+		c.Next()
+	}
 }

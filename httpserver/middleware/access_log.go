@@ -132,6 +132,10 @@ func AccessLog(configs ...AccessLogConfig) gin.HandlerFunc {
 
 		c.Next()
 
+		if c.GetString(utils.StreamingKey) != "" {
+			return
+		}
+
 		status := statusCode(c.Writer.Status())
 		fields := map[string]any{
 			"method":     c.Request.Method,
