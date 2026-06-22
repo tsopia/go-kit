@@ -33,6 +33,45 @@ go get github.com/tsopia/go-kit/httpserver
 - `httpserver/integration/errorsx` 子包支持 `errors` 包到 typed handler 的统一错误映射
 - `httpserver/swagger` 子包支持 Swagger UI 路由挂载
 
+## 流式连接（SSE / WebSocket）与中间件
+
+SSE/WS 与普通 HTTP 请求共享同一套 Gin 中间件链，遵循三层模型：
+
+| 层 | 作用范围 | 说明 |
+|----|---------|------|
+| engine 中间件（`srv.Use`） | **所有路由**，含 SSE/WS | Recovery、鉴权、TraceID、RequestID 等。前提：在注册路由前 `Use` |
+| Timeout | 仅 `regularGroup` | SSE/WS 走 `streamingGroup`，自动豁免请求级超时 |
+| 可观测 | SSE/WS 专属 | 每个连接产生 2 条结构化日志（`stream_connect` / `stream_disconnect`），不产生 `access_log` 与请求延迟指标 |
+
+### 鉴权数据共享
+
+鉴权中间件用 `c.Set("user", u)` 写入的数据，SSE/WS handler 均可读取：
+
+```go
+srv.Use(authMiddleware) // 内部 c.Set("user", u)
+
+srv.SSE("/events", func(s httpserver.SSEStream) {
+	user, ok := s.Get("user")
+	_ = user; _ = ok
+})
+
+srv.WS("/chat", func(session httpserver.WSSession) {
+	user, ok := session.GetString("user")
+	_ = user; _ = ok
+})
+```
+
+### 流式指标
+
+挂载 `prometheus.Middleware()` 后，`/metrics` 暴露
+`streaming_active_connections{transport="sse|ws"}` 活跃连接数 gauge；
+流式连接不会污染 `http_requests_total` 与 `http_request_duration_seconds_sum`。
+
+### 自定义流式路由
+
+通过 `srv.StreamingGroup()` 自行注册的流式路由，需用 `middleware.MarkStreaming("sse"|"ws")`
+打标，才能享受上述观测层处理（`SSE`/`SSEPost`/`WS` 便利方法已自动打标）。
+
 ## 快速开始
 
 ### 直接使用 Gin 风格路由

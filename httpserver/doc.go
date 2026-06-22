@@ -101,5 +101,12 @@
 //	public := srv.Group("")
 //	httpswagger.Register(public, httpswagger.Config{})
 //
+// # 流式连接
+//
+// SSE/WS 与普通请求共享同一中间件链。流式 handler 自动标记 utils.StreamingKey，
+// 观测型中间件（AccessLog/prometheus/otel）据此跳过请求级汇总，改用连接级
+// 日志与活跃连接 gauge。鉴权中间件经 c.Set 写入的数据可经 SSEStream.Get /
+// WSSession.Get 读取。
+//
 // 更多信息请参考 README.md、httpserver/swagger/README.md 和 docs/httpserver.md
 package httpserver
