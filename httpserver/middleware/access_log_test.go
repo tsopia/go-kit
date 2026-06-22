@@ -534,3 +534,56 @@ func TestAccessLogMultipartSelectedParts(t *testing.T) {
 		t.Fatalf("metadata = %#v, want %#v", got, `{"env":"staging"}`)
 	}
 }
+
+func TestAccessLog_SkipsStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var events []string
+	logger := func(_ context.Context, _ string, event string, _ map[string]any) {
+		events = append(events, event)
+	}
+
+	engine := gin.New()
+	engine.Use(AccessLog(AccessLogConfig{Logger: logger}))
+	engine.GET("/stream", func(c *gin.Context) {
+		c.Set(utils.StreamingKey, "sse")
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	engine.ServeHTTP(w, req)
+
+	for _, e := range events {
+		if e == accessLogEvent || e == payloadLogEvent {
+			t.Errorf("streaming request should not emit %q", e)
+		}
+	}
+}
+
+func TestAccessLog_EmitsForNonStreaming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var events []string
+	logger := func(_ context.Context, _ string, event string, _ map[string]any) {
+		events = append(events, event)
+	}
+
+	engine := gin.New()
+	engine.Use(AccessLog(AccessLogConfig{Logger: logger}))
+	engine.GET("/normal", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/normal", nil)
+	engine.ServeHTTP(w, req)
+
+	found := false
+	for _, e := range events {
+		if e == accessLogEvent {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("non-streaming request should emit access_log")
+	}
+}
