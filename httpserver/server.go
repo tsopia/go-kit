@@ -230,6 +230,12 @@ func (s *Server) sseRegister(method, relativePath string, handler SSEHandlerFunc
 		stream := &sseSender{ginCtx: c, ctx: ctx, config: cfg, startedAt: startedAt}
 		stream.logConnect()
 
+		c.Set(utils.StreamingKey, "sse")
+		if obs, ok := httpmiddleware.StreamObserverFromContext(c.Request.Context()); ok && obs != nil {
+			obs.OnConnect("sse")
+			defer obs.OnDisconnect("sse")
+		}
+
 		// 启动心跳（如果配置了）
 		stopHeartbeat := stream.startHeartbeat(ctx)
 
@@ -274,6 +280,13 @@ func (s *Server) WS(relativePath string, handler WSHandlerFunc, opts ...WSRouteO
 			return
 		}
 		logStreamEvent(c, "info", "stream_connect", "ws", time.Time{}, nil)
+
+		c.Set(utils.StreamingKey, "ws")
+		if obs, ok := httpmiddleware.StreamObserverFromContext(c.Request.Context()); ok && obs != nil {
+			obs.OnConnect("ws")
+			defer obs.OnDisconnect("ws")
+		}
+
 		defer func() {
 			if err := conn.Close(); err != nil {
 				slog.Debug("websocket close failed",
